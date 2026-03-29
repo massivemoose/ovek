@@ -1,0 +1,53 @@
+services:
+  traefik:
+    image: traefik:v3.6
+    container_name: traefik
+    environment:
+      - DOCKER_API_VERSION=1.52
+    command:
+      - "--log.level=INFO"
+      - "--api.insecure=true" # Dashboard at :8080 (Turn off in production!)
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=alces-net"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080" # Traefik Dashboard
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - alces-net
+
+  # --- Example of plug and play app ---
+  my-new-idea:
+    image: nginxdemos/hello
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.my-idea.entrypoints=web"
+      - "traefik.http.routers.my-idea.service=my-idea"
+      - "traefik.http.routers.my-idea.rule=Host(`my-app.localhost`)" # Change to your domain
+      - "traefik.http.services.my-idea.loadbalancer.server.port=80"
+      - "traefik.docker.network=alces-net"
+    networks:
+      - alces-net
+
+  # --- Each app gets a Pocketbase instance for free ---
+  database:
+    image: elestio/pocketbase:latest
+    volumes:
+      - ./pb_data:/pb_data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pb.entrypoints=web"
+      - "traefik.http.routers.pb.service=pb"
+      - "traefik.http.routers.pb.rule=Host(`pb.localhost`)"
+      - "traefik.http.services.pb.loadbalancer.server.port=8090"
+      - "traefik.docker.network=alces-net"
+    networks:
+      - alces-net
+
+networks:
+  alces-net:
+    external: false
+    name: alces-net
