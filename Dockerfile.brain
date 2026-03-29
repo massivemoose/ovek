@@ -1,0 +1,22 @@
+FROM golang:1.25.5-alpine AS build
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY cmd/brain ./cmd/brain
+RUN CGO_ENABLED=0 go build -o /out/brain ./cmd/brain
+
+FROM buildpacksio/pack:0.38.2 AS pack
+
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates docker-cli git
+
+COPY --from=pack /usr/local/bin/pack /usr/local/bin/pack
+COPY --from=build /out/brain /usr/local/bin/brain
+
+EXPOSE 8081
+
+ENTRYPOINT ["/usr/local/bin/brain"]
