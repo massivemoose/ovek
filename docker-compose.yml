@@ -19,6 +19,24 @@ services:
     networks:
       - alces-net
 
+  # --- Control plane (Brain) ---
+  brain:
+    build:
+      context: .
+      dockerfile: Dockerfile.brain
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./brain_data:/var/lib/alces"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.brain.entrypoints=web"
+      - "traefik.http.routers.brain.service=brain"
+      - "traefik.http.routers.brain.rule=Host(`brain.localhost`)"
+      - "traefik.http.services.brain.loadbalancer.server.port=8081"
+      - "traefik.docker.network=alces-net"
+    networks:
+      - alces-net
+
   # --- Example of plug and play app ---
   my-new-idea:
     image: nginxdemos/hello
