@@ -7,7 +7,7 @@ import (
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
-	handler := newHandler()
+	handler := newHandler(config{BrainAPIKey: "test-key"})
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	recorder := httptest.NewRecorder()
 
@@ -19,7 +19,7 @@ func TestHealthzReturnsOK(t *testing.T) {
 }
 
 func TestUnknownRouteReturnsNotFound(t *testing.T) {
-	handler := newHandler()
+	handler := newHandler(config{BrainAPIKey: "test-key"})
 	request := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
 	recorder := httptest.NewRecorder()
 
@@ -27,5 +27,47 @@ func TestUnknownRouteReturnsNotFound(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+}
+
+func TestPingRequiresAPIKey(t *testing.T) {
+	handler := newHandler(config{BrainAPIKey: "test-key"})
+	request := httptest.NewRequest(http.MethodGet, "/v1/ping", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
+	}
+}
+
+func TestPingRejectsWrongAPIKey(t *testing.T) {
+	handler := newHandler(config{BrainAPIKey: "test-key"})
+	request := httptest.NewRequest(http.MethodGet, "/v1/ping", nil)
+	request.Header.Set("X-API-Key", "wrong-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
+	}
+}
+
+func TestPingReturnsOKWithCorrectAPIKey(t *testing.T) {
+	handler := newHandler(config{BrainAPIKey: "test-key"})
+	request := httptest.NewRequest(http.MethodGet, "/v1/ping", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	if recorder.Body.String() != "pong" {
+		t.Fatalf("expected body %q, got %q", "pong", recorder.Body.String())
 	}
 }

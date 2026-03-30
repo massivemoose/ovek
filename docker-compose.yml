@@ -24,6 +24,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.brain
+    environment:
+      - BRAIN_API_KEY=dev-brain-key
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
       - "./brain_data:/var/lib/alces"
