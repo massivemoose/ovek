@@ -22,4 +22,8 @@ func TestLoadConfigReadsAPIKey(t *testing.T) {
 	if cfg.BrainAPIKey != "test-key" {
 		t.Fatalf("expected API key %q, got %q", "test-key", cfg.BrainAPIKey)
 	}
+
+	if cfg.DataDir != defaultDataDir {
+		t.Fatalf("expected data dir %q, got %q", defaultDataDir, cfg.DataDir)
+	}
 }

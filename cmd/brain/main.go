@@ -14,6 +14,16 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	db, err := openBrainDB(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("failed to open brain database: %v", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("failed to close brain database: %v", err)
+		}
+	}()
+
 	server := &http.Server{
 		Addr:    listenAddr,
 		Handler: newHandler(cfg),
