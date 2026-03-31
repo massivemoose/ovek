@@ -6,8 +6,11 @@ import (
 	"strings"
 )
 
+const defaultDataDir = "/var/lib/alces"
+
 type config struct {
 	BrainAPIKey string
+	DataDir     string
 }
 
 func loadConfig() (config, error) {
@@ -18,5 +21,6 @@ func loadConfig() (config, error) {
 
 	return config{
 		BrainAPIKey: apiKey,
+		DataDir:     defaultDataDir,
 	}, nil
 }
