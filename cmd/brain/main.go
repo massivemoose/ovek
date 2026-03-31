@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"log"
 	"net/http"
@@ -26,7 +27,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    listenAddr,
-		Handler: newHandler(cfg),
+		Handler: newHandler(cfg, db),
 	}
 
 	log.Printf("brain listening on %s", listenAddr)
@@ -37,7 +38,7 @@ func main() {
 	}
 }
 
-func newHandler(cfg config) http.Handler {
+func newHandler(cfg config, db *sql.DB) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -47,6 +48,8 @@ func newHandler(cfg config) http.Handler {
 	apiMux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("pong"))
 	})
+	apiMux.HandleFunc("POST /v1/deployments", handleCreateDeployment(db))
+	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))
 
 	mux.Handle("/v1/", apiKeyMiddleware(cfg.BrainAPIKey, apiMux))
 
