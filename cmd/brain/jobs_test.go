@@ -10,7 +10,8 @@ import (
 )
 
 func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
-	handler, db := newTestHandler(t)
+	enqueuer := &recordingEnqueuer{}
+	handler, db := newTestHandler(t, enqueuer)
 
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -48,10 +49,16 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	if persistedJob.ID != job.ID {
 		t.Fatalf("expected persisted job ID %q, got %q", job.ID, persistedJob.ID)
 	}
+	if len(enqueuer.jobIDs) != 1 {
+		t.Fatalf("expected 1 enqueued job, got %d", len(enqueuer.jobIDs))
+	}
+	if enqueuer.jobIDs[0] != job.ID {
+		t.Fatalf("expected enqueued job ID %q, got %q", job.ID, enqueuer.jobIDs[0])
+	}
 }
 
 func TestCreateDeploymentRejectsInvalidProjectName(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler, _ := newTestHandler(t, noopEnqueuer{})
 
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -69,7 +76,7 @@ func TestCreateDeploymentRejectsInvalidProjectName(t *testing.T) {
 }
 
 func TestGetJobReturnsPersistedJob(t *testing.T) {
-	handler, db := newTestHandler(t)
+	handler, db := newTestHandler(t, noopEnqueuer{})
 
 	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
 	if err != nil {
@@ -100,7 +107,7 @@ func TestGetJobReturnsPersistedJob(t *testing.T) {
 }
 
 func TestGetJobReturnsNotFoundForUnknownJob(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler, _ := newTestHandler(t, noopEnqueuer{})
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/jobs/unknown-job", nil)
 	request.Header.Set("X-API-Key", "test-key")
@@ -113,7 +120,7 @@ func TestGetJobReturnsNotFoundForUnknownJob(t *testing.T) {
 	}
 }
 
-func newTestHandler(t *testing.T) (http.Handler, *sql.DB) {
+func newTestHandler(t *testing.T, enqueuer deploymentEnqueuer) (http.Handler, *sql.DB) {
 	t.Helper()
 
 	dataDir := t.TempDir()
@@ -128,7 +135,19 @@ func newTestHandler(t *testing.T) (http.Handler, *sql.DB) {
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db)
+	}, db, enqueuer)
 
 	return handler, db
+}
+
+type noopEnqueuer struct{}
+
+func (noopEnqueuer) Enqueue(string) {}
+
+type recordingEnqueuer struct {
+	jobIDs []string
+}
+
+func (enqueuer *recordingEnqueuer) Enqueue(jobID string) {
+	enqueuer.jobIDs = append(enqueuer.jobIDs, jobID)
 }

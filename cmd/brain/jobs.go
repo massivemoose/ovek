@@ -26,6 +26,8 @@ type job struct {
 	Status       string `json:"status"`
 	ErrorMessage string `json:"errorMessage,omitempty"`
 	CreatedAt    string `json:"createdAt"`
+	StartedAt    string `json:"startedAt,omitempty"`
+	FinishedAt   string `json:"finishedAt,omitempty"`
 }
 
 type createDeploymentRequest struct {
@@ -33,7 +35,11 @@ type createDeploymentRequest struct {
 	RepoURL string `json:"repoUrl"`
 }
 
-func handleCreateDeployment(db *sql.DB) http.HandlerFunc {
+type deploymentEnqueuer interface {
+	Enqueue(jobID string)
+}
+
+func handleCreateDeployment(db *sql.DB, enqueuer deploymentEnqueuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -60,6 +66,10 @@ func handleCreateDeployment(db *sql.DB) http.HandlerFunc {
 		if err != nil {
 			http.Error(w, "failed to create deployment job", http.StatusInternalServerError)
 			return
+		}
+
+		if enqueuer != nil {
+			enqueuer.Enqueue(job.ID)
 		}
 
 		writeJSON(w, http.StatusAccepted, job)
@@ -138,9 +148,11 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 func getJob(db *sql.DB, jobID string) (job, error) {
 	var job job
 	var errorMessage sql.NullString
+	var startedAt sql.NullString
+	var finishedAt sql.NullString
 
 	err := db.QueryRow(
-		`SELECT id, project_name, repo_url, status, error_message, created_at
+		`SELECT id, project_name, repo_url, status, error_message, created_at, started_at, finished_at
 		 FROM jobs
 		 WHERE id = ?`,
 		jobID,
@@ -151,6 +163,8 @@ func getJob(db *sql.DB, jobID string) (job, error) {
 		&job.Status,
 		&errorMessage,
 		&job.CreatedAt,
+		&startedAt,
+		&finishedAt,
 	)
 	if err != nil {
 		return job, err
@@ -158,6 +172,12 @@ func getJob(db *sql.DB, jobID string) (job, error) {
 
 	if errorMessage.Valid {
 		job.ErrorMessage = errorMessage.String
+	}
+	if startedAt.Valid {
+		job.StartedAt = startedAt.String
+	}
+	if finishedAt.Valid {
+		job.FinishedAt = finishedAt.String
 	}
 
 	return job, nil

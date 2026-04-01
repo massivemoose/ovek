@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
@@ -25,9 +26,17 @@ func main() {
 		}
 	}()
 
+	jobManager := newJobManager(db, placeholderDeploymentProcessor{})
+	workerContext, cancelWorker := context.WithCancel(context.Background())
+	defer cancelWorker()
+
+	if err := jobManager.Start(workerContext); err != nil {
+		log.Fatalf("failed to start job manager: %v", err)
+	}
+
 	server := &http.Server{
 		Addr:    listenAddr,
-		Handler: newHandler(cfg, db),
+		Handler: newHandler(cfg, db, jobManager),
 	}
 
 	log.Printf("brain listening on %s", listenAddr)
@@ -38,7 +47,7 @@ func main() {
 	}
 }
 
-func newHandler(cfg config, db *sql.DB) http.Handler {
+func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -48,7 +57,7 @@ func newHandler(cfg config, db *sql.DB) http.Handler {
 	apiMux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("pong"))
 	})
-	apiMux.HandleFunc("POST /v1/deployments", handleCreateDeployment(db))
+	apiMux.HandleFunc("POST /v1/deployments", handleCreateDeployment(db, enqueuer))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))
 
 	mux.Handle("/v1/", apiKeyMiddleware(cfg.BrainAPIKey, apiMux))
