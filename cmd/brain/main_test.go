@@ -7,7 +7,7 @@ import (
 )
 
 func TestHealthzReturnsOK(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler, _ := newTestHandler(t, noopEnqueuer{})
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	recorder := httptest.NewRecorder()
 
@@ -19,7 +19,7 @@ func TestHealthzReturnsOK(t *testing.T) {
 }
 
 func TestUnknownRouteReturnsNotFound(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler, _ := newTestHandler(t, noopEnqueuer{})
 	request := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
 	recorder := httptest.NewRecorder()
 
@@ -31,7 +31,7 @@ func TestUnknownRouteReturnsNotFound(t *testing.T) {
 }
 
 func TestPingRequiresAPIKey(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler, _ := newTestHandler(t, noopEnqueuer{})
 	request := httptest.NewRequest(http.MethodGet, "/v1/ping", nil)
 	recorder := httptest.NewRecorder()
 
@@ -43,7 +43,7 @@ func TestPingRequiresAPIKey(t *testing.T) {
 }
 
 func TestPingRejectsWrongAPIKey(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler, _ := newTestHandler(t, noopEnqueuer{})
 	request := httptest.NewRequest(http.MethodGet, "/v1/ping", nil)
 	request.Header.Set("X-API-Key", "wrong-key")
 	recorder := httptest.NewRecorder()
@@ -56,7 +56,7 @@ func TestPingRejectsWrongAPIKey(t *testing.T) {
 }
 
 func TestPingReturnsOKWithCorrectAPIKey(t *testing.T) {
-	handler, _ := newTestHandler(t)
+	handler, _ := newTestHandler(t, noopEnqueuer{})
 	request := httptest.NewRequest(http.MethodGet, "/v1/ping", nil)
 	request.Header.Set("X-API-Key", "test-key")
 	recorder := httptest.NewRecorder()
