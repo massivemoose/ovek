@@ -24,6 +24,8 @@ type job struct {
 	ProjectName  string `json:"projectName"`
 	RepoURL      string `json:"repoUrl"`
 	Status       string `json:"status"`
+	LogPath      string `json:"logPath,omitempty"`
+	ImageRef     string `json:"imageRef,omitempty"`
 	ErrorMessage string `json:"errorMessage,omitempty"`
 	CreatedAt    string `json:"createdAt"`
 	StartedAt    string `json:"startedAt,omitempty"`
@@ -147,12 +149,14 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 
 func getJob(db *sql.DB, jobID string) (job, error) {
 	var job job
+	var logPath sql.NullString
+	var imageRef sql.NullString
 	var errorMessage sql.NullString
 	var startedAt sql.NullString
 	var finishedAt sql.NullString
 
 	err := db.QueryRow(
-		`SELECT id, project_name, repo_url, status, error_message, created_at, started_at, finished_at
+		`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at
 		 FROM jobs
 		 WHERE id = ?`,
 		jobID,
@@ -161,6 +165,8 @@ func getJob(db *sql.DB, jobID string) (job, error) {
 		&job.ProjectName,
 		&job.RepoURL,
 		&job.Status,
+		&logPath,
+		&imageRef,
 		&errorMessage,
 		&job.CreatedAt,
 		&startedAt,
@@ -170,6 +176,12 @@ func getJob(db *sql.DB, jobID string) (job, error) {
 		return job, err
 	}
 
+	if logPath.Valid {
+		job.LogPath = logPath.String
+	}
+	if imageRef.Valid {
+		job.ImageRef = imageRef.String
+	}
 	if errorMessage.Valid {
 		job.ErrorMessage = errorMessage.String
 	}

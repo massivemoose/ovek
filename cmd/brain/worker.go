@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -17,8 +16,13 @@ const (
 	defaultJobQueueSize = 64
 )
 
+type deploymentResult struct {
+	LogPath  string
+	ImageRef string
+}
+
 type deploymentProcessor interface {
-	Process(ctx context.Context, job job) error
+	Process(ctx context.Context, job job) (deploymentResult, error)
 }
 
 type jobManager struct {
@@ -27,17 +31,7 @@ type jobManager struct {
 	queue     chan string
 }
 
-type placeholderDeploymentProcessor struct{}
-
-func (placeholderDeploymentProcessor) Process(_ context.Context, _ job) error {
-	return errors.New("deployment processing not implemented yet")
-}
-
 func newJobManager(db *sql.DB, processor deploymentProcessor) *jobManager {
-	if processor == nil {
-		processor = placeholderDeploymentProcessor{}
-	}
-
 	return &jobManager{
 		db:        db,
 		processor: processor,
@@ -89,22 +83,23 @@ func (manager *jobManager) processJob(ctx context.Context, jobID string) {
 	job, err := getJob(manager.db, jobID)
 	if err != nil {
 		finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
-		if updateErr := markJobFailed(manager.db, jobID, finishedAt, "failed to load claimed job"); updateErr != nil {
+		if updateErr := markJobFailed(manager.db, jobID, finishedAt, "failed to load claimed job", deploymentResult{}); updateErr != nil {
 			log.Printf("failed to mark job %s as failed after load error: %v", jobID, updateErr)
 		}
 		return
 	}
 
-	if err := manager.processor.Process(ctx, job); err != nil {
+	result, err := manager.processor.Process(ctx, job)
+	if err != nil {
 		finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
-		if updateErr := markJobFailed(manager.db, jobID, finishedAt, err.Error()); updateErr != nil {
+		if updateErr := markJobFailed(manager.db, jobID, finishedAt, err.Error(), result); updateErr != nil {
 			log.Printf("failed to mark job %s as failed: %v", jobID, updateErr)
 		}
 		return
 	}
 
 	finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := markJobSucceeded(manager.db, jobID, finishedAt); err != nil {
+	if err := markJobSucceeded(manager.db, jobID, finishedAt, result); err != nil {
 		log.Printf("failed to mark job %s as succeeded: %v", jobID, err)
 	}
 }
@@ -160,14 +155,16 @@ func claimQueuedJob(db *sql.DB, jobID string, startedAt string) (bool, error) {
 	return rowsAffected == 1, nil
 }
 
-func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage string) error {
-	result, err := db.Exec(
+func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage string, result deploymentResult) error {
+	updateResult, err := db.Exec(
 		`UPDATE jobs
-		 SET status = ?, finished_at = ?, error_message = ?
+		 SET status = ?, finished_at = ?, error_message = ?, log_path = ?, image_ref = ?
 		 WHERE id = ? AND status = ?`,
 		jobStatusFailed,
 		finishedAt,
 		errorMessage,
+		nullableString(result.LogPath),
+		nullableString(result.ImageRef),
 		jobID,
 		jobStatusRunning,
 	)
@@ -175,16 +172,18 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 		return fmt.Errorf("mark job failed: %w", err)
 	}
 
-	return requireUpdatedRow(result, "mark failed job")
+	return requireUpdatedRow(updateResult, "mark failed job")
 }
 
-func markJobSucceeded(db *sql.DB, jobID string, finishedAt string) error {
-	result, err := db.Exec(
+func markJobSucceeded(db *sql.DB, jobID string, finishedAt string, result deploymentResult) error {
+	updateResult, err := db.Exec(
 		`UPDATE jobs
-		 SET status = ?, finished_at = ?, error_message = NULL
+		 SET status = ?, finished_at = ?, error_message = NULL, log_path = ?, image_ref = ?
 		 WHERE id = ? AND status = ?`,
 		jobStatusSucceeded,
 		finishedAt,
+		nullableString(result.LogPath),
+		nullableString(result.ImageRef),
 		jobID,
 		jobStatusRunning,
 	)
@@ -192,7 +191,15 @@ func markJobSucceeded(db *sql.DB, jobID string, finishedAt string) error {
 		return fmt.Errorf("mark job succeeded: %w", err)
 	}
 
-	return requireUpdatedRow(result, "mark succeeded job")
+	return requireUpdatedRow(updateResult, "mark succeeded job")
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+
+	return value
 }
 
 func requireUpdatedRow(result sql.Result, operation string) error {

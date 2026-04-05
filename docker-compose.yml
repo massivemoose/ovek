@@ -26,6 +26,9 @@ services:
       dockerfile: Dockerfile.brain
     environment:
       - BRAIN_API_KEY=dev-brain-key
+      - BUILDKIT_HOST=tcp://buildkitd:1234
+    depends_on:
+      - buildkitd
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
       - "./brain_data:/var/lib/alces"
@@ -36,6 +39,14 @@ services:
       - "traefik.http.routers.brain.rule=Host(`brain.localhost`)"
       - "traefik.http.services.brain.loadbalancer.server.port=8081"
       - "traefik.docker.network=alces-net"
+    networks:
+      - alces-net
+
+  buildkitd:
+    image: moby/buildkit:buildx-stable-1
+    command:
+      - "--addr=tcp://0.0.0.0:1234"
+    privileged: true
     networks:
       - alces-net
 

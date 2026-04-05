@@ -26,7 +26,7 @@ func main() {
 		}
 	}()
 
-	jobManager := newJobManager(db, placeholderDeploymentProcessor{})
+	jobManager := newJobManager(db, newBuildProcessor(cfg.DataDir, cfg.BuildKitHost, systemCommandRunner{}))
 	workerContext, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
 
