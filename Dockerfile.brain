@@ -8,13 +8,27 @@ RUN go mod download
 COPY cmd/brain ./cmd/brain
 RUN CGO_ENABLED=0 go build -o /out/brain ./cmd/brain
 
-FROM buildpacksio/pack:0.38.2 AS pack
+FROM docker:28.3.3-cli AS dockercli
 
-FROM alpine:3.22
+FROM debian:bookworm-slim
 
-RUN apk add --no-cache ca-certificates docker-cli git
+ARG RAILPACK_VERSION=0.15.1
+ARG TARGETARCH
 
-COPY --from=pack /usr/local/bin/pack /usr/local/bin/pack
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl git \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN case "${TARGETARCH}" in \
+      amd64) railpack_arch="x86_64" ;; \
+      arm64) railpack_arch="arm64" ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/railpack.tar.gz "https://github.com/railwayapp/railpack/releases/download/v${RAILPACK_VERSION}/railpack-v${RAILPACK_VERSION}-${railpack_arch}-unknown-linux-musl.tar.gz" \
+ && tar -xzf /tmp/railpack.tar.gz -C /usr/local/bin railpack \
+ && rm /tmp/railpack.tar.gz
+
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=build /out/brain /usr/local/bin/brain
 
 EXPOSE 8081

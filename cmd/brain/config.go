@@ -7,10 +7,12 @@ import (
 )
 
 const defaultDataDir = "/var/lib/alces"
+const defaultBuildKitHost = "tcp://buildkitd:1234"
 
 type config struct {
-	BrainAPIKey string
-	DataDir     string
+	BrainAPIKey  string
+	DataDir      string
+	BuildKitHost string
 }
 
 func loadConfig() (config, error) {
@@ -19,8 +21,14 @@ func loadConfig() (config, error) {
 		return config{}, errors.New("BRAIN_API_KEY is required")
 	}
 
+	buildKitHost := strings.TrimSpace(os.Getenv("BUILDKIT_HOST"))
+	if buildKitHost == "" {
+		buildKitHost = defaultBuildKitHost
+	}
+
 	return config{
-		BrainAPIKey: apiKey,
-		DataDir:     defaultDataDir,
+		BrainAPIKey:  apiKey,
+		DataDir:      defaultDataDir,
+		BuildKitHost: buildKitHost,
 	}, nil
 }
