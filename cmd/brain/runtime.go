@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	cerrdefs "github.com/containerd/errdefs"
+	dockercontainer "github.com/docker/docker/api/types/container"
 	dockernetwork "github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 const (
@@ -37,6 +39,9 @@ type projectNetwork struct {
 type dockerClient interface {
 	NetworkInspect(ctx context.Context, networkID string, options dockernetwork.InspectOptions) (dockernetwork.Inspect, error)
 	NetworkCreate(ctx context.Context, name string, options dockernetwork.CreateOptions) (dockernetwork.CreateResponse, error)
+	ContainerInspect(ctx context.Context, containerID string) (dockercontainer.InspectResponse, error)
+	ContainerCreate(ctx context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error)
+	ContainerStart(ctx context.Context, containerID string, options dockercontainer.StartOptions) error
 }
 
 type dockerRuntime struct {
