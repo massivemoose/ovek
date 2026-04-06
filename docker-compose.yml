@@ -1,4 +1,5 @@
 services:
+  # --- Edge router for the control plane and deployed apps ---
   traefik:
     image: traefik:v3.6
     container_name: traefik
@@ -19,7 +20,7 @@ services:
     networks:
       - alces-net
 
-  # --- Control plane (Brain) ---
+  # --- Alces control plane ---
   brain:
     build:
       context: .
@@ -45,39 +46,12 @@ services:
     networks:
       - alces-net
 
+  # --- Internal image builder for Railpack ---
   buildkitd:
     image: moby/buildkit:buildx-stable-1
     command:
       - "--addr=tcp://0.0.0.0:1234"
     privileged: true
-    networks:
-      - alces-net
-
-  # --- Example of plug and play app ---
-  my-new-idea:
-    image: nginxdemos/hello
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.my-idea.entrypoints=web"
-      - "traefik.http.routers.my-idea.service=my-idea"
-      - "traefik.http.routers.my-idea.rule=Host(`my-app.localhost`)" # Change to your domain
-      - "traefik.http.services.my-idea.loadbalancer.server.port=80"
-      - "traefik.docker.network=alces-net"
-    networks:
-      - alces-net
-
-  # --- Each app gets a Pocketbase instance for free ---
-  database:
-    image: elestio/pocketbase:latest
-    volumes:
-      - ./pb_data:/pb_data
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.pb.entrypoints=web"
-      - "traefik.http.routers.pb.service=pb"
-      - "traefik.http.routers.pb.rule=Host(`pb.localhost`)"
-      - "traefik.http.services.pb.loadbalancer.server.port=8090"
-      - "traefik.docker.network=alces-net"
     networks:
       - alces-net
 
