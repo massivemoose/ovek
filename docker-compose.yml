@@ -27,11 +27,14 @@ services:
     environment:
       - BRAIN_API_KEY=dev-brain-key
       - BUILDKIT_HOST=tcp://buildkitd:1234
+      - PROJECTS_HOST_DATA_DIR=${PWD}/brain_data/projects
+      - POCKETBASE_IMAGE=elestio/pocketbase:latest
     depends_on:
       - buildkitd
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
       - "./brain_data:/var/lib/alces"
+      - "${PWD}/brain_data/projects:${PWD}/brain_data/projects"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.brain.entrypoints=web"

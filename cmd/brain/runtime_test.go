@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
+	dockercontainer "github.com/docker/docker/api/types/container"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 func TestProjectResourceNames(t *testing.T) {
@@ -47,8 +49,8 @@ func TestManagedLabelsIncludesOptionalFields(t *testing.T) {
 
 func TestDockerRuntimeEnsureProjectNetworkCreatesManagedNetworkWhenMissing(t *testing.T) {
 	client := &fakeDockerClient{
-		inspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
-		createResponse: dockernetwork.CreateResponse{
+		networkInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		networkCreateResponse: dockernetwork.CreateResponse{
 			ID: "network-123",
 		},
 	}
@@ -65,14 +67,14 @@ func TestDockerRuntimeEnsureProjectNetworkCreatesManagedNetworkWhenMissing(t *te
 	if network.ID != "network-123" {
 		t.Fatalf("expected network ID %q, got %q", "network-123", network.ID)
 	}
-	if client.inspectName != "demo-app-net" {
-		t.Fatalf("expected inspect name %q, got %q", "demo-app-net", client.inspectName)
+	if client.networkInspectName != "demo-app-net" {
+		t.Fatalf("expected inspect name %q, got %q", "demo-app-net", client.networkInspectName)
 	}
-	if client.createName != "demo-app-net" {
-		t.Fatalf("expected created network name %q, got %q", "demo-app-net", client.createName)
+	if client.networkCreateName != "demo-app-net" {
+		t.Fatalf("expected created network name %q, got %q", "demo-app-net", client.networkCreateName)
 	}
-	if client.createOptions.Driver != projectNetworkDriver {
-		t.Fatalf("expected network driver %q, got %q", projectNetworkDriver, client.createOptions.Driver)
+	if client.networkCreateOptions.Driver != projectNetworkDriver {
+		t.Fatalf("expected network driver %q, got %q", projectNetworkDriver, client.networkCreateOptions.Driver)
 	}
 
 	wantLabels := map[string]string{
@@ -80,14 +82,14 @@ func TestDockerRuntimeEnsureProjectNetworkCreatesManagedNetworkWhenMissing(t *te
 		projectLabelKey: "demo-app",
 		roleLabelKey:    resourceRoleProjectNetwork,
 	}
-	if !reflect.DeepEqual(client.createOptions.Labels, wantLabels) {
-		t.Fatalf("expected labels %#v, got %#v", wantLabels, client.createOptions.Labels)
+	if !reflect.DeepEqual(client.networkCreateOptions.Labels, wantLabels) {
+		t.Fatalf("expected labels %#v, got %#v", wantLabels, client.networkCreateOptions.Labels)
 	}
 }
 
 func TestDockerRuntimeEnsureProjectNetworkReusesExistingManagedNetwork(t *testing.T) {
 	client := &fakeDockerClient{
-		inspectResponse: dockernetwork.Inspect{
+		networkInspectResponse: dockernetwork.Inspect{
 			ID:   "network-123",
 			Name: "demo-app-net",
 			Labels: map[string]string{
@@ -110,14 +112,14 @@ func TestDockerRuntimeEnsureProjectNetworkReusesExistingManagedNetwork(t *testin
 	if network.Name != "demo-app-net" {
 		t.Fatalf("expected network name %q, got %q", "demo-app-net", network.Name)
 	}
-	if client.createCalls != 0 {
-		t.Fatalf("expected create not to be called, got %d calls", client.createCalls)
+	if client.networkCreateCalls != 0 {
+		t.Fatalf("expected create not to be called, got %d calls", client.networkCreateCalls)
 	}
 }
 
 func TestDockerRuntimeEnsureProjectNetworkRejectsUnmanagedExistingNetwork(t *testing.T) {
 	client := &fakeDockerClient{
-		inspectResponse: dockernetwork.Inspect{
+		networkInspectResponse: dockernetwork.Inspect{
 			ID:     "network-123",
 			Name:   "demo-app-net",
 			Labels: map[string]string{},
@@ -132,30 +134,64 @@ func TestDockerRuntimeEnsureProjectNetworkRejectsUnmanagedExistingNetwork(t *tes
 	if !strings.Contains(err.Error(), "already exists but is not managed by alces") {
 		t.Fatalf("expected unmanaged network error, got %v", err)
 	}
-	if client.createCalls != 0 {
-		t.Fatalf("expected create not to be called, got %d calls", client.createCalls)
+	if client.networkCreateCalls != 0 {
+		t.Fatalf("expected create not to be called, got %d calls", client.networkCreateCalls)
 	}
 }
 
 type fakeDockerClient struct {
-	inspectName     string
-	inspectResponse dockernetwork.Inspect
-	inspectErr      error
-	createCalls     int
-	createName      string
-	createOptions   dockernetwork.CreateOptions
-	createResponse  dockernetwork.CreateResponse
-	createErr       error
+	networkInspectName     string
+	networkInspectResponse dockernetwork.Inspect
+	networkInspectErr      error
+	networkCreateCalls     int
+	networkCreateName      string
+	networkCreateOptions   dockernetwork.CreateOptions
+	networkCreateResponse  dockernetwork.CreateResponse
+	networkCreateErr       error
+
+	containerInspectName            string
+	containerInspectResponse        dockercontainer.InspectResponse
+	containerInspectErr             error
+	containerCreateName             string
+	containerCreateConfig           *dockercontainer.Config
+	containerCreateHostConfig       *dockercontainer.HostConfig
+	containerCreateNetworkingConfig *dockernetwork.NetworkingConfig
+	containerCreatePlatform         *ocispec.Platform
+	containerCreateResponse         dockercontainer.CreateResponse
+	containerCreateErr              error
+	containerStartID                string
+	containerStartOptions           dockercontainer.StartOptions
+	containerStartErr               error
 }
 
 func (client *fakeDockerClient) NetworkInspect(_ context.Context, networkID string, _ dockernetwork.InspectOptions) (dockernetwork.Inspect, error) {
-	client.inspectName = networkID
-	return client.inspectResponse, client.inspectErr
+	client.networkInspectName = networkID
+	return client.networkInspectResponse, client.networkInspectErr
 }
 
 func (client *fakeDockerClient) NetworkCreate(_ context.Context, name string, options dockernetwork.CreateOptions) (dockernetwork.CreateResponse, error) {
-	client.createCalls++
-	client.createName = name
-	client.createOptions = options
-	return client.createResponse, client.createErr
+	client.networkCreateCalls++
+	client.networkCreateName = name
+	client.networkCreateOptions = options
+	return client.networkCreateResponse, client.networkCreateErr
+}
+
+func (client *fakeDockerClient) ContainerInspect(_ context.Context, containerID string) (dockercontainer.InspectResponse, error) {
+	client.containerInspectName = containerID
+	return client.containerInspectResponse, client.containerInspectErr
+}
+
+func (client *fakeDockerClient) ContainerCreate(_ context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error) {
+	client.containerCreateName = containerName
+	client.containerCreateConfig = config
+	client.containerCreateHostConfig = hostConfig
+	client.containerCreateNetworkingConfig = networkingConfig
+	client.containerCreatePlatform = platform
+	return client.containerCreateResponse, client.containerCreateErr
+}
+
+func (client *fakeDockerClient) ContainerStart(_ context.Context, containerID string, options dockercontainer.StartOptions) error {
+	client.containerStartID = containerID
+	client.containerStartOptions = options
+	return client.containerStartErr
 }

@@ -8,11 +8,15 @@ import (
 
 const defaultDataDir = "/var/lib/alces"
 const defaultBuildKitHost = "tcp://buildkitd:1234"
+const defaultProjectsHostDataDir = "/var/lib/alces/projects"
+const defaultPocketBaseImage = "elestio/pocketbase:latest"
 
 type config struct {
-	BrainAPIKey  string
-	DataDir      string
-	BuildKitHost string
+	BrainAPIKey         string
+	DataDir             string
+	BuildKitHost        string
+	ProjectsHostDataDir string
+	PocketBaseImage     string
 }
 
 func loadConfig() (config, error) {
@@ -26,9 +30,21 @@ func loadConfig() (config, error) {
 		buildKitHost = defaultBuildKitHost
 	}
 
+	projectsHostDataDir := strings.TrimSpace(os.Getenv("PROJECTS_HOST_DATA_DIR"))
+	if projectsHostDataDir == "" {
+		projectsHostDataDir = defaultProjectsHostDataDir
+	}
+
+	pocketBaseImage := strings.TrimSpace(os.Getenv("POCKETBASE_IMAGE"))
+	if pocketBaseImage == "" {
+		pocketBaseImage = defaultPocketBaseImage
+	}
+
 	return config{
-		BrainAPIKey:  apiKey,
-		DataDir:      defaultDataDir,
-		BuildKitHost: buildKitHost,
+		BrainAPIKey:         apiKey,
+		DataDir:             defaultDataDir,
+		BuildKitHost:        buildKitHost,
+		ProjectsHostDataDir: projectsHostDataDir,
+		PocketBaseImage:     pocketBaseImage,
 	}, nil
 }

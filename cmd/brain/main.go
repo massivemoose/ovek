@@ -26,7 +26,18 @@ func main() {
 		}
 	}()
 
-	jobManager := newJobManager(db, newBuildProcessor(cfg.DataDir, cfg.BuildKitHost, systemCommandRunner{}))
+	runtime, err := newDockerRuntimeFromEnv()
+	if err != nil {
+		log.Fatalf("failed to create docker runtime: %v", err)
+	}
+
+	processor := newManagedDeploymentProcessor(
+		newBuildProcessor(cfg.DataDir, cfg.BuildKitHost, systemCommandRunner{}),
+		runtime,
+		cfg.ProjectsHostDataDir,
+		cfg.PocketBaseImage,
+	)
+	jobManager := newJobManager(db, processor)
 	workerContext, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
 
