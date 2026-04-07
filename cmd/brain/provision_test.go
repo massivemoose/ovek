@@ -40,6 +40,15 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	if provisioner.projectsHostDataDir != "/srv/alces/projects" {
 		t.Fatalf("expected projects host data dir %q, got %q", "/srv/alces/projects", provisioner.projectsHostDataDir)
 	}
+	if provisioner.appJob.ID != "job-123" {
+		t.Fatalf("expected app job ID %q, got %q", "job-123", provisioner.appJob.ID)
+	}
+	if provisioner.appImageRef != "alces-demo-app:job-123" {
+		t.Fatalf("expected app image ref %q, got %q", "alces-demo-app:job-123", provisioner.appImageRef)
+	}
+	if got := provisioner.sequence; len(got) != 2 || got[0] != "pocketbase" || got[1] != "app" {
+		t.Fatalf("expected provisioner order [pocketbase app], got %#v", got)
+	}
 }
 
 func TestManagedDeploymentProcessorReturnsBuildFailureWithoutProvisioning(t *testing.T) {
@@ -88,12 +97,44 @@ func TestManagedDeploymentProcessorReturnsProvisioningFailure(t *testing.T) {
 	}
 }
 
+func TestManagedDeploymentProcessorReturnsAppProvisioningFailure(t *testing.T) {
+	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:  "/tmp/job.log",
+			ImageRef: "alces-demo-app:" + job.ID,
+		}, nil
+	})
+	provisioner := &fakeProjectProvisioner{
+		appErr: errors.New("app provisioning failed"),
+	}
+	processor := newManagedDeploymentProcessor(builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+
+	result, err := processor.Process(context.Background(), job{
+		ID:          "job-123",
+		ProjectName: "demo-app",
+	})
+	if err == nil {
+		t.Fatal("expected app provisioning failure")
+	}
+	if err.Error() != "ensure app container: app provisioning failed" {
+		t.Fatalf("expected app provisioning error %q, got %q", "ensure app container: app provisioning failed", err.Error())
+	}
+	if result.ImageRef != "alces-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", result.ImageRef)
+	}
+}
+
 type fakeProjectProvisioner struct {
 	calls               int
 	projectName         string
 	image               string
 	projectsHostDataDir string
 	err                 error
+	appCalls            int
+	appJob              job
+	appImageRef         string
+	appErr              error
+	sequence            []string
 }
 
 func (provisioner *fakeProjectProvisioner) EnsureProjectPocketBase(_ context.Context, projectName string, image string, projectsHostDataDir string) (string, error) {
@@ -101,10 +142,24 @@ func (provisioner *fakeProjectProvisioner) EnsureProjectPocketBase(_ context.Con
 	provisioner.projectName = projectName
 	provisioner.image = image
 	provisioner.projectsHostDataDir = projectsHostDataDir
+	provisioner.sequence = append(provisioner.sequence, "pocketbase")
 
 	if provisioner.err != nil {
 		return "", provisioner.err
 	}
 
 	return "container-123", nil
+}
+
+func (provisioner *fakeProjectProvisioner) EnsureProjectApp(_ context.Context, currentJob job, imageRef string) (string, error) {
+	provisioner.appCalls++
+	provisioner.appJob = currentJob
+	provisioner.appImageRef = imageRef
+	provisioner.sequence = append(provisioner.sequence, "app")
+
+	if provisioner.appErr != nil {
+		return "", provisioner.appErr
+	}
+
+	return "app-container-123", nil
 }

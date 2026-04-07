@@ -7,6 +7,7 @@ import (
 
 type projectProvisioner interface {
 	EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error)
+	EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error)
 }
 
 type managedDeploymentProcessor struct {
@@ -33,6 +34,9 @@ func (processor managedDeploymentProcessor) Process(ctx context.Context, job job
 
 	if _, err := processor.provisioner.EnsureProjectPocketBase(ctx, job.ProjectName, processor.pocketBaseImage, processor.projectsHostDataDir); err != nil {
 		return result, fmt.Errorf("ensure PocketBase: %w", err)
+	}
+	if _, err := processor.provisioner.EnsureProjectApp(ctx, job, result.ImageRef); err != nil {
+		return result, fmt.Errorf("ensure app container: %w", err)
 	}
 
 	return result, nil
