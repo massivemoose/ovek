@@ -2,9 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -285,3 +290,103 @@ func TestDockerRuntimeEnsureProjectAppRejectsUnmanagedContainer(t *testing.T) {
 		t.Fatalf("expected unmanaged container error, got %q", got)
 	}
 }
+
+func TestDockerRuntimeWaitForProjectAppReadySucceedsAfterRetry(t *testing.T) {
+	runtime := newDockerRuntime(&fakeDockerClient{})
+	attempts := 0
+	sleeps := 0
+	runtime.dialContext = func(_ context.Context, network string, address string) (net.Conn, error) {
+		attempts++
+		if network != "tcp" {
+			t.Fatalf("expected network %q, got %q", "tcp", network)
+		}
+		if address != "alces-demo-app-app-dep-123:8080" {
+			t.Fatalf("expected address %q, got %q", "alces-demo-app-app-dep-123:8080", address)
+		}
+		if attempts < 2 {
+			return nil, errors.New("connection refused")
+		}
+
+		return fakeConn{}, nil
+	}
+	runtime.sleep = func(_ context.Context, delay time.Duration) error {
+		sleeps++
+		if delay != appReadinessInterval {
+			t.Fatalf("expected sleep delay %s, got %s", appReadinessInterval, delay)
+		}
+
+		return nil
+	}
+
+	err := runtime.WaitForProjectAppReady(context.Background(), job{
+		ID:          "dep-123",
+		ProjectName: "demo-app",
+	})
+	if err != nil {
+		t.Fatalf("expected readiness wait to succeed, got error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 probe attempts, got %d", attempts)
+	}
+	if sleeps != 1 {
+		t.Fatalf("expected 1 sleep between probes, got %d", sleeps)
+	}
+}
+
+func TestDockerRuntimeWaitForProjectAppReadyTimesOut(t *testing.T) {
+	runtime := newDockerRuntime(&fakeDockerClient{})
+	runtime.dialContext = func(_ context.Context, _ string, _ string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}
+	runtime.sleep = func(_ context.Context, _ time.Duration) error {
+		return context.DeadlineExceeded
+	}
+
+	err := runtime.WaitForProjectAppReady(context.Background(), job{
+		ID:          "dep-123",
+		ProjectName: "demo-app",
+	})
+	if err == nil {
+		t.Fatal("expected readiness timeout")
+	}
+	if got := err.Error(); !strings.Contains(got, "timed out waiting for app container") {
+		t.Fatalf("expected timeout error, got %q", got)
+	}
+}
+
+func TestDockerRuntimeWaitForProjectAppReadyReturnsSleepFailure(t *testing.T) {
+	runtime := newDockerRuntime(&fakeDockerClient{})
+	runtime.dialContext = func(_ context.Context, _ string, _ string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}
+	runtime.sleep = func(_ context.Context, _ time.Duration) error {
+		return errors.New("sleep failed")
+	}
+
+	err := runtime.WaitForProjectAppReady(context.Background(), job{
+		ID:          "dep-123",
+		ProjectName: "demo-app",
+	})
+	if err == nil {
+		t.Fatal("expected readiness wait to fail")
+	}
+	if got := err.Error(); got != "wait for next readiness probe: sleep failed" {
+		t.Fatalf("expected sleep failure error, got %q", got)
+	}
+}
+
+type fakeConn struct{}
+
+func (fakeConn) Read(_ []byte) (int, error)         { return 0, io.EOF }
+func (fakeConn) Write(buffer []byte) (int, error)   { return len(buffer), nil }
+func (fakeConn) Close() error                       { return nil }
+func (fakeConn) LocalAddr() net.Addr                { return fakeAddr("local") }
+func (fakeConn) RemoteAddr() net.Addr               { return fakeAddr("remote") }
+func (fakeConn) SetDeadline(_ time.Time) error      { return nil }
+func (fakeConn) SetReadDeadline(_ time.Time) error  { return nil }
+func (fakeConn) SetWriteDeadline(_ time.Time) error { return nil }
+
+type fakeAddr string
+
+func (addr fakeAddr) Network() string { return "tcp" }
+func (addr fakeAddr) String() string  { return string(addr) }

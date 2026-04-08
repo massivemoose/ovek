@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"slices"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -19,7 +22,13 @@ const (
 	alcesEdgeNetworkName  = "alces-net"
 	traefikWebEntrypoint  = "web"
 	traefikEnableLabelKey = "traefik.enable"
+	appReadinessTimeout   = 20 * time.Second
+	appReadinessInterval  = 250 * time.Millisecond
+	appReadinessDialTime  = 1 * time.Second
 )
+
+type dialContextFunc func(ctx context.Context, network string, address string) (net.Conn, error)
+type sleepFunc func(ctx context.Context, delay time.Duration) error
 
 type appSpec struct {
 	ProjectName  string
@@ -93,6 +102,43 @@ func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, ima
 	}
 
 	return createResponse.ID, nil
+}
+
+func (runtime *dockerRuntime) WaitForProjectAppReady(ctx context.Context, job job) error {
+	readyContext, cancel := context.WithTimeout(ctx, appReadinessTimeout)
+	defer cancel()
+
+	address := net.JoinHostPort(appContainerName(job.ProjectName, job.ID), appRuntimePort)
+	var lastErr error
+	for {
+		conn, err := runtime.dialContext(readyContext, "tcp", address)
+		if err == nil {
+			if closeErr := conn.Close(); closeErr != nil {
+				return fmt.Errorf("close readiness probe connection: %w", closeErr)
+			}
+
+			return nil
+		}
+
+		lastErr = err
+		if errors.Is(readyContext.Err(), context.DeadlineExceeded) {
+			break
+		}
+
+		if waitErr := runtime.sleep(readyContext, appReadinessInterval); waitErr != nil {
+			if errors.Is(waitErr, context.DeadlineExceeded) || errors.Is(waitErr, context.Canceled) {
+				break
+			}
+
+			return fmt.Errorf("wait for next readiness probe: %w", waitErr)
+		}
+	}
+
+	if lastErr == nil {
+		lastErr = readyContext.Err()
+	}
+
+	return fmt.Errorf("timed out waiting for app container %q to accept TCP connections on %s: %w", appContainerName(job.ProjectName, job.ID), address, lastErr)
 }
 
 func newAppContainerSpec(spec appSpec) appContainerSpec {
@@ -188,4 +234,16 @@ func appRouterName(projectName string, deploymentID string) string {
 
 func appServiceName(projectName string, deploymentID string) string {
 	return "app-" + projectName + "-" + deploymentID
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

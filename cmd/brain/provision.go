@@ -8,6 +8,7 @@ import (
 type projectProvisioner interface {
 	EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error)
 	EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error)
+	WaitForProjectAppReady(ctx context.Context, job job) error
 }
 
 type managedDeploymentProcessor struct {
@@ -37,6 +38,9 @@ func (processor managedDeploymentProcessor) Process(ctx context.Context, job job
 	}
 	if _, err := processor.provisioner.EnsureProjectApp(ctx, job, result.ImageRef); err != nil {
 		return result, fmt.Errorf("ensure app container: %w", err)
+	}
+	if err := processor.provisioner.WaitForProjectAppReady(ctx, job); err != nil {
+		return result, fmt.Errorf("wait for app readiness: %w", err)
 	}
 
 	return result, nil
