@@ -1,0 +1,191 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	cerrdefs "github.com/containerd/errdefs"
+	dockercontainer "github.com/docker/docker/api/types/container"
+	dockernetwork "github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+)
+
+const (
+	appRuntimePort        = "8080"
+	appPortEnv            = "PORT=" + appRuntimePort
+	appPocketBaseURL      = "http://db:8090"
+	appPocketBaseURLEnv   = "POCKETBASE_URL=" + appPocketBaseURL
+	alcesEdgeNetworkName  = "alces-net"
+	traefikWebEntrypoint  = "web"
+	traefikEnableLabelKey = "traefik.enable"
+)
+
+type appSpec struct {
+	ProjectName  string
+	DeploymentID string
+	JobID        string
+	ImageRef     string
+	Network      projectNetwork
+}
+
+type appContainerSpec struct {
+	Name               string
+	Metadata           managedResourceMetadata
+	Config             *dockercontainer.Config
+	HostConfig         *dockercontainer.HostConfig
+	NetworkingConfig   *dockernetwork.NetworkingConfig
+	EdgeEndpointConfig *dockernetwork.EndpointSettings
+	ProjectNetworkName string
+}
+
+func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error) {
+	network, err := runtime.EnsureProjectNetwork(ctx, job.ProjectName)
+	if err != nil {
+		return "", fmt.Errorf("ensure project network: %w", err)
+	}
+
+	spec := newAppContainerSpec(appSpec{
+		ProjectName:  job.ProjectName,
+		DeploymentID: job.ID,
+		JobID:        job.ID,
+		ImageRef:     imageRef,
+		Network:      network,
+	})
+
+	container, err := runtime.client.ContainerInspect(ctx, spec.Name)
+	if err == nil {
+		if err := validateExistingAppContainer(container, spec); err != nil {
+			return "", err
+		}
+		if err := runtime.ensureAppEdgeNetworkAttachment(ctx, container.ID, container.NetworkSettings, spec); err != nil {
+			return "", err
+		}
+		if container.State != nil && !container.State.Running {
+			if err := runtime.client.ContainerStart(ctx, container.ID, dockercontainer.StartOptions{}); err != nil {
+				return "", fmt.Errorf("start app container %q: %w", spec.Name, err)
+			}
+		}
+
+		return container.ID, nil
+	}
+	if !cerrdefs.IsNotFound(err) {
+		return "", fmt.Errorf("inspect app container %q: %w", spec.Name, err)
+	}
+
+	createResponse, err := runtime.client.ContainerCreate(
+		ctx,
+		spec.Config,
+		spec.HostConfig,
+		spec.NetworkingConfig,
+		(*ocispec.Platform)(nil),
+		spec.Name,
+	)
+	if err != nil {
+		return "", fmt.Errorf("create app container %q: %w", spec.Name, err)
+	}
+
+	if err := runtime.client.NetworkConnect(ctx, alcesEdgeNetworkName, createResponse.ID, spec.EdgeEndpointConfig); err != nil {
+		return "", fmt.Errorf("connect app container %q to network %q: %w", spec.Name, alcesEdgeNetworkName, err)
+	}
+	if err := runtime.client.ContainerStart(ctx, createResponse.ID, dockercontainer.StartOptions{}); err != nil {
+		return "", fmt.Errorf("start app container %q: %w", spec.Name, err)
+	}
+
+	return createResponse.ID, nil
+}
+
+func newAppContainerSpec(spec appSpec) appContainerSpec {
+	metadata := managedResourceMetadata{
+		ProjectName:  spec.ProjectName,
+		Role:         resourceRoleApp,
+		DeploymentID: spec.DeploymentID,
+		JobID:        spec.JobID,
+	}
+
+	routerName := appRouterName(spec.ProjectName, spec.DeploymentID)
+	serviceName := appServiceName(spec.ProjectName, spec.DeploymentID)
+	labels := managedLabels(metadata)
+	labels[traefikEnableLabelKey] = "true"
+	labels["traefik.http.routers."+routerName+".entrypoints"] = traefikWebEntrypoint
+	labels["traefik.http.routers."+routerName+".rule"] = fmt.Sprintf("Host(`%s.localhost`)", spec.ProjectName)
+	labels["traefik.http.routers."+routerName+".service"] = serviceName
+	labels["traefik.http.services."+serviceName+".loadbalancer.server.port"] = appRuntimePort
+	labels["traefik.docker.network"] = alcesEdgeNetworkName
+
+	return appContainerSpec{
+		Name:     appContainerName(spec.ProjectName, spec.DeploymentID),
+		Metadata: metadata,
+		Config: &dockercontainer.Config{
+			Image:  spec.ImageRef,
+			Env:    []string{appPortEnv, appPocketBaseURLEnv},
+			Labels: labels,
+		},
+		HostConfig: &dockercontainer.HostConfig{
+			NetworkMode: dockercontainer.NetworkMode(spec.Network.Name),
+			RestartPolicy: dockercontainer.RestartPolicy{
+				Name: dockercontainer.RestartPolicyUnlessStopped,
+			},
+		},
+		NetworkingConfig: &dockernetwork.NetworkingConfig{
+			EndpointsConfig: map[string]*dockernetwork.EndpointSettings{
+				spec.Network.Name: {},
+			},
+		},
+		EdgeEndpointConfig: &dockernetwork.EndpointSettings{},
+		ProjectNetworkName: spec.Network.Name,
+	}
+}
+
+func validateExistingAppContainer(container dockercontainer.InspectResponse, spec appContainerSpec) error {
+	if container.Config == nil {
+		return fmt.Errorf("app container %q is missing config", spec.Name)
+	}
+	if err := requireManagedResourceOwnership(spec.Name, container.Config.Labels, spec.Metadata); err != nil {
+		return err
+	}
+	if container.Config.Image != spec.Config.Image {
+		return fmt.Errorf("app container %q already exists with image %q, not %q", spec.Name, container.Config.Image, spec.Config.Image)
+	}
+	for _, env := range spec.Config.Env {
+		if !slices.Contains(container.Config.Env, env) {
+			return fmt.Errorf("app container %q is missing env %q", spec.Name, env)
+		}
+	}
+	for key, want := range spec.Config.Labels {
+		if got := container.Config.Labels[key]; got != want {
+			return fmt.Errorf("app container %q has label %q=%q, not %q", spec.Name, key, got, want)
+		}
+	}
+	if container.NetworkSettings == nil {
+		return fmt.Errorf("app container %q is missing network settings", spec.Name)
+	}
+	if container.NetworkSettings.Networks[spec.ProjectNetworkName] == nil {
+		return fmt.Errorf("app container %q is not attached to network %q", spec.Name, spec.ProjectNetworkName)
+	}
+
+	return nil
+}
+
+func (runtime *dockerRuntime) ensureAppEdgeNetworkAttachment(ctx context.Context, containerID string, networkSettings *dockercontainer.NetworkSettings, spec appContainerSpec) error {
+	if networkSettings == nil {
+		return fmt.Errorf("app container %q is missing network settings", spec.Name)
+	}
+	if networkSettings.Networks[alcesEdgeNetworkName] != nil {
+		return nil
+	}
+
+	if err := runtime.client.NetworkConnect(ctx, alcesEdgeNetworkName, containerID, spec.EdgeEndpointConfig); err != nil {
+		return fmt.Errorf("connect app container %q to network %q: %w", spec.Name, alcesEdgeNetworkName, err)
+	}
+
+	return nil
+}
+
+func appRouterName(projectName string, deploymentID string) string {
+	return "app-" + projectName + "-" + deploymentID
+}
+
+func appServiceName(projectName string, deploymentID string) string {
+	return "app-" + projectName + "-" + deploymentID
+}

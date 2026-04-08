@@ -148,6 +148,10 @@ type fakeDockerClient struct {
 	networkCreateOptions   dockernetwork.CreateOptions
 	networkCreateResponse  dockernetwork.CreateResponse
 	networkCreateErr       error
+	networkConnectNetwork  string
+	networkConnectID       string
+	networkConnectConfig   *dockernetwork.EndpointSettings
+	networkConnectErr      error
 
 	containerInspectName            string
 	containerInspectResponse        dockercontainer.InspectResponse
@@ -174,6 +178,13 @@ func (client *fakeDockerClient) NetworkCreate(_ context.Context, name string, op
 	client.networkCreateName = name
 	client.networkCreateOptions = options
 	return client.networkCreateResponse, client.networkCreateErr
+}
+
+func (client *fakeDockerClient) NetworkConnect(_ context.Context, networkID string, containerID string, config *dockernetwork.EndpointSettings) error {
+	client.networkConnectNetwork = networkID
+	client.networkConnectID = containerID
+	client.networkConnectConfig = config
+	return client.networkConnectErr
 }
 
 func (client *fakeDockerClient) ContainerInspect(_ context.Context, containerID string) (dockercontainer.InspectResponse, error) {
