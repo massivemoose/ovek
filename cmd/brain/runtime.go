@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -46,7 +47,9 @@ type dockerClient interface {
 }
 
 type dockerRuntime struct {
-	client dockerClient
+	client      dockerClient
+	dialContext dialContextFunc
+	sleep       sleepFunc
 }
 
 func newDockerRuntimeFromEnv() (*dockerRuntime, error) {
@@ -58,11 +61,19 @@ func newDockerRuntimeFromEnv() (*dockerRuntime, error) {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
 
-	return &dockerRuntime{client: client}, nil
+	return &dockerRuntime{
+		client:      client,
+		dialContext: (&net.Dialer{Timeout: appReadinessDialTime}).DialContext,
+		sleep:       sleepWithContext,
+	}, nil
 }
 
 func newDockerRuntime(client dockerClient) *dockerRuntime {
-	return &dockerRuntime{client: client}
+	return &dockerRuntime{
+		client:      client,
+		dialContext: (&net.Dialer{Timeout: appReadinessDialTime}).DialContext,
+		sleep:       sleepWithContext,
+	}
 }
 
 func (runtime *dockerRuntime) EnsureProjectNetwork(ctx context.Context, projectName string) (projectNetwork, error) {

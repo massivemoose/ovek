@@ -46,8 +46,14 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	if provisioner.appImageRef != "alces-demo-app:job-123" {
 		t.Fatalf("expected app image ref %q, got %q", "alces-demo-app:job-123", provisioner.appImageRef)
 	}
-	if got := provisioner.sequence; len(got) != 2 || got[0] != "pocketbase" || got[1] != "app" {
-		t.Fatalf("expected provisioner order [pocketbase app], got %#v", got)
+	if provisioner.readyCalls != 1 {
+		t.Fatalf("expected readiness to be checked once, got %d", provisioner.readyCalls)
+	}
+	if provisioner.readyJob.ID != "job-123" {
+		t.Fatalf("expected readiness job ID %q, got %q", "job-123", provisioner.readyJob.ID)
+	}
+	if got := provisioner.sequence; len(got) != 3 || got[0] != "pocketbase" || got[1] != "app" || got[2] != "ready" {
+		t.Fatalf("expected provisioner order [pocketbase app ready], got %#v", got)
 	}
 }
 
@@ -124,6 +130,33 @@ func TestManagedDeploymentProcessorReturnsAppProvisioningFailure(t *testing.T) {
 	}
 }
 
+func TestManagedDeploymentProcessorReturnsReadinessFailure(t *testing.T) {
+	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:  "/tmp/job.log",
+			ImageRef: "alces-demo-app:" + job.ID,
+		}, nil
+	})
+	provisioner := &fakeProjectProvisioner{
+		readyErr: errors.New("timed out waiting for port"),
+	}
+	processor := newManagedDeploymentProcessor(builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+
+	result, err := processor.Process(context.Background(), job{
+		ID:          "job-123",
+		ProjectName: "demo-app",
+	})
+	if err == nil {
+		t.Fatal("expected readiness failure")
+	}
+	if err.Error() != "wait for app readiness: timed out waiting for port" {
+		t.Fatalf("expected readiness error %q, got %q", "wait for app readiness: timed out waiting for port", err.Error())
+	}
+	if result.ImageRef != "alces-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", result.ImageRef)
+	}
+}
+
 type fakeProjectProvisioner struct {
 	calls               int
 	projectName         string
@@ -135,6 +168,9 @@ type fakeProjectProvisioner struct {
 	appImageRef         string
 	appErr              error
 	sequence            []string
+	readyCalls          int
+	readyJob            job
+	readyErr            error
 }
 
 func (provisioner *fakeProjectProvisioner) EnsureProjectPocketBase(_ context.Context, projectName string, image string, projectsHostDataDir string) (string, error) {
@@ -162,4 +198,12 @@ func (provisioner *fakeProjectProvisioner) EnsureProjectApp(_ context.Context, c
 	}
 
 	return "app-container-123", nil
+}
+
+func (provisioner *fakeProjectProvisioner) WaitForProjectAppReady(_ context.Context, currentJob job) error {
+	provisioner.readyCalls++
+	provisioner.readyJob = currentJob
+	provisioner.sequence = append(provisioner.sequence, "ready")
+
+	return provisioner.readyErr
 }
