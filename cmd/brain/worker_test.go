@@ -17,8 +17,11 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
-			LogPath:  "/tmp/build.log",
-			ImageRef: "alces-demo-app:" + currentJob.ID,
+			LogPath:                 "/tmp/build.log",
+			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
 		}, errors.New("build failed")
 	}))
 
@@ -46,6 +49,8 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	if job.FinishedAt == "" {
 		t.Fatal("expected finishedAt to be set")
 	}
+	assertDeploymentMissing(t, db, createdJob.ID)
+	assertCurrentDeploymentUnset(t, db, createdJob.ProjectName)
 }
 
 func TestJobManagerProcessesJobsSequentially(t *testing.T) {
@@ -66,7 +71,7 @@ func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 			close(firstJobStarted)
 			<-releaseFirstJob
 		}
-		return deploymentResult{ImageRef: "alces-demo-app:" + job.ID}, nil
+		return successfulDeploymentResult(job), nil
 	}))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -107,6 +112,18 @@ func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 	if secondFinishedJob.ImageRef != "alces-demo-app:"+secondJob.ID {
 		t.Fatalf("expected second image ref %q, got %q", "alces-demo-app:"+secondJob.ID, secondFinishedJob.ImageRef)
 	}
+
+	firstDeployment := getDeploymentRecord(t, db, firstJob.ID)
+	if firstDeployment.AppContainerName != appContainerName(firstJob.ProjectName, firstJob.ID) {
+		t.Fatalf("expected first app container name %q, got %q", appContainerName(firstJob.ProjectName, firstJob.ID), firstDeployment.AppContainerName)
+	}
+	secondDeployment := getDeploymentRecord(t, db, secondJob.ID)
+	if secondDeployment.AppContainerName != appContainerName(secondJob.ProjectName, secondJob.ID) {
+		t.Fatalf("expected second app container name %q, got %q", appContainerName(secondJob.ProjectName, secondJob.ID), secondDeployment.AppContainerName)
+	}
+	if got := getProjectCurrentDeploymentID(t, db, secondJob.ProjectName); got != secondJob.ID {
+		t.Fatalf("expected current deployment ID %q, got %q", secondJob.ID, got)
+	}
 }
 
 func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
@@ -118,8 +135,11 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
-			LogPath:  "/tmp/requeued.log",
-			ImageRef: "alces-demo-app:" + currentJob.ID,
+			LogPath:                 "/tmp/requeued.log",
+			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
 		}, nil
 	}))
 
@@ -135,6 +155,17 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 	}
 	if job.LogPath != "/tmp/requeued.log" {
 		t.Fatalf("expected log path %q, got %q", "/tmp/requeued.log", job.LogPath)
+	}
+
+	deployment := getDeploymentRecord(t, db, createdJob.ID)
+	if deployment.ProjectName != createdJob.ProjectName {
+		t.Fatalf("expected deployment project name %q, got %q", createdJob.ProjectName, deployment.ProjectName)
+	}
+	if deployment.Status != deploymentStatusSucceeded {
+		t.Fatalf("expected deployment status %q, got %q", deploymentStatusSucceeded, deployment.Status)
+	}
+	if got := getProjectCurrentDeploymentID(t, db, createdJob.ProjectName); got != createdJob.ID {
+		t.Fatalf("expected current deployment ID %q, got %q", createdJob.ID, got)
 	}
 }
 
@@ -179,4 +210,88 @@ func waitForJobStatus(t *testing.T, db *sql.DB, jobID string, wantStatus string)
 
 	t.Fatalf("expected job %q status %q, got %q", jobID, wantStatus, job.Status)
 	return job
+}
+
+type deploymentRecord struct {
+	ID                      string
+	ProjectName             string
+	ImageRef                string
+	AppContainerName        string
+	NetworkName             string
+	PocketBaseContainerName string
+	Status                  string
+	CreatedAt               string
+}
+
+func successfulDeploymentResult(currentJob job) deploymentResult {
+	return deploymentResult{
+		ImageRef:                "alces-" + currentJob.ProjectName + ":" + currentJob.ID,
+		AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+		NetworkName:             projectNetworkName(currentJob.ProjectName),
+		PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
+	}
+}
+
+func getDeploymentRecord(t *testing.T, db *sql.DB, deploymentID string) deploymentRecord {
+	t.Helper()
+
+	var record deploymentRecord
+	err := db.QueryRow(
+		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at
+		 FROM deployments
+		 WHERE id = ?`,
+		deploymentID,
+	).Scan(
+		&record.ID,
+		&record.ProjectName,
+		&record.ImageRef,
+		&record.AppContainerName,
+		&record.NetworkName,
+		&record.PocketBaseContainerName,
+		&record.Status,
+		&record.CreatedAt,
+	)
+	if err != nil {
+		t.Fatalf("expected deployment %q lookup to succeed, got error: %v", deploymentID, err)
+	}
+
+	return record
+}
+
+func assertDeploymentMissing(t *testing.T, db *sql.DB, deploymentID string) {
+	t.Helper()
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(1) FROM deployments WHERE id = ?", deploymentID).Scan(&count); err != nil {
+		t.Fatalf("expected deployment missing lookup to succeed, got error: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected deployment %q to be absent, got count %d", deploymentID, count)
+	}
+}
+
+func getProjectCurrentDeploymentID(t *testing.T, db *sql.DB, projectName string) string {
+	t.Helper()
+
+	var currentDeploymentID sql.NullString
+	err := db.QueryRow(
+		"SELECT current_deployment_id FROM projects WHERE name = ?",
+		projectName,
+	).Scan(&currentDeploymentID)
+	if err != nil {
+		t.Fatalf("expected project %q lookup to succeed, got error: %v", projectName, err)
+	}
+	if !currentDeploymentID.Valid {
+		return ""
+	}
+
+	return currentDeploymentID.String
+}
+
+func assertCurrentDeploymentUnset(t *testing.T, db *sql.DB, projectName string) {
+	t.Helper()
+
+	if got := getProjectCurrentDeploymentID(t, db, projectName); got != "" {
+		t.Fatalf("expected project %q current deployment to be unset, got %q", projectName, got)
+	}
 }
