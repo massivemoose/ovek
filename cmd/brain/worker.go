@@ -9,16 +9,20 @@ import (
 )
 
 const (
-	jobStatusRunning   = "running"
-	jobStatusSucceeded = "succeeded"
-	jobStatusFailed    = "failed"
+	jobStatusRunning          = "running"
+	jobStatusSucceeded        = "succeeded"
+	jobStatusFailed           = "failed"
+	deploymentStatusSucceeded = "succeeded"
 
 	defaultJobQueueSize = 64
 )
 
 type deploymentResult struct {
-	LogPath  string
-	ImageRef string
+	LogPath                 string
+	ImageRef                string
+	AppContainerName        string
+	NetworkName             string
+	PocketBaseContainerName string
 }
 
 type deploymentProcessor interface {
@@ -99,7 +103,7 @@ func (manager *jobManager) processJob(ctx context.Context, jobID string) {
 	}
 
 	finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := markJobSucceeded(manager.db, jobID, finishedAt, result); err != nil {
+	if err := markJobSucceeded(manager.db, job, finishedAt, result); err != nil {
 		log.Printf("failed to mark job %s as succeeded: %v", jobID, err)
 	}
 }
@@ -175,8 +179,13 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 	return requireUpdatedRow(updateResult, "mark failed job")
 }
 
-func markJobSucceeded(db *sql.DB, jobID string, finishedAt string, result deploymentResult) error {
-	updateResult, err := db.Exec(
+func markJobSucceeded(db *sql.DB, currentJob job, finishedAt string, result deploymentResult) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin succeeded job transaction: %w", err)
+	}
+
+	updateResult, err := tx.Exec(
 		`UPDATE jobs
 		 SET status = ?, finished_at = ?, error_message = NULL, log_path = ?, image_ref = ?
 		 WHERE id = ? AND status = ?`,
@@ -184,14 +193,95 @@ func markJobSucceeded(db *sql.DB, jobID string, finishedAt string, result deploy
 		finishedAt,
 		nullableString(result.LogPath),
 		nullableString(result.ImageRef),
-		jobID,
+		currentJob.ID,
 		jobStatusRunning,
 	)
 	if err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("mark job succeeded: %w", err)
 	}
+	if err := requireUpdatedRow(updateResult, "mark succeeded job"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 
-	return requireUpdatedRow(updateResult, "mark succeeded job")
+	if err := insertSucceededDeployment(tx, currentJob, result); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := setProjectCurrentDeployment(tx, currentJob.ProjectName, currentJob.ID); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit succeeded job transaction: %w", err)
+	}
+
+	return nil
+}
+
+func insertSucceededDeployment(tx *sql.Tx, currentJob job, result deploymentResult) error {
+	if err := requireDeploymentMetadata(result); err != nil {
+		return err
+	}
+
+	insertResult, err := tx.Exec(
+		`INSERT INTO deployments(
+			id,
+			project_name,
+			image_ref,
+			app_container_name,
+			network_name,
+			pb_container_name,
+			status,
+			created_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		currentJob.ID,
+		currentJob.ProjectName,
+		result.ImageRef,
+		result.AppContainerName,
+		result.NetworkName,
+		result.PocketBaseContainerName,
+		deploymentStatusSucceeded,
+		currentJob.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert deployment %q: %w", currentJob.ID, err)
+	}
+
+	return requireUpdatedRow(insertResult, "insert deployment")
+}
+
+func setProjectCurrentDeployment(tx *sql.Tx, projectName string, deploymentID string) error {
+	updateResult, err := tx.Exec(
+		`UPDATE projects
+		 SET current_deployment_id = ?
+		 WHERE name = ?`,
+		deploymentID,
+		projectName,
+	)
+	if err != nil {
+		return fmt.Errorf("set current deployment for project %q: %w", projectName, err)
+	}
+
+	return requireUpdatedRow(updateResult, "set current deployment")
+}
+
+func requireDeploymentMetadata(result deploymentResult) error {
+	if result.ImageRef == "" {
+		return fmt.Errorf("deployment result is missing image ref")
+	}
+	if result.AppContainerName == "" {
+		return fmt.Errorf("deployment result is missing app container name")
+	}
+	if result.NetworkName == "" {
+		return fmt.Errorf("deployment result is missing network name")
+	}
+	if result.PocketBaseContainerName == "" {
+		return fmt.Errorf("deployment result is missing PocketBase container name")
+	}
+
+	return nil
 }
 
 func nullableString(value string) any {

@@ -31,6 +31,15 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	if result.ImageRef != "alces-demo-app:job-123" {
 		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", result.ImageRef)
 	}
+	if result.AppContainerName != "alces-demo-app-app-job-123" {
+		t.Fatalf("expected app container name %q, got %q", "alces-demo-app-app-job-123", result.AppContainerName)
+	}
+	if result.NetworkName != "demo-app-net" {
+		t.Fatalf("expected network name %q, got %q", "demo-app-net", result.NetworkName)
+	}
+	if result.PocketBaseContainerName != "alces-demo-app-pb" {
+		t.Fatalf("expected PocketBase container name %q, got %q", "alces-demo-app-pb", result.PocketBaseContainerName)
+	}
 	if provisioner.projectName != "demo-app" {
 		t.Fatalf("expected provisioned project %q, got %q", "demo-app", provisioner.projectName)
 	}

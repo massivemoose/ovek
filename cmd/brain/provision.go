@@ -43,5 +43,9 @@ func (processor managedDeploymentProcessor) Process(ctx context.Context, job job
 		return result, fmt.Errorf("wait for app readiness: %w", err)
 	}
 
+	result.AppContainerName = appContainerName(job.ProjectName, job.ID)
+	result.NetworkName = projectNetworkName(job.ProjectName)
+	result.PocketBaseContainerName = pocketBaseContainerName(job.ProjectName)
+
 	return result, nil
 }
