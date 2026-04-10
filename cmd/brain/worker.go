@@ -3,16 +3,18 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 )
 
 const (
-	jobStatusRunning          = "running"
-	jobStatusSucceeded        = "succeeded"
-	jobStatusFailed           = "failed"
-	deploymentStatusSucceeded = "succeeded"
+	jobStatusRunning           = "running"
+	jobStatusSucceeded         = "succeeded"
+	jobStatusFailed            = "failed"
+	deploymentStatusSucceeded  = "succeeded"
+	deploymentStatusSuperseded = "superseded"
 
 	defaultJobQueueSize = 64
 )
@@ -23,6 +25,18 @@ type deploymentResult struct {
 	AppContainerName        string
 	NetworkName             string
 	PocketBaseContainerName string
+	SupersededDeploymentID  string
+}
+
+type deploymentRecord struct {
+	ID                      string
+	ProjectName             string
+	ImageRef                string
+	AppContainerName        string
+	NetworkName             string
+	PocketBaseContainerName string
+	Status                  string
+	CreatedAt               string
 }
 
 type deploymentProcessor interface {
@@ -205,6 +219,10 @@ func markJobSucceeded(db *sql.DB, currentJob job, finishedAt string, result depl
 		return err
 	}
 
+	if err := markSupersededDeployment(tx, currentJob.ProjectName, result.SupersededDeploymentID); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if err := insertSucceededDeployment(tx, currentJob, result); err != nil {
 		_ = tx.Rollback()
 		return err
@@ -252,6 +270,27 @@ func insertSucceededDeployment(tx *sql.Tx, currentJob job, result deploymentResu
 	return requireUpdatedRow(insertResult, "insert deployment")
 }
 
+func markSupersededDeployment(tx *sql.Tx, projectName string, deploymentID string) error {
+	if deploymentID == "" {
+		return nil
+	}
+
+	updateResult, err := tx.Exec(
+		`UPDATE deployments
+		 SET status = ?
+		 WHERE id = ? AND project_name = ? AND status = ?`,
+		deploymentStatusSuperseded,
+		deploymentID,
+		projectName,
+		deploymentStatusSucceeded,
+	)
+	if err != nil {
+		return fmt.Errorf("mark deployment %q superseded: %w", deploymentID, err)
+	}
+
+	return requireUpdatedRow(updateResult, "mark superseded deployment")
+}
+
 func setProjectCurrentDeployment(tx *sql.Tx, projectName string, deploymentID string) error {
 	updateResult, err := tx.Exec(
 		`UPDATE projects
@@ -282,6 +321,34 @@ func requireDeploymentMetadata(result deploymentResult) error {
 	}
 
 	return nil
+}
+
+func getProjectCurrentDeployment(db *sql.DB, projectName string) (deploymentRecord, bool, error) {
+	var deployment deploymentRecord
+	err := db.QueryRow(
+		`SELECT d.id, d.project_name, d.image_ref, d.app_container_name, d.network_name, d.pb_container_name, d.status, d.created_at
+		 FROM projects p
+		 JOIN deployments d ON d.id = p.current_deployment_id
+		 WHERE p.name = ?`,
+		projectName,
+	).Scan(
+		&deployment.ID,
+		&deployment.ProjectName,
+		&deployment.ImageRef,
+		&deployment.AppContainerName,
+		&deployment.NetworkName,
+		&deployment.PocketBaseContainerName,
+		&deployment.Status,
+		&deployment.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return deploymentRecord{}, false, nil
+	}
+	if err != nil {
+		return deploymentRecord{}, false, fmt.Errorf("get current deployment for project %q: %w", projectName, err)
+	}
+
+	return deployment, true, nil
 }
 
 func nullableString(value string) any {

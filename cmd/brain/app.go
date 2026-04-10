@@ -25,6 +25,7 @@ const (
 	appReadinessTimeout   = 20 * time.Second
 	appReadinessInterval  = 250 * time.Millisecond
 	appReadinessDialTime  = 1 * time.Second
+	appStopTimeoutSeconds = 10
 )
 
 type dialContextFunc func(ctx context.Context, network string, address string) (net.Conn, error)
@@ -139,6 +140,47 @@ func (runtime *dockerRuntime) WaitForProjectAppReady(ctx context.Context, job jo
 	}
 
 	return fmt.Errorf("timed out waiting for app container %q to accept TCP connections on %s: %w", appContainerName(job.ProjectName, job.ID), address, lastErr)
+}
+
+func (runtime *dockerRuntime) RemoveProjectApp(ctx context.Context, deployment deploymentRecord) error {
+	container, err := runtime.client.ContainerInspect(ctx, deployment.AppContainerName)
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return nil
+		}
+
+		return fmt.Errorf("inspect app container %q: %w", deployment.AppContainerName, err)
+	}
+	if container.Config == nil {
+		return fmt.Errorf("app container %q is missing config", deployment.AppContainerName)
+	}
+	if err := requireManagedResourceOwnership(deployment.AppContainerName, container.Config.Labels, managedResourceMetadata{
+		ProjectName:  deployment.ProjectName,
+		Role:         resourceRoleApp,
+		DeploymentID: deployment.ID,
+	}); err != nil {
+		return err
+	}
+
+	containerID := container.ID
+	if containerID == "" {
+		containerID = deployment.AppContainerName
+	}
+
+	if container.State != nil && container.State.Running {
+		timeout := appStopTimeoutSeconds
+		if err := runtime.client.ContainerStop(ctx, containerID, dockercontainer.StopOptions{
+			Timeout: &timeout,
+		}); err != nil && !cerrdefs.IsNotFound(err) {
+			return fmt.Errorf("stop app container %q: %w", deployment.AppContainerName, err)
+		}
+	}
+
+	if err := runtime.client.ContainerRemove(ctx, containerID, dockercontainer.RemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("remove app container %q: %w", deployment.AppContainerName, err)
+	}
+
+	return nil
 }
 
 func newAppContainerSpec(spec appSpec) appContainerSpec {
