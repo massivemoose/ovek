@@ -291,6 +291,71 @@ func TestDockerRuntimeEnsureProjectAppRejectsUnmanagedContainer(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeRemoveProjectAppStopsAndRemovesRunningManagedContainer(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+				State: &dockercontainer.State{
+					Running: true,
+				},
+			},
+			Config: &dockercontainer.Config{
+				Labels: map[string]string{
+					managedLabelKey:    managedLabelValue,
+					projectLabelKey:    "demo-app",
+					roleLabelKey:       resourceRoleApp,
+					deploymentLabelKey: "dep-old",
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.RemoveProjectApp(context.Background(), deploymentRecord{
+		ID:               "dep-old",
+		ProjectName:      "demo-app",
+		AppContainerName: "alces-demo-app-app-dep-old",
+	})
+	if err != nil {
+		t.Fatalf("expected app removal to succeed, got error: %v", err)
+	}
+	if client.containerInspectName != "alces-demo-app-app-dep-old" {
+		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-app-dep-old", client.containerInspectName)
+	}
+	if client.containerStopID != "container-123" {
+		t.Fatalf("expected stop ID %q, got %q", "container-123", client.containerStopID)
+	}
+	if client.containerStopOptions.Timeout == nil || *client.containerStopOptions.Timeout != appStopTimeoutSeconds {
+		t.Fatalf("expected stop timeout %d, got %#v", appStopTimeoutSeconds, client.containerStopOptions.Timeout)
+	}
+	if client.containerRemoveID != "container-123" {
+		t.Fatalf("expected remove ID %q, got %q", "container-123", client.containerRemoveID)
+	}
+}
+
+func TestDockerRuntimeRemoveProjectAppIgnoresMissingContainer(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.RemoveProjectApp(context.Background(), deploymentRecord{
+		ID:               "dep-old",
+		ProjectName:      "demo-app",
+		AppContainerName: "alces-demo-app-app-dep-old",
+	})
+	if err != nil {
+		t.Fatalf("expected missing app removal to be ignored, got error: %v", err)
+	}
+	if client.containerStopID != "" {
+		t.Fatalf("expected stop not to be called, got %q", client.containerStopID)
+	}
+	if client.containerRemoveID != "" {
+		t.Fatalf("expected remove not to be called, got %q", client.containerRemoveID)
+	}
+}
+
 func TestDockerRuntimeWaitForProjectAppReadySucceedsAfterRetry(t *testing.T) {
 	runtime := newDockerRuntime(&fakeDockerClient{})
 	attempts := 0

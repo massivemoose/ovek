@@ -71,7 +71,12 @@ func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 			close(firstJobStarted)
 			<-releaseFirstJob
 		}
-		return successfulDeploymentResult(job), nil
+		result := successfulDeploymentResult(job)
+		if job.ID == secondJob.ID {
+			result.SupersededDeploymentID = firstJob.ID
+		}
+
+		return result, nil
 	}))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -117,9 +122,15 @@ func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 	if firstDeployment.AppContainerName != appContainerName(firstJob.ProjectName, firstJob.ID) {
 		t.Fatalf("expected first app container name %q, got %q", appContainerName(firstJob.ProjectName, firstJob.ID), firstDeployment.AppContainerName)
 	}
+	if firstDeployment.Status != deploymentStatusSuperseded {
+		t.Fatalf("expected first deployment status %q, got %q", deploymentStatusSuperseded, firstDeployment.Status)
+	}
 	secondDeployment := getDeploymentRecord(t, db, secondJob.ID)
 	if secondDeployment.AppContainerName != appContainerName(secondJob.ProjectName, secondJob.ID) {
 		t.Fatalf("expected second app container name %q, got %q", appContainerName(secondJob.ProjectName, secondJob.ID), secondDeployment.AppContainerName)
+	}
+	if secondDeployment.Status != deploymentStatusSucceeded {
+		t.Fatalf("expected second deployment status %q, got %q", deploymentStatusSucceeded, secondDeployment.Status)
 	}
 	if got := getProjectCurrentDeploymentID(t, db, secondJob.ProjectName); got != secondJob.ID {
 		t.Fatalf("expected current deployment ID %q, got %q", secondJob.ID, got)
@@ -210,17 +221,6 @@ func waitForJobStatus(t *testing.T, db *sql.DB, jobID string, wantStatus string)
 
 	t.Fatalf("expected job %q status %q, got %q", jobID, wantStatus, job.Status)
 	return job
-}
-
-type deploymentRecord struct {
-	ID                      string
-	ProjectName             string
-	ImageRef                string
-	AppContainerName        string
-	NetworkName             string
-	PocketBaseContainerName string
-	Status                  string
-	CreatedAt               string
 }
 
 func successfulDeploymentResult(currentJob job) deploymentResult {

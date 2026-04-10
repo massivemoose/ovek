@@ -32,6 +32,7 @@ func main() {
 	}
 
 	processor := newManagedDeploymentProcessor(
+		db,
 		newBuildProcessor(cfg.DataDir, cfg.BuildKitHost, systemCommandRunner{}),
 		runtime,
 		cfg.ProjectsHostDataDir,

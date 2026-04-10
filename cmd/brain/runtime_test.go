@@ -166,6 +166,12 @@ type fakeDockerClient struct {
 	containerStartID                string
 	containerStartOptions           dockercontainer.StartOptions
 	containerStartErr               error
+	containerStopID                 string
+	containerStopOptions            dockercontainer.StopOptions
+	containerStopErr                error
+	containerRemoveID               string
+	containerRemoveOptions          dockercontainer.RemoveOptions
+	containerRemoveErr              error
 }
 
 func (client *fakeDockerClient) NetworkInspect(_ context.Context, networkID string, _ dockernetwork.InspectOptions) (dockernetwork.Inspect, error) {
@@ -205,4 +211,16 @@ func (client *fakeDockerClient) ContainerStart(_ context.Context, containerID st
 	client.containerStartID = containerID
 	client.containerStartOptions = options
 	return client.containerStartErr
+}
+
+func (client *fakeDockerClient) ContainerStop(_ context.Context, containerID string, options dockercontainer.StopOptions) error {
+	client.containerStopID = containerID
+	client.containerStopOptions = options
+	return client.containerStopErr
+}
+
+func (client *fakeDockerClient) ContainerRemove(_ context.Context, containerID string, options dockercontainer.RemoveOptions) error {
+	client.containerRemoveID = containerID
+	client.containerRemoveOptions = options
+	return client.containerRemoveErr
 }

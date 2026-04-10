@@ -44,6 +44,8 @@ type dockerClient interface {
 	ContainerInspect(ctx context.Context, containerID string) (dockercontainer.InspectResponse, error)
 	ContainerCreate(ctx context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string, options dockercontainer.StartOptions) error
+	ContainerStop(ctx context.Context, containerID string, options dockercontainer.StopOptions) error
+	ContainerRemove(ctx context.Context, containerID string, options dockercontainer.RemoveOptions) error
 }
 
 type dockerRuntime struct {
