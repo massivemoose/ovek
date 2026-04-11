@@ -288,3 +288,56 @@ func TestDockerRuntimeEnsureProjectPocketBaseRejectsUnmanagedContainer(t *testin
 		t.Fatalf("expected unmanaged container not to be started, got %q", client.containerStartID)
 	}
 }
+
+func TestDockerRuntimeRemoveProjectPocketBaseStopsAndRemovesRunningManagedContainer(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+				State: &dockercontainer.State{
+					Running: true,
+				},
+			},
+			Config: &dockercontainer.Config{
+				Labels: map[string]string{
+					managedLabelKey: managedLabelValue,
+					projectLabelKey: "demo-app",
+					roleLabelKey:    resourceRolePocketBase,
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.RemoveProjectPocketBase(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected PocketBase removal to succeed, got error: %v", err)
+	}
+	if client.containerInspectName != "alces-demo-app-pb" {
+		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-pb", client.containerInspectName)
+	}
+	if client.containerStopID != "container-123" {
+		t.Fatalf("expected stop ID %q, got %q", "container-123", client.containerStopID)
+	}
+	if client.containerRemoveID != "container-123" {
+		t.Fatalf("expected remove ID %q, got %q", "container-123", client.containerRemoveID)
+	}
+}
+
+func TestDockerRuntimeRemoveProjectPocketBaseIgnoresMissingContainer(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.RemoveProjectPocketBase(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected missing PocketBase removal to be ignored, got error: %v", err)
+	}
+	if client.containerStopID != "" {
+		t.Fatalf("expected stop not to be called, got %q", client.containerStopID)
+	}
+	if client.containerRemoveID != "" {
+		t.Fatalf("expected remove not to be called, got %q", client.containerRemoveID)
+	}
+}

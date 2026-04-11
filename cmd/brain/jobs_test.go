@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -135,7 +136,7 @@ func newTestHandler(t *testing.T, enqueuer deploymentEnqueuer) (http.Handler, *s
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, enqueuer)
+	}, db, enqueuer, noopProjectCleaner{})
 
 	return handler, db
 }
@@ -143,6 +144,10 @@ func newTestHandler(t *testing.T, enqueuer deploymentEnqueuer) (http.Handler, *s
 type noopEnqueuer struct{}
 
 func (noopEnqueuer) Enqueue(string) {}
+
+type noopProjectCleaner struct{}
+
+func (noopProjectCleaner) Cleanup(context.Context, string) error { return nil }
 
 type recordingEnqueuer struct {
 	jobIDs []string

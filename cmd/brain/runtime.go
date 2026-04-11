@@ -41,6 +41,7 @@ type dockerClient interface {
 	NetworkInspect(ctx context.Context, networkID string, options dockernetwork.InspectOptions) (dockernetwork.Inspect, error)
 	NetworkCreate(ctx context.Context, name string, options dockernetwork.CreateOptions) (dockernetwork.CreateResponse, error)
 	NetworkConnect(ctx context.Context, networkID, containerID string, config *dockernetwork.EndpointSettings) error
+	NetworkRemove(ctx context.Context, networkID string) error
 	ContainerList(ctx context.Context, options dockercontainer.ListOptions) ([]dockercontainer.Summary, error)
 	ContainerInspect(ctx context.Context, containerID string) (dockercontainer.InspectResponse, error)
 	ContainerCreate(ctx context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error)
@@ -77,6 +78,28 @@ func newDockerRuntime(client dockerClient) *dockerRuntime {
 		dialContext: (&net.Dialer{Timeout: appReadinessDialTime}).DialContext,
 		sleep:       sleepWithContext,
 	}
+}
+
+func (runtime *dockerRuntime) removeManagedContainer(ctx context.Context, containerName string, container dockercontainer.InspectResponse, resourceType string) error {
+	containerID := container.ID
+	if containerID == "" {
+		containerID = containerName
+	}
+
+	if container.State != nil && container.State.Running {
+		timeout := appStopTimeoutSeconds
+		if err := runtime.client.ContainerStop(ctx, containerID, dockercontainer.StopOptions{
+			Timeout: &timeout,
+		}); err != nil && !cerrdefs.IsNotFound(err) {
+			return fmt.Errorf("stop %s %q: %w", resourceType, containerName, err)
+		}
+	}
+
+	if err := runtime.client.ContainerRemove(ctx, containerID, dockercontainer.RemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("remove %s %q: %w", resourceType, containerName, err)
+	}
+
+	return nil
 }
 
 func (runtime *dockerRuntime) EnsureProjectNetwork(ctx context.Context, projectName string) (projectNetwork, error) {
@@ -117,6 +140,35 @@ func (runtime *dockerRuntime) EnsureProjectNetwork(ctx context.Context, projectN
 
 func projectNetworkName(projectName string) string {
 	return projectName + "-net"
+}
+
+func (runtime *dockerRuntime) RemoveProjectNetwork(ctx context.Context, projectName string) error {
+	networkName := projectNetworkName(projectName)
+	network, err := runtime.client.NetworkInspect(ctx, networkName, dockernetwork.InspectOptions{})
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return nil
+		}
+
+		return fmt.Errorf("inspect project network %q: %w", networkName, err)
+	}
+	if err := requireManagedResourceOwnership(networkName, network.Labels, managedResourceMetadata{
+		ProjectName: projectName,
+		Role:        resourceRoleProjectNetwork,
+	}); err != nil {
+		return err
+	}
+
+	networkID := network.ID
+	if networkID == "" {
+		networkID = networkName
+	}
+
+	if err := runtime.client.NetworkRemove(ctx, networkID); err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("remove project network %q: %w", networkName, err)
+	}
+
+	return nil
 }
 
 func pocketBaseContainerName(projectName string) string {

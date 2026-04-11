@@ -158,6 +158,29 @@ func validateExistingPocketBaseContainer(container dockercontainer.InspectRespon
 	return nil
 }
 
+func (runtime *dockerRuntime) RemoveProjectPocketBase(ctx context.Context, projectName string) error {
+	containerName := pocketBaseContainerName(projectName)
+	container, err := runtime.client.ContainerInspect(ctx, containerName)
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return nil
+		}
+
+		return fmt.Errorf("inspect PocketBase container %q: %w", containerName, err)
+	}
+	if container.Config == nil {
+		return fmt.Errorf("PocketBase container %q is missing config", containerName)
+	}
+	if err := requireManagedResourceOwnership(containerName, container.Config.Labels, managedResourceMetadata{
+		ProjectName: projectName,
+		Role:        resourceRolePocketBase,
+	}); err != nil {
+		return err
+	}
+
+	return runtime.removeManagedContainer(ctx, containerName, container, "PocketBase container")
+}
+
 func pocketBaseDataDir(projectsHostDataDir string, projectName string) string {
 	return filepath.Join(projectsHostDataDir, projectName, pocketBaseDataDirName)
 }
