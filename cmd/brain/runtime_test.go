@@ -152,6 +152,9 @@ type fakeDockerClient struct {
 	networkConnectID       string
 	networkConnectConfig   *dockernetwork.EndpointSettings
 	networkConnectErr      error
+	containerListOptions   dockercontainer.ListOptions
+	containerListResponse  []dockercontainer.Summary
+	containerListErr       error
 
 	containerInspectName            string
 	containerInspectResponse        dockercontainer.InspectResponse
@@ -191,6 +194,11 @@ func (client *fakeDockerClient) NetworkConnect(_ context.Context, networkID stri
 	client.networkConnectID = containerID
 	client.networkConnectConfig = config
 	return client.networkConnectErr
+}
+
+func (client *fakeDockerClient) ContainerList(_ context.Context, options dockercontainer.ListOptions) ([]dockercontainer.Summary, error) {
+	client.containerListOptions = options
+	return client.containerListResponse, client.containerListErr
 }
 
 func (client *fakeDockerClient) ContainerInspect(_ context.Context, containerID string) (dockercontainer.InspectResponse, error) {

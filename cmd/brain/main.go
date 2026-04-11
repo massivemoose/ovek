@@ -30,6 +30,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create docker runtime: %v", err)
 	}
+	if err := newStartupDeploymentReconciler(db, runtime).Reconcile(context.Background()); err != nil {
+		log.Fatalf("failed to reconcile startup deployment state: %v", err)
+	}
 
 	processor := newManagedDeploymentProcessor(
 		db,

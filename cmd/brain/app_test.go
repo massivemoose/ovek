@@ -356,6 +356,66 @@ func TestDockerRuntimeRemoveProjectAppIgnoresMissingContainer(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeListProjectAppsReturnsManagedProjectApps(t *testing.T) {
+	client := &fakeDockerClient{
+		containerListResponse: []dockercontainer.Summary{
+			{
+				Names:   []string{"/alces-demo-app-app-dep-123"},
+				Image:   "alces-demo-app:dep-123",
+				Created: 1_744_070_400,
+				Labels: map[string]string{
+					deploymentLabelKey: "dep-123",
+				},
+				State: "running",
+			},
+			{
+				Names:   []string{"/alces-demo-app-app-dep-456"},
+				Image:   "alces-demo-app:dep-456",
+				Created: 1_744_070_500,
+				Labels: map[string]string{
+					deploymentLabelKey: "dep-456",
+				},
+				State: "exited",
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	apps, err := runtime.ListProjectApps(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected project app listing to succeed, got error: %v", err)
+	}
+
+	want := []projectAppRuntime{
+		{
+			DeploymentID:            "dep-123",
+			ProjectName:             "demo-app",
+			AppContainerName:        "alces-demo-app-app-dep-123",
+			ImageRef:                "alces-demo-app:dep-123",
+			NetworkName:             "demo-app-net",
+			PocketBaseContainerName: "alces-demo-app-pb",
+			CreatedAt:               "2025-04-08T00:00:00Z",
+			Running:                 true,
+		},
+		{
+			DeploymentID:            "dep-456",
+			ProjectName:             "demo-app",
+			AppContainerName:        "alces-demo-app-app-dep-456",
+			ImageRef:                "alces-demo-app:dep-456",
+			NetworkName:             "demo-app-net",
+			PocketBaseContainerName: "alces-demo-app-pb",
+			CreatedAt:               "2025-04-08T00:01:40Z",
+			Running:                 false,
+		},
+	}
+	if !reflect.DeepEqual(apps, want) {
+		t.Fatalf("expected apps %#v, got %#v", want, apps)
+	}
+	if !client.containerListOptions.All {
+		t.Fatal("expected container listing to include stopped containers")
+	}
+}
+
 func TestDockerRuntimeWaitForProjectAppReadySucceedsAfterRetry(t *testing.T) {
 	runtime := newDockerRuntime(&fakeDockerClient{})
 	attempts := 0
