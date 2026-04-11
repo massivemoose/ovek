@@ -70,15 +70,15 @@ func handleDeleteProjectRuntime(cleaner projectCleanupService) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := strings.TrimSpace(r.PathValue("projectName"))
 		if !isValidProjectName(projectName) {
-			http.Error(w, "invalid project name", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
 			return
 		}
 
 		if err := cleaner.Cleanup(r.Context(), projectName); errors.Is(err, errProjectNotFound) {
-			http.Error(w, "project not found", http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
 			return
 		} else if err != nil {
-			http.Error(w, "failed to clean up project", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, errorCodeProjectCleanupFailed, "failed to clean up project")
 			return
 		}
 

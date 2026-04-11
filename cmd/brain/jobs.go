@@ -15,25 +15,33 @@ import (
 const (
 	jobStatusQueued   = "queued"
 	projectStatusIdle = "idle"
+	jobTypeDeployment = "deployment"
 )
 
 var projectNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
+type jobLinks struct {
+	Self       string `json:"self"`
+	Logs       string `json:"logs"`
+	LogsStream string `json:"logsStream"`
+}
+
 type job struct {
-	ID           string `json:"id"`
-	ProjectName  string `json:"projectName"`
-	RepoURL      string `json:"repoUrl"`
-	Status       string `json:"status"`
-	LogPath      string `json:"logPath,omitempty"`
-	ImageRef     string `json:"imageRef,omitempty"`
-	ErrorMessage string `json:"errorMessage,omitempty"`
-	CreatedAt    string `json:"createdAt"`
-	StartedAt    string `json:"startedAt,omitempty"`
-	FinishedAt   string `json:"finishedAt,omitempty"`
+	ID           string   `json:"id"`
+	Type         string   `json:"type"`
+	ProjectName  string   `json:"projectName"`
+	RepoURL      string   `json:"repoUrl"`
+	Status       string   `json:"status"`
+	LogPath      string   `json:"logPath,omitempty"`
+	ImageRef     string   `json:"imageRef,omitempty"`
+	ErrorMessage string   `json:"errorMessage,omitempty"`
+	CreatedAt    string   `json:"createdAt"`
+	StartedAt    string   `json:"startedAt,omitempty"`
+	FinishedAt   string   `json:"finishedAt,omitempty"`
+	Links        jobLinks `json:"links"`
 }
 
 type createDeploymentRequest struct {
-	Name    string `json:"name"`
 	RepoURL string `json:"repoUrl"`
 }
 
@@ -45,36 +53,21 @@ func handleCreateDeployment(db *sql.DB, enqueuer deploymentEnqueuer) http.Handle
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
 		var request createDeploymentRequest
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidRequestBody, "invalid request body")
 			return
 		}
 
-		projectName := strings.TrimSpace(request.Name)
-		repoURL := strings.TrimSpace(request.RepoURL)
-		if !isValidProjectName(projectName) {
-			http.Error(w, "invalid project name", http.StatusBadRequest)
-			return
-		}
-		if repoURL == "" {
-			http.Error(w, "repoUrl is required", http.StatusBadRequest)
-			return
-		}
-
-		job, err := createQueuedJob(db, projectName, repoURL)
-		if err != nil {
-			http.Error(w, "failed to create deployment job", http.StatusInternalServerError)
-			return
-		}
-
-		if enqueuer != nil {
-			enqueuer.Enqueue(job.ID)
-		}
-
-		writeJSON(w, http.StatusAccepted, job)
+		createDeploymentJob(w, db, enqueuer, projectName, request.RepoURL)
 	}
 }
 
@@ -82,22 +75,43 @@ func handleGetJob(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := strings.TrimSpace(r.PathValue("jobID"))
 		if jobID == "" {
-			http.Error(w, "job ID is required", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, errorCodeJobIDRequired, "job ID is required")
 			return
 		}
 
 		job, err := getJob(db, jobID)
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "job not found", http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, errorCodeJobNotFound, "job not found")
 			return
 		}
 		if err != nil {
-			http.Error(w, "failed to fetch job", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, errorCodeFetchJobFailed, "failed to fetch job")
 			return
 		}
 
 		writeJSON(w, http.StatusOK, job)
 	}
+}
+
+func createDeploymentJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentEnqueuer, projectName string, repoURL string) {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL == "" {
+		writeJSONError(w, http.StatusBadRequest, errorCodeRepoURLRequired, "repoUrl is required")
+		return
+	}
+
+	job, err := createQueuedJob(db, projectName, repoURL)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, errorCodeCreateJobFailed, "failed to create deployment job")
+		return
+	}
+
+	if enqueuer != nil {
+		enqueuer.Enqueue(job.ID)
+	}
+
+	w.Header().Set("Location", jobPath(job.ID))
+	writeJSON(w, http.StatusAccepted, job)
 }
 
 func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error) {
@@ -138,13 +152,13 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 		return job{}, err
 	}
 
-	return job{
+	return decorateJob(job{
 		ID:          jobID,
 		ProjectName: projectName,
 		RepoURL:     repoURL,
 		Status:      jobStatusQueued,
 		CreatedAt:   createdAt,
-	}, nil
+	}), nil
 }
 
 func getJob(db *sql.DB, jobID string) (job, error) {
@@ -192,7 +206,7 @@ func getJob(db *sql.DB, jobID string) (job, error) {
 		job.FinishedAt = finishedAt.String
 	}
 
-	return job, nil
+	return decorateJob(job), nil
 }
 
 func isValidProjectName(name string) bool {
@@ -208,8 +222,25 @@ func newID() (string, error) {
 	return hex.EncodeToString(buffer[:]), nil
 }
 
-func writeJSON(w http.ResponseWriter, statusCode int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(value)
+func decorateJob(job job) job {
+	job.Type = jobTypeDeployment
+	job.Links = jobLinks{
+		Self:       jobPath(job.ID),
+		Logs:       jobLogsPath(job.ID),
+		LogsStream: jobLogsStreamPath(job.ID),
+	}
+
+	return job
+}
+
+func jobPath(jobID string) string {
+	return "/v1/jobs/" + jobID
+}
+
+func jobLogsPath(jobID string) string {
+	return jobPath(jobID) + "/logs"
+}
+
+func jobLogsStreamPath(jobID string) string {
+	return jobLogsPath(jobID) + "/stream"
 }

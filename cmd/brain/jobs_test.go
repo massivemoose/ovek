@@ -16,8 +16,8 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/deployments",
-		strings.NewReader(`{"name":"demo-app","repoUrl":"https://example.com/demo.git"}`),
+		"/v1/projects/demo-app/deployments",
+		strings.NewReader(`{"repoUrl":"https://example.com/demo.git"}`),
 	)
 	request.Header.Set("X-API-Key", "test-key")
 	recorder := httptest.NewRecorder()
@@ -32,6 +32,9 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&job); err != nil {
 		t.Fatalf("expected response body to decode, got error: %v", err)
 	}
+	if got := recorder.Header().Get("Location"); got != jobPath(job.ID) {
+		t.Fatalf("expected Location header %q, got %q", jobPath(job.ID), got)
+	}
 
 	if job.ProjectName != "demo-app" {
 		t.Fatalf("expected project name %q, got %q", "demo-app", job.ProjectName)
@@ -42,6 +45,10 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	if job.Status != jobStatusQueued {
 		t.Fatalf("expected status %q, got %q", jobStatusQueued, job.Status)
 	}
+	if job.Type != jobTypeDeployment {
+		t.Fatalf("expected type %q, got %q", jobTypeDeployment, job.Type)
+	}
+	assertJobLinks(t, job)
 
 	persistedJob, err := getJob(db, job.ID)
 	if err != nil {
@@ -59,20 +66,52 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 }
 
 func TestCreateDeploymentRejectsInvalidProjectName(t *testing.T) {
+	handler := handleCreateDeployment(nil, noopEnqueuer{})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects/demo-app/deployments",
+		strings.NewReader(`{"repoUrl":"https://example.com/demo.git"}`),
+	)
+	request.SetPathValue("projectName", "Demo App")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+}
+
+func TestCreateDeploymentRejectsUnknownFields(t *testing.T) {
 	handler, _ := newTestHandler(t, noopEnqueuer{})
 
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/deployments",
-		strings.NewReader(`{"name":"Demo App","repoUrl":"https://example.com/demo.git"}`),
+		"/v1/projects/demo-app/deployments",
+		strings.NewReader(`{"name":"demo-app","repoUrl":"https://example.com/demo.git"}`),
 	)
 	request.Header.Set("X-API-Key", "test-key")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeInvalidRequestBody, "invalid request body")
+}
+
+func TestGlobalCreateDeploymentRouteReturnsNotFound(t *testing.T) {
+	handler, _ := newTestHandler(t, noopEnqueuer{})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/deployments",
+		strings.NewReader(`{"name":"demo-app","repoUrl":"https://example.com/demo.git"}`),
+	)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
 	}
 }
 
@@ -105,6 +144,10 @@ func TestGetJobReturnsPersistedJob(t *testing.T) {
 	if job.Status != jobStatusQueued {
 		t.Fatalf("expected status %q, got %q", jobStatusQueued, job.Status)
 	}
+	if job.Type != jobTypeDeployment {
+		t.Fatalf("expected type %q, got %q", jobTypeDeployment, job.Type)
+	}
+	assertJobLinks(t, job)
 }
 
 func TestGetJobReturnsNotFoundForUnknownJob(t *testing.T) {
@@ -116,9 +159,7 @@ func TestGetJobReturnsNotFoundForUnknownJob(t *testing.T) {
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
-	}
+	assertAPIError(t, recorder, http.StatusNotFound, errorCodeJobNotFound, "job not found")
 }
 
 func newTestHandler(t *testing.T, enqueuer deploymentEnqueuer) (http.Handler, *sql.DB) {
@@ -155,4 +196,40 @@ type recordingEnqueuer struct {
 
 func (enqueuer *recordingEnqueuer) Enqueue(jobID string) {
 	enqueuer.jobIDs = append(enqueuer.jobIDs, jobID)
+}
+
+func assertJobLinks(t *testing.T, job job) {
+	t.Helper()
+
+	if job.Links.Self != jobPath(job.ID) {
+		t.Fatalf("expected self link %q, got %q", jobPath(job.ID), job.Links.Self)
+	}
+	if job.Links.Logs != jobLogsPath(job.ID) {
+		t.Fatalf("expected logs link %q, got %q", jobLogsPath(job.ID), job.Links.Logs)
+	}
+	if job.Links.LogsStream != jobLogsStreamPath(job.ID) {
+		t.Fatalf("expected logsStream link %q, got %q", jobLogsStreamPath(job.ID), job.Links.LogsStream)
+	}
+}
+
+func assertAPIError(t *testing.T, recorder *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessage string) {
+	t.Helper()
+
+	if recorder.Code != wantStatus {
+		t.Fatalf("expected status %d, got %d", wantStatus, recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("expected Content-Type %q, got %q", "application/json", got)
+	}
+
+	var response apiError
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("expected error response body to decode, got error: %v", err)
+	}
+	if response.Code != wantCode {
+		t.Fatalf("expected error code %q, got %q", wantCode, response.Code)
+	}
+	if response.Message != wantMessage {
+		t.Fatalf("expected error message %q, got %q", wantMessage, response.Message)
+	}
 }

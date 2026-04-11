@@ -37,9 +37,7 @@ func TestPingRequiresAPIKey(t *testing.T) {
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
-	}
+	assertAPIError(t, recorder, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
 }
 
 func TestPingRejectsWrongAPIKey(t *testing.T) {
@@ -50,9 +48,7 @@ func TestPingRejectsWrongAPIKey(t *testing.T) {
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, recorder.Code)
-	}
+	assertAPIError(t, recorder, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
 }
 
 func TestPingReturnsOKWithCorrectAPIKey(t *testing.T) {
