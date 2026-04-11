@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -225,9 +224,7 @@ func TestDeleteProjectRuntimeEndpointRejectsInvalidProjectName(t *testing.T) {
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
-	}
+	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
 }
 
 func TestDeleteProjectRuntimeEndpointReturnsNotFoundForUnknownProject(t *testing.T) {
@@ -251,12 +248,7 @@ func TestDeleteProjectRuntimeEndpointReturnsNotFoundForUnknownProject(t *testing
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
-	}
-	if !strings.Contains(recorder.Body.String(), "project not found") {
-		t.Fatalf("expected project not found body, got %q", recorder.Body.String())
-	}
+	assertAPIError(t, recorder, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
 }
 
 func TestDeleteProjectRuntimeEndpointReturnsInternalServerErrorOnCleanupFailure(t *testing.T) {
@@ -267,12 +259,7 @@ func TestDeleteProjectRuntimeEndpointReturnsInternalServerErrorOnCleanupFailure(
 
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
-	}
-	if !strings.Contains(recorder.Body.String(), "failed to clean up project") {
-		t.Fatalf("expected cleanup failure body, got %q", recorder.Body.String())
-	}
+	assertAPIError(t, recorder, http.StatusInternalServerError, errorCodeProjectCleanupFailed, "failed to clean up project")
 }
 
 func TestProjectExistsReturnsExpectedState(t *testing.T) {
