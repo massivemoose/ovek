@@ -175,25 +175,7 @@ func (runtime *dockerRuntime) RemoveProjectApp(ctx context.Context, deployment d
 		return err
 	}
 
-	containerID := container.ID
-	if containerID == "" {
-		containerID = deployment.AppContainerName
-	}
-
-	if container.State != nil && container.State.Running {
-		timeout := appStopTimeoutSeconds
-		if err := runtime.client.ContainerStop(ctx, containerID, dockercontainer.StopOptions{
-			Timeout: &timeout,
-		}); err != nil && !cerrdefs.IsNotFound(err) {
-			return fmt.Errorf("stop app container %q: %w", deployment.AppContainerName, err)
-		}
-	}
-
-	if err := runtime.client.ContainerRemove(ctx, containerID, dockercontainer.RemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
-		return fmt.Errorf("remove app container %q: %w", deployment.AppContainerName, err)
-	}
-
-	return nil
+	return runtime.removeManagedContainer(ctx, deployment.AppContainerName, container, "app container")
 }
 
 func (runtime *dockerRuntime) ListProjectApps(ctx context.Context, projectName string) ([]projectAppRuntime, error) {

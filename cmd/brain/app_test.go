@@ -356,6 +356,47 @@ func TestDockerRuntimeRemoveProjectAppIgnoresMissingContainer(t *testing.T) {
 	}
 }
 
+func TestDockerRuntimeRemoveProjectNetworkRemovesManagedNetwork(t *testing.T) {
+	client := &fakeDockerClient{
+		networkInspectResponse: dockernetwork.Inspect{
+			ID:   "network-123",
+			Name: "demo-app-net",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRoleProjectNetwork,
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.RemoveProjectNetwork(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected network removal to succeed, got error: %v", err)
+	}
+	if client.networkInspectName != "demo-app-net" {
+		t.Fatalf("expected inspect name %q, got %q", "demo-app-net", client.networkInspectName)
+	}
+	if client.networkRemoveID != "network-123" {
+		t.Fatalf("expected removed network ID %q, got %q", "network-123", client.networkRemoveID)
+	}
+}
+
+func TestDockerRuntimeRemoveProjectNetworkIgnoresMissingNetwork(t *testing.T) {
+	client := &fakeDockerClient{
+		networkInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.RemoveProjectNetwork(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected missing network removal to be ignored, got error: %v", err)
+	}
+	if client.networkRemoveID != "" {
+		t.Fatalf("expected remove not to be called, got %q", client.networkRemoveID)
+	}
+}
+
 func TestDockerRuntimeListProjectAppsReturnsManagedProjectApps(t *testing.T) {
 	client := &fakeDockerClient{
 		containerListResponse: []dockercontainer.Summary{
