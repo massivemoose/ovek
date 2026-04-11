@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strings"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	dockernetwork "github.com/docker/docker/api/types/network"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -47,6 +49,17 @@ type appContainerSpec struct {
 	NetworkingConfig   *dockernetwork.NetworkingConfig
 	EdgeEndpointConfig *dockernetwork.EndpointSettings
 	ProjectNetworkName string
+}
+
+type projectAppRuntime struct {
+	DeploymentID            string
+	ProjectName             string
+	AppContainerName        string
+	ImageRef                string
+	NetworkName             string
+	PocketBaseContainerName string
+	CreatedAt               string
+	Running                 bool
 }
 
 func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error) {
@@ -181,6 +194,51 @@ func (runtime *dockerRuntime) RemoveProjectApp(ctx context.Context, deployment d
 	}
 
 	return nil
+}
+
+func (runtime *dockerRuntime) ListProjectApps(ctx context.Context, projectName string) ([]projectAppRuntime, error) {
+	containers, err := runtime.client.ContainerList(ctx, dockercontainer.ListOptions{
+		All: true,
+		Filters: filters.NewArgs(
+			filters.Arg("label", managedLabelKey+"="+managedLabelValue),
+			filters.Arg("label", projectLabelKey+"="+projectName),
+			filters.Arg("label", roleLabelKey+"="+resourceRoleApp),
+		),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list project app containers: %w", err)
+	}
+
+	apps := make([]projectAppRuntime, 0, len(containers))
+	for _, container := range containers {
+		deploymentID := container.Labels[deploymentLabelKey]
+		if deploymentID == "" {
+			name := container.ID
+			if len(container.Names) > 0 {
+				name = strings.TrimPrefix(container.Names[0], "/")
+			}
+
+			return nil, fmt.Errorf("managed app container %q is missing deployment label", name)
+		}
+
+		appName := container.ID
+		if len(container.Names) > 0 {
+			appName = strings.TrimPrefix(container.Names[0], "/")
+		}
+
+		apps = append(apps, projectAppRuntime{
+			DeploymentID:            deploymentID,
+			ProjectName:             projectName,
+			AppContainerName:        appName,
+			ImageRef:                container.Image,
+			NetworkName:             projectNetworkName(projectName),
+			PocketBaseContainerName: pocketBaseContainerName(projectName),
+			CreatedAt:               time.Unix(container.Created, 0).UTC().Format(time.RFC3339Nano),
+			Running:                 container.State == "running",
+		})
+	}
+
+	return apps, nil
 }
 
 func newAppContainerSpec(spec appSpec) appContainerSpec {
