@@ -63,6 +63,9 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	if enqueuer.jobIDs[0] != job.ID {
 		t.Fatalf("expected enqueued job ID %q, got %q", job.ID, enqueuer.jobIDs[0])
 	}
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusDeploying {
+		t.Fatalf("expected project status %q, got %q", projectStatusDeploying, got)
+	}
 }
 
 func TestCreateDeploymentRejectsInvalidProjectName(t *testing.T) {

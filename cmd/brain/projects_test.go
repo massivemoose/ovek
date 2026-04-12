@@ -46,11 +46,17 @@ func TestListProjectsReturnsProjectSummaries(t *testing.T) {
 	if projects[0].CurrentDeploymentID == nil || *projects[0].CurrentDeploymentID != "dep-alpha" {
 		t.Fatalf("expected alpha-app current deployment %q, got %#v", "dep-alpha", projects[0].CurrentDeploymentID)
 	}
+	if projects[0].Status != projectStatusRunning {
+		t.Fatalf("expected alpha-app status %q, got %q", projectStatusRunning, projects[0].Status)
+	}
 	if projects[1].Name != "beta-app" {
 		t.Fatalf("expected second project %q, got %q", "beta-app", projects[1].Name)
 	}
 	if projects[1].CurrentDeploymentID != nil {
 		t.Fatalf("expected beta-app current deployment to be nil, got %#v", projects[1].CurrentDeploymentID)
+	}
+	if projects[1].Status != projectStatusIdle {
+		t.Fatalf("expected beta-app status %q, got %q", projectStatusIdle, projects[1].Status)
 	}
 }
 
@@ -144,8 +150,8 @@ func TestGetProjectReturnsProjectSummary(t *testing.T) {
 	if project.Name != "alpha-app" {
 		t.Fatalf("expected project name %q, got %q", "alpha-app", project.Name)
 	}
-	if project.Status != projectStatusIdle {
-		t.Fatalf("expected project status %q, got %q", projectStatusIdle, project.Status)
+	if project.Status != projectStatusRunning {
+		t.Fatalf("expected project status %q, got %q", projectStatusRunning, project.Status)
 	}
 	if project.CurrentDeploymentID == nil || *project.CurrentDeploymentID != "dep-alpha" {
 		t.Fatalf("expected current deployment %q, got %#v", "dep-alpha", project.CurrentDeploymentID)

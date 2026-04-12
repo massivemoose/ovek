@@ -76,6 +76,9 @@ func TestManagedProjectCleanerRemovesManagedResourcesInOrderAndClearsRuntimeStat
 	if got := getDeploymentRecord(t, db, "dep-old").Status; got != deploymentStatusSuperseded {
 		t.Fatalf("expected old deployment status %q, got %q", deploymentStatusSuperseded, got)
 	}
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusIdle {
+		t.Fatalf("expected project status %q, got %q", projectStatusIdle, got)
+	}
 }
 
 func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t *testing.T) {
@@ -123,6 +126,9 @@ func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t 
 	if got := getDeploymentRecord(t, db, "dep-current").Status; got != deploymentStatusSucceeded {
 		t.Fatalf("expected deployment status %q, got %q", deploymentStatusSucceeded, got)
 	}
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusRunning {
+		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
+	}
 }
 
 func TestManagedProjectCleanerIsIdempotentWhenRuntimeResourcesAreAlreadyGone(t *testing.T) {
@@ -160,6 +166,9 @@ func TestManagedProjectCleanerIsIdempotentWhenRuntimeResourcesAreAlreadyGone(t *
 	assertCurrentDeploymentUnset(t, db, "demo-app")
 	if got := getDeploymentRecord(t, db, "dep-current").Status; got != deploymentStatusSuperseded {
 		t.Fatalf("expected deployment status %q, got %q", deploymentStatusSuperseded, got)
+	}
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusIdle {
+		t.Fatalf("expected project status %q, got %q", projectStatusIdle, got)
 	}
 }
 
@@ -214,6 +223,9 @@ func TestDeleteProjectRuntimeEndpointReturnsNoContent(t *testing.T) {
 		t.Fatalf("expected empty body, got %q", recorder.Body.String())
 	}
 	assertCurrentDeploymentUnset(t, db, "demo-app")
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusIdle {
+		t.Fatalf("expected project status %q, got %q", projectStatusIdle, got)
+	}
 }
 
 func TestDeleteProjectRuntimeEndpointRejectsInvalidProjectName(t *testing.T) {

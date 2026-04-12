@@ -33,6 +33,9 @@ func main() {
 	if err := newStartupDeploymentReconciler(db, runtime).Reconcile(context.Background()); err != nil {
 		log.Fatalf("failed to reconcile startup deployment state: %v", err)
 	}
+	if err := reconcileAllProjectStatuses(db); err != nil {
+		log.Fatalf("failed to reconcile startup project status state: %v", err)
+	}
 
 	processor := newManagedDeploymentProcessor(
 		db,

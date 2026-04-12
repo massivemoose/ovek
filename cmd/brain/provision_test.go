@@ -373,4 +373,7 @@ func seedCurrentDeployment(t *testing.T, db *sql.DB, deployment deploymentRecord
 	); err != nil {
 		t.Fatalf("expected project current deployment seed to succeed, got error: %v", err)
 	}
+	if err := syncProjectStatus(db, deployment.ProjectName); err != nil {
+		t.Fatalf("expected project status seed to succeed, got error: %v", err)
+	}
 }
