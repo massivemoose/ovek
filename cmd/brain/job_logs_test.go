@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestGetJobLogsReturnsPersistedLogContents(t *testing.T) {
@@ -123,6 +126,146 @@ func TestGetJobLogsReturnsInternalServerErrorWhenLogFileCannotBeRead(t *testing.
 	assertAPIError(t, recorder, http.StatusInternalServerError, errorCodeFetchJobLogsFailed, "failed to fetch job logs")
 }
 
+func TestGetJobLogsStreamReturnsSSEForCompletedJob(t *testing.T) {
+	handler, db, dataDir := newJobLogsTestHandler(t)
+
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	logPath := jobLogPath(dataDir, createdJob.ID)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatalf("expected log directory creation to succeed, got error: %v", err)
+	}
+
+	wantBody := "data: first line\n\ndata: second line\n\n"
+	if err := os.WriteFile(logPath, []byte("first line\nsecond line\n"), 0o644); err != nil {
+		t.Fatalf("expected log file write to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET log_path = ?, status = ? WHERE id = ?", logPath, jobStatusSucceeded, createdJob.ID); err != nil {
+		t.Fatalf("expected log path update to succeed, got error: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, jobLogsStreamPath(createdJob.ID), nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertSSEResponse(t, recorder, http.StatusOK, wantBody)
+}
+
+func TestGetJobLogsStreamFollowsRunningJobUntilCompletion(t *testing.T) {
+	dataDir := t.TempDir()
+	db, err := openBrainDB(dataDir)
+	if err != nil {
+		t.Fatalf("expected test database to open, got error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	logPath := jobLogPath(dataDir, createdJob.ID)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatalf("expected log directory creation to succeed, got error: %v", err)
+	}
+	if err := os.WriteFile(logPath, []byte("first line\n"), 0o644); err != nil {
+		t.Fatalf("expected initial log file write to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET status = ? WHERE id = ?", jobStatusRunning, createdJob.ID); err != nil {
+		t.Fatalf("expected job status update to succeed, got error: %v", err)
+	}
+
+	handler := handleGetJobLogsStreamWithPollInterval(db, dataDir, time.Millisecond)
+	request := httptest.NewRequest(http.MethodGet, jobLogsStreamPath(createdJob.ID), nil)
+	request.SetPathValue("jobID", createdJob.ID)
+
+	ctx, cancel := context.WithTimeout(request.Context(), time.Second)
+	defer cancel()
+	request = request.WithContext(ctx)
+
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(recorder, request)
+		close(done)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+
+	file, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("expected log file append open to succeed, got error: %v", err)
+	}
+	if _, err := file.WriteString("second line\n"); err != nil {
+		_ = file.Close()
+		t.Fatalf("expected log file append to succeed, got error: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("expected log file close to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET status = ?, log_path = ? WHERE id = ?", jobStatusSucceeded, logPath, createdJob.ID); err != nil {
+		t.Fatalf("expected terminal job update to succeed, got error: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("expected stream handler to complete after job reached terminal status")
+	}
+
+	assertSSEResponse(t, recorder, http.StatusOK, recorder.Body.String())
+	if !strings.Contains(recorder.Body.String(), "data: first line\n\n") {
+		t.Fatalf("expected first streamed log line in body %q", recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "data: second line\n\n") {
+		t.Fatalf("expected second streamed log line in body %q", recorder.Body.String())
+	}
+}
+
+func TestGetJobLogsStreamReturnsNotFoundForUnknownJob(t *testing.T) {
+	handler, _, _ := newJobLogsTestHandler(t)
+
+	request := httptest.NewRequest(http.MethodGet, jobLogsStreamPath("missing-job"), nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusNotFound, errorCodeJobNotFound, "job not found")
+}
+
+func TestGetJobLogsStreamReturnsInternalServerErrorWhenInitialLogFileCannotBeRead(t *testing.T) {
+	handler, db, dataDir := newJobLogsTestHandler(t)
+
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	logPath := jobLogPath(dataDir, createdJob.ID)
+	if err := os.MkdirAll(logPath, 0o755); err != nil {
+		t.Fatalf("expected unreadable log path setup to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET log_path = ?, status = ? WHERE id = ?", logPath, jobStatusSucceeded, createdJob.ID); err != nil {
+		t.Fatalf("expected log path update to succeed, got error: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, jobLogsStreamPath(createdJob.ID), nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusInternalServerError, errorCodeFetchJobLogsFailed, "failed to fetch job logs")
+}
+
 func newJobLogsTestHandler(t *testing.T) (http.Handler, *sql.DB, string) {
 	t.Helper()
 
@@ -151,6 +294,26 @@ func assertTextResponse(t *testing.T, recorder *httptest.ResponseRecorder, wantS
 	}
 	if got := recorder.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
 		t.Fatalf("expected Content-Type %q, got %q", "text/plain; charset=utf-8", got)
+	}
+	if got := recorder.Body.String(); got != wantBody {
+		t.Fatalf("expected body %q, got %q", wantBody, got)
+	}
+}
+
+func assertSSEResponse(t *testing.T, recorder *httptest.ResponseRecorder, wantStatus int, wantBody string) {
+	t.Helper()
+
+	if recorder.Code != wantStatus {
+		t.Fatalf("expected status %d, got %d", wantStatus, recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("expected Content-Type %q, got %q", "text/event-stream", got)
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("expected Cache-Control %q, got %q", "no-cache", got)
+	}
+	if got := recorder.Header().Get("Connection"); got != "keep-alive" {
+		t.Fatalf("expected Connection %q, got %q", "keep-alive", got)
 	}
 	if got := recorder.Body.String(); got != wantBody {
 		t.Fatalf("expected body %q, got %q", wantBody, got)
