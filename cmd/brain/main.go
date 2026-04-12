@@ -42,6 +42,7 @@ func main() {
 		cfg.PocketBaseImage,
 	)
 	cleaner := newManagedProjectCleaner(db, runtime)
+	projectRuntimeService := newManagedProjectRuntimeService(db, runtime)
 	jobManager := newJobManager(db, processor)
 	workerContext, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
@@ -52,7 +53,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    listenAddr,
-		Handler: newHandler(cfg, db, jobManager, cleaner),
+		Handler: newHandler(cfg, db, jobManager, cleaner, projectRuntimeService),
 	}
 
 	log.Printf("brain listening on %s", listenAddr)
@@ -63,7 +64,7 @@ func main() {
 	}
 }
 
-func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService) http.Handler {
+func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -75,8 +76,10 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	})
 	apiMux.HandleFunc("GET /v1/projects", handleListProjects(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}", handleGetProject(db))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
 	apiMux.HandleFunc("POST /v1/projects/{projectName}/deployments", handleCreateDeployment(db, enqueuer))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))
+	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs", handleGetJobLogs(db, cfg.DataDir))
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/runtime", handleDeleteProjectRuntime(cleaner))
 
 	mux.Handle("/v1/", apiKeyMiddleware(cfg.BrainAPIKey, apiMux))
