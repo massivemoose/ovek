@@ -51,6 +51,9 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	}
 	assertDeploymentMissing(t, db, createdJob.ID)
 	assertCurrentDeploymentUnset(t, db, createdJob.ProjectName)
+	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusFailed {
+		t.Fatalf("expected project status %q, got %q", projectStatusFailed, got)
+	}
 }
 
 func TestJobManagerProcessesJobsSequentially(t *testing.T) {
@@ -98,6 +101,9 @@ func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 	if firstJobState.StartedAt == "" {
 		t.Fatal("expected first job startedAt to be set")
 	}
+	if got := getProjectStatus(t, db, firstJob.ProjectName); got != projectStatusDeploying {
+		t.Fatalf("expected project status %q while first job is running, got %q", projectStatusDeploying, got)
+	}
 
 	secondJobState, err := getJob(db, secondJob.ID)
 	if err != nil {
@@ -134,6 +140,9 @@ func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 	}
 	if got := getProjectCurrentDeploymentID(t, db, secondJob.ProjectName); got != secondJob.ID {
 		t.Fatalf("expected current deployment ID %q, got %q", secondJob.ID, got)
+	}
+	if got := getProjectStatus(t, db, secondJob.ProjectName); got != projectStatusRunning {
+		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
 	}
 }
 
@@ -177,6 +186,56 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 	}
 	if got := getProjectCurrentDeploymentID(t, db, createdJob.ProjectName); got != createdJob.ID {
 		t.Fatalf("expected current deployment ID %q, got %q", createdJob.ID, got)
+	}
+	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusRunning {
+		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
+	}
+}
+
+func TestJobManagerKeepsProjectRunningWhenNewDeploymentFailsOverExistingRuntime(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:                 "/tmp/build.log",
+			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
+		}, errors.New("build failed")
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+
+	job := waitForJobStatus(t, db, createdJob.ID, jobStatusFailed)
+	if job.ErrorMessage != "build failed" {
+		t.Fatalf("expected error message %q, got %q", "build failed", job.ErrorMessage)
+	}
+	if got := getProjectCurrentDeploymentID(t, db, createdJob.ProjectName); got != "dep-current" {
+		t.Fatalf("expected current deployment ID %q, got %q", "dep-current", got)
+	}
+	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusRunning {
+		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
 	}
 }
 
@@ -294,4 +353,18 @@ func assertCurrentDeploymentUnset(t *testing.T, db *sql.DB, projectName string) 
 	if got := getProjectCurrentDeploymentID(t, db, projectName); got != "" {
 		t.Fatalf("expected project %q current deployment to be unset, got %q", projectName, got)
 	}
+}
+
+func getProjectStatus(t *testing.T, db *sql.DB, projectName string) string {
+	t.Helper()
+
+	var status string
+	if err := db.QueryRow(
+		"SELECT status FROM projects WHERE name = ?",
+		projectName,
+	).Scan(&status); err != nil {
+		t.Fatalf("expected project %q status lookup to succeed, got error: %v", projectName, err)
+	}
+
+	return status
 }

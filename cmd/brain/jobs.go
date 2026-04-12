@@ -14,7 +14,6 @@ import (
 
 const (
 	jobStatusQueued   = "queued"
-	projectStatusIdle = "idle"
 	jobTypeDeployment = "deployment"
 )
 
@@ -144,6 +143,10 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 		jobStatusQueued,
 		createdAt,
 	); err != nil {
+		_ = tx.Rollback()
+		return job{}, err
+	}
+	if err := syncProjectStatus(tx, projectName); err != nil {
 		_ = tx.Rollback()
 		return job{}, err
 	}

@@ -127,6 +127,10 @@ func clearProjectRuntimeState(db *sql.DB, projectName string) error {
 		_ = tx.Rollback()
 		return fmt.Errorf("clear current deployment for project %q: %w", projectName, err)
 	}
+	if err := syncProjectStatus(tx, projectName); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit cleanup transaction: %w", err)

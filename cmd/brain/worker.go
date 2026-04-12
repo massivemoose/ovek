@@ -174,7 +174,18 @@ func claimQueuedJob(db *sql.DB, jobID string, startedAt string) (bool, error) {
 }
 
 func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage string, result deploymentResult) error {
-	updateResult, err := db.Exec(
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin failed job transaction: %w", err)
+	}
+
+	projectName, err := getJobProjectName(tx, jobID)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+
+	updateResult, err := tx.Exec(
 		`UPDATE jobs
 		 SET status = ?, finished_at = ?, error_message = ?, log_path = ?, image_ref = ?
 		 WHERE id = ? AND status = ?`,
@@ -187,10 +198,22 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 		jobStatusRunning,
 	)
 	if err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("mark job failed: %w", err)
 	}
+	if err := requireUpdatedRow(updateResult, "mark failed job"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := syncProjectStatus(tx, projectName); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit failed job transaction: %w", err)
+	}
 
-	return requireUpdatedRow(updateResult, "mark failed job")
+	return nil
 }
 
 func markJobSucceeded(db *sql.DB, currentJob job, finishedAt string, result deploymentResult) error {
@@ -302,8 +325,25 @@ func setProjectCurrentDeployment(tx *sql.Tx, projectName string, deploymentID st
 	if err != nil {
 		return fmt.Errorf("set current deployment for project %q: %w", projectName, err)
 	}
+	if err := requireUpdatedRow(updateResult, "set current deployment"); err != nil {
+		return err
+	}
 
-	return requireUpdatedRow(updateResult, "set current deployment")
+	return syncProjectStatus(tx, projectName)
+}
+
+func getJobProjectName(store projectStatusStore, jobID string) (string, error) {
+	var projectName string
+	if err := store.QueryRow(
+		`SELECT project_name
+		 FROM jobs
+		 WHERE id = ?`,
+		jobID,
+	).Scan(&projectName); err != nil {
+		return "", fmt.Errorf("get project name for job %q: %w", jobID, err)
+	}
+
+	return projectName, nil
 }
 
 func requireDeploymentMetadata(result deploymentResult) error {
