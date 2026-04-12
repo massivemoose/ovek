@@ -177,7 +177,7 @@ func newTestHandler(t *testing.T, enqueuer deploymentEnqueuer) (http.Handler, *s
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, enqueuer, noopProjectCleaner{})
+	}, db, enqueuer, noopProjectCleaner{}, noopProjectRuntimeService{})
 
 	return handler, db
 }
@@ -189,6 +189,12 @@ func (noopEnqueuer) Enqueue(string) {}
 type noopProjectCleaner struct{}
 
 func (noopProjectCleaner) Cleanup(context.Context, string) error { return nil }
+
+type noopProjectRuntimeService struct{}
+
+func (noopProjectRuntimeService) GetRuntime(context.Context, string) (projectRuntimeView, error) {
+	return projectRuntimeView{}, nil
+}
 
 type recordingEnqueuer struct {
 	jobIDs []string
