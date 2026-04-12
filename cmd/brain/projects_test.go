@@ -111,3 +111,70 @@ func TestListProjectsRejectsInvalidLimit(t *testing.T) {
 
 	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeInvalidLimit, "limit must be a positive integer")
 }
+
+func TestGetProjectReturnsProjectSummary(t *testing.T) {
+	handler, db := newTestHandler(t, noopEnqueuer{})
+
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-alpha",
+		ProjectName:             "alpha-app",
+		ImageRef:                "alces-alpha-app:dep-alpha",
+		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		NetworkName:             "alpha-app-net",
+		PocketBaseContainerName: "alces-alpha-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-10T00:00:00Z",
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	var project projectSummary
+	if err := json.NewDecoder(recorder.Body).Decode(&project); err != nil {
+		t.Fatalf("expected response body to decode, got error: %v", err)
+	}
+
+	if project.Name != "alpha-app" {
+		t.Fatalf("expected project name %q, got %q", "alpha-app", project.Name)
+	}
+	if project.Status != projectStatusIdle {
+		t.Fatalf("expected project status %q, got %q", projectStatusIdle, project.Status)
+	}
+	if project.CurrentDeploymentID == nil || *project.CurrentDeploymentID != "dep-alpha" {
+		t.Fatalf("expected current deployment %q, got %#v", "dep-alpha", project.CurrentDeploymentID)
+	}
+	if project.CreatedAt != "2026-04-10T00:00:00Z" {
+		t.Fatalf("expected createdAt %q, got %q", "2026-04-10T00:00:00Z", project.CreatedAt)
+	}
+}
+
+func TestGetProjectRejectsInvalidProjectName(t *testing.T) {
+	handler := handleGetProject(nil)
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/demo-app", nil)
+	request.SetPathValue("projectName", "Demo App")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+}
+
+func TestGetProjectReturnsNotFoundForUnknownProject(t *testing.T) {
+	handler, _ := newTestHandler(t, noopEnqueuer{})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/missing-app", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+}

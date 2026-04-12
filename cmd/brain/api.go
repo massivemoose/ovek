@@ -13,6 +13,7 @@ const (
 	errorCodeRepoURLRequired      = "repo_url_required"
 	errorCodeCreateJobFailed      = "create_deployment_job_failed"
 	errorCodeListProjectsFailed   = "list_projects_failed"
+	errorCodeFetchProjectFailed   = "fetch_project_failed"
 	errorCodeJobIDRequired        = "job_id_required"
 	errorCodeJobNotFound          = "job_not_found"
 	errorCodeFetchJobFailed       = "fetch_job_failed"
