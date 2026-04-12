@@ -36,6 +36,28 @@ func handleListProjects(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func handleGetProject(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		project, err := getProject(db, projectName)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeFetchProjectFailed, "failed to fetch project")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, project)
+	}
+}
+
 func parseProjectListLimit(r *http.Request) (int, error) {
 	limitValue := strings.TrimSpace(r.URL.Query().Get("limit"))
 	if limitValue == "" {
@@ -68,21 +90,10 @@ func listProjects(db *sql.DB, limit int) ([]projectSummary, error) {
 
 	projects := make([]projectSummary, 0)
 	for rows.Next() {
-		var project projectSummary
-		var currentDeploymentID sql.NullString
-		if err := rows.Scan(
-			&project.Name,
-			&project.Status,
-			&currentDeploymentID,
-			&project.CreatedAt,
-		); err != nil {
+		project, err := scanProjectSummary(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan project: %w", err)
 		}
-		if currentDeploymentID.Valid {
-			deploymentID := currentDeploymentID.String
-			project.CurrentDeploymentID = &deploymentID
-		}
-
 		projects = append(projects, project)
 	}
 
@@ -91,4 +102,38 @@ func listProjects(db *sql.DB, limit int) ([]projectSummary, error) {
 	}
 
 	return projects, nil
+}
+
+func getProject(db *sql.DB, projectName string) (projectSummary, error) {
+	return scanProjectSummary(
+		db.QueryRow(
+			`SELECT name, status, current_deployment_id, created_at
+			 FROM projects
+			 WHERE name = ?`,
+			projectName,
+		),
+	)
+}
+
+type projectSummaryScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanProjectSummary(scanner projectSummaryScanner) (projectSummary, error) {
+	var project projectSummary
+	var currentDeploymentID sql.NullString
+	if err := scanner.Scan(
+		&project.Name,
+		&project.Status,
+		&currentDeploymentID,
+		&project.CreatedAt,
+	); err != nil {
+		return project, err
+	}
+	if currentDeploymentID.Valid {
+		deploymentID := currentDeploymentID.String
+		project.CurrentDeploymentID = &deploymentID
+	}
+
+	return project, nil
 }
