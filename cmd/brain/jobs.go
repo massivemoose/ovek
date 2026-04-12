@@ -17,7 +17,7 @@ const (
 	jobTypeDeployment = "deployment"
 )
 
-var projectNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+var projectNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type jobLinks struct {
 	Self       string `json:"self"`
