@@ -16,7 +16,8 @@ const (
 	deploymentStatusSucceeded  = "succeeded"
 	deploymentStatusSuperseded = "superseded"
 
-	defaultJobQueueSize = 64
+	defaultJobQueueSize        = 64
+	interruptedJobErrorMessage = "job interrupted by brain restart"
 )
 
 type deploymentResult struct {
@@ -58,12 +59,16 @@ func newJobManager(db *sql.DB, processor deploymentProcessor) *jobManager {
 }
 
 func (manager *jobManager) Start(ctx context.Context) error {
-	go manager.run(ctx)
+	if err := recoverInterruptedJobs(manager.db); err != nil {
+		return err
+	}
 
 	jobIDs, err := listQueuedJobIDs(manager.db)
 	if err != nil {
 		return err
 	}
+
+	go manager.run(ctx)
 
 	for _, jobID := range jobIDs {
 		manager.Enqueue(jobID)
@@ -123,15 +128,23 @@ func (manager *jobManager) processJob(ctx context.Context, jobID string) {
 }
 
 func listQueuedJobIDs(db *sql.DB) ([]string, error) {
+	return listJobIDsByStatus(db, jobStatusQueued)
+}
+
+func listRunningJobIDs(db *sql.DB) ([]string, error) {
+	return listJobIDsByStatus(db, jobStatusRunning)
+}
+
+func listJobIDsByStatus(db *sql.DB, status string) ([]string, error) {
 	rows, err := db.Query(
 		`SELECT id
 		 FROM jobs
 		 WHERE status = ?
 		 ORDER BY created_at ASC`,
-		jobStatusQueued,
+		status,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list queued jobs: %w", err)
+		return nil, fmt.Errorf("list %s jobs: %w", status, err)
 	}
 	defer rows.Close()
 
@@ -139,16 +152,33 @@ func listQueuedJobIDs(db *sql.DB) ([]string, error) {
 	for rows.Next() {
 		var jobID string
 		if err := rows.Scan(&jobID); err != nil {
-			return nil, fmt.Errorf("scan queued job ID: %w", err)
+			return nil, fmt.Errorf("scan %s job ID: %w", status, err)
 		}
 		jobIDs = append(jobIDs, jobID)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate queued jobs: %w", err)
+		return nil, fmt.Errorf("iterate %s jobs: %w", status, err)
 	}
 
 	return jobIDs, nil
+}
+
+func recoverInterruptedJobs(db *sql.DB) error {
+	jobIDs, err := listRunningJobIDs(db)
+	if err != nil {
+		return err
+	}
+
+	for _, jobID := range jobIDs {
+		finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		if err := markJobFailed(db, jobID, finishedAt, interruptedJobErrorMessage, deploymentResult{}); err != nil {
+			return fmt.Errorf("recover interrupted job %q: %w", jobID, err)
+		}
+		log.Printf("recovered interrupted job %q as failed after Brain restart", jobID)
+	}
+
+	return nil
 }
 
 func claimQueuedJob(db *sql.DB, jobID string, startedAt string) (bool, error) {

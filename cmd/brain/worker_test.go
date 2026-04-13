@@ -192,6 +192,101 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 	}
 }
 
+func TestJobManagerRecoversInterruptedRunningJobsOnStart(t *testing.T) {
+	db := newTestDB(t)
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE jobs
+		 SET status = ?, started_at = ?
+		 WHERE id = ?`,
+		jobStatusRunning,
+		"2026-04-12T00:00:00Z",
+		createdJob.ID,
+	); err != nil {
+		t.Fatalf("expected job running-state seed to succeed, got error: %v", err)
+	}
+
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		t.Fatalf("expected interrupted running job %q not to be reprocessed", currentJob.ID)
+		return deploymentResult{}, nil
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	job := waitForJobStatus(t, db, createdJob.ID, jobStatusFailed)
+	if job.ErrorMessage != interruptedJobErrorMessage {
+		t.Fatalf("expected interruption error %q, got %q", interruptedJobErrorMessage, job.ErrorMessage)
+	}
+	if job.StartedAt != "2026-04-12T00:00:00Z" {
+		t.Fatalf("expected startedAt to remain %q, got %q", "2026-04-12T00:00:00Z", job.StartedAt)
+	}
+	if job.FinishedAt == "" {
+		t.Fatal("expected finishedAt to be set")
+	}
+	assertCurrentDeploymentUnset(t, db, createdJob.ProjectName)
+	assertDeploymentMissing(t, db, createdJob.ID)
+	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusFailed {
+		t.Fatalf("expected project status %q, got %q", projectStatusFailed, got)
+	}
+}
+
+func TestJobManagerKeepsProjectRunningWhenRecoveringInterruptedJobOverExistingRuntime(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE jobs
+		 SET status = ?, started_at = ?
+		 WHERE id = ?`,
+		jobStatusRunning,
+		"2026-04-12T00:00:00Z",
+		createdJob.ID,
+	); err != nil {
+		t.Fatalf("expected job running-state seed to succeed, got error: %v", err)
+	}
+
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		t.Fatalf("expected interrupted running job %q not to be reprocessed", currentJob.ID)
+		return deploymentResult{}, nil
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	job := waitForJobStatus(t, db, createdJob.ID, jobStatusFailed)
+	if job.ErrorMessage != interruptedJobErrorMessage {
+		t.Fatalf("expected interruption error %q, got %q", interruptedJobErrorMessage, job.ErrorMessage)
+	}
+	if got := getProjectCurrentDeploymentID(t, db, createdJob.ProjectName); got != "dep-current" {
+		t.Fatalf("expected current deployment ID %q, got %q", "dep-current", got)
+	}
+	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusRunning {
+		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
+	}
+}
+
 func TestJobManagerKeepsProjectRunningWhenNewDeploymentFailsOverExistingRuntime(t *testing.T) {
 	db := newTestDB(t)
 	seedCurrentDeployment(t, db, deploymentRecord{
