@@ -458,7 +458,18 @@ func TestDockerRuntimeListProjectAppsReturnsManagedProjectApps(t *testing.T) {
 }
 
 func TestDockerRuntimeWaitForProjectAppReadySucceedsAfterRetry(t *testing.T) {
-	runtime := newDockerRuntime(&fakeDockerClient{})
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			NetworkSettings: &dockercontainer.NetworkSettings{
+				Networks: map[string]*dockernetwork.EndpointSettings{
+					alcesEdgeNetworkName: {
+						IPAddress: "172.20.0.10",
+					},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
 	attempts := 0
 	sleeps := 0
 	runtime.dialContext = func(_ context.Context, network string, address string) (net.Conn, error) {
@@ -466,8 +477,8 @@ func TestDockerRuntimeWaitForProjectAppReadySucceedsAfterRetry(t *testing.T) {
 		if network != "tcp" {
 			t.Fatalf("expected network %q, got %q", "tcp", network)
 		}
-		if address != "alces-demo-app-app-dep-123:8080" {
-			t.Fatalf("expected address %q, got %q", "alces-demo-app-app-dep-123:8080", address)
+		if address != "172.20.0.10:8080" {
+			t.Fatalf("expected address %q, got %q", "172.20.0.10:8080", address)
 		}
 		if attempts < 2 {
 			return nil, errors.New("connection refused")
@@ -497,10 +508,27 @@ func TestDockerRuntimeWaitForProjectAppReadySucceedsAfterRetry(t *testing.T) {
 	if sleeps != 1 {
 		t.Fatalf("expected 1 sleep between probes, got %d", sleeps)
 	}
+	if client.containerInspectName != "alces-demo-app-app-dep-123" {
+		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-app-dep-123", client.containerInspectName)
+	}
+	if client.containerInspectCalls != 2 {
+		t.Fatalf("expected 2 inspect attempts, got %d", client.containerInspectCalls)
+	}
 }
 
 func TestDockerRuntimeWaitForProjectAppReadyTimesOut(t *testing.T) {
-	runtime := newDockerRuntime(&fakeDockerClient{})
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			NetworkSettings: &dockercontainer.NetworkSettings{
+				Networks: map[string]*dockernetwork.EndpointSettings{
+					alcesEdgeNetworkName: {
+						IPAddress: "172.20.0.10",
+					},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
 	runtime.dialContext = func(_ context.Context, _ string, _ string) (net.Conn, error) {
 		return nil, errors.New("connection refused")
 	}
@@ -521,7 +549,18 @@ func TestDockerRuntimeWaitForProjectAppReadyTimesOut(t *testing.T) {
 }
 
 func TestDockerRuntimeWaitForProjectAppReadyReturnsSleepFailure(t *testing.T) {
-	runtime := newDockerRuntime(&fakeDockerClient{})
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			NetworkSettings: &dockercontainer.NetworkSettings{
+				Networks: map[string]*dockernetwork.EndpointSettings{
+					alcesEdgeNetworkName: {
+						IPAddress: "172.20.0.10",
+					},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
 	runtime.dialContext = func(_ context.Context, _ string, _ string) (net.Conn, error) {
 		return nil, errors.New("connection refused")
 	}
@@ -538,6 +577,32 @@ func TestDockerRuntimeWaitForProjectAppReadyReturnsSleepFailure(t *testing.T) {
 	}
 	if got := err.Error(); got != "wait for next readiness probe: sleep failed" {
 		t.Fatalf("expected sleep failure error, got %q", got)
+	}
+}
+
+func TestDockerRuntimeWaitForProjectAppReadyTimesOutWhenEdgeIPAddressIsMissing(t *testing.T) {
+	runtime := newDockerRuntime(&fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			NetworkSettings: &dockercontainer.NetworkSettings{
+				Networks: map[string]*dockernetwork.EndpointSettings{
+					alcesEdgeNetworkName: {},
+				},
+			},
+		},
+	})
+	runtime.sleep = func(_ context.Context, _ time.Duration) error {
+		return context.DeadlineExceeded
+	}
+
+	err := runtime.WaitForProjectAppReady(context.Background(), job{
+		ID:          "dep-123",
+		ProjectName: "demo-app",
+	})
+	if err == nil {
+		t.Fatal("expected readiness timeout")
+	}
+	if got := err.Error(); !strings.Contains(got, "has no IP address on network") {
+		t.Fatalf("expected missing IP address error, got %q", got)
 	}
 }
 

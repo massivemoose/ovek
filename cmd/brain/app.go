@@ -122,19 +122,24 @@ func (runtime *dockerRuntime) WaitForProjectAppReady(ctx context.Context, job jo
 	readyContext, cancel := context.WithTimeout(ctx, appReadinessTimeout)
 	defer cancel()
 
-	address := net.JoinHostPort(appContainerName(job.ProjectName, job.ID), appRuntimePort)
+	containerName := appContainerName(job.ProjectName, job.ID)
+	address := ""
 	var lastErr error
 	for {
-		conn, err := runtime.dialContext(readyContext, "tcp", address)
-		if err == nil {
-			if closeErr := conn.Close(); closeErr != nil {
-				return fmt.Errorf("close readiness probe connection: %w", closeErr)
+		address, lastErr = runtime.projectAppReadinessAddress(readyContext, containerName)
+		if lastErr == nil {
+			conn, err := runtime.dialContext(readyContext, "tcp", address)
+			if err == nil {
+				if closeErr := conn.Close(); closeErr != nil {
+					return fmt.Errorf("close readiness probe connection: %w", closeErr)
+				}
+
+				return nil
 			}
 
-			return nil
+			lastErr = err
 		}
 
-		lastErr = err
 		if errors.Is(readyContext.Err(), context.DeadlineExceeded) {
 			break
 		}
@@ -152,7 +157,34 @@ func (runtime *dockerRuntime) WaitForProjectAppReady(ctx context.Context, job jo
 		lastErr = readyContext.Err()
 	}
 
-	return fmt.Errorf("timed out waiting for app container %q to accept TCP connections on %s: %w", appContainerName(job.ProjectName, job.ID), address, lastErr)
+	return fmt.Errorf("timed out waiting for app container %q to accept TCP connections on %s: %w", containerName, address, lastErr)
+}
+
+func (runtime *dockerRuntime) projectAppReadinessAddress(ctx context.Context, containerName string) (string, error) {
+	container, err := runtime.client.ContainerInspect(ctx, containerName)
+	if err != nil {
+		return "", fmt.Errorf("inspect app container %q: %w", containerName, err)
+	}
+
+	return readinessAddressForAppContainer(container, containerName)
+}
+
+func readinessAddressForAppContainer(container dockercontainer.InspectResponse, containerName string) (string, error) {
+	if container.NetworkSettings == nil {
+		return "", fmt.Errorf("app container %q is missing network settings", containerName)
+	}
+
+	endpoint := container.NetworkSettings.Networks[alcesEdgeNetworkName]
+	if endpoint == nil {
+		return "", fmt.Errorf("app container %q is not attached to network %q", containerName, alcesEdgeNetworkName)
+	}
+
+	ipAddress := strings.TrimSpace(endpoint.IPAddress)
+	if ipAddress == "" {
+		return "", fmt.Errorf("app container %q has no IP address on network %q", containerName, alcesEdgeNetworkName)
+	}
+
+	return net.JoinHostPort(ipAddress, appRuntimePort), nil
 }
 
 func (runtime *dockerRuntime) RemoveProjectApp(ctx context.Context, deployment deploymentRecord) error {

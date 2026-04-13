@@ -159,6 +159,7 @@ type fakeDockerClient struct {
 	containerListErr       error
 
 	containerInspectName            string
+	containerInspectCalls           int
 	containerInspectResponse        dockercontainer.InspectResponse
 	containerInspectErr             error
 	containerCreateName             string
@@ -210,6 +211,7 @@ func (client *fakeDockerClient) ContainerList(_ context.Context, options dockerc
 
 func (client *fakeDockerClient) ContainerInspect(_ context.Context, containerID string) (dockercontainer.InspectResponse, error) {
 	client.containerInspectName = containerID
+	client.containerInspectCalls++
 	return client.containerInspectResponse, client.containerInspectErr
 }
 
