@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -169,6 +172,70 @@ func TestManagedProjectCleanerIsIdempotentWhenRuntimeResourcesAreAlreadyGone(t *
 	}
 	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusIdle {
 		t.Fatalf("expected project status %q, got %q", projectStatusIdle, got)
+	}
+}
+
+func TestManagedProjectCleanerCleansUpDeploymentImagesAfterRuntimeTeardown(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+	seedDeploymentRecord(t, db, deploymentRecord{
+		ID:                      "dep-old",
+		ProjectName:             "demo-app",
+		ImageRef:                "localhost:5001/alces-demo-app:dep-old",
+		AppContainerName:        "alces-demo-app-app-dep-old",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSuperseded,
+		CreatedAt:               "2026-04-08T23:55:00Z",
+	})
+
+	artifactCleaner := &fakeRegistryArtifactCleaner{}
+	err := newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, artifactCleaner).Cleanup(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected cleanup to succeed, got error: %v", err)
+	}
+
+	wantImageRefs := []string{
+		"localhost:5001/alces-demo-app:dep-old",
+		"localhost:5001/alces-demo-app:dep-current",
+	}
+	if !reflect.DeepEqual(artifactCleaner.cleanedRefs, wantImageRefs) {
+		t.Fatalf("expected cleaned refs %#v, got %#v", wantImageRefs, artifactCleaner.cleanedRefs)
+	}
+}
+
+func TestManagedProjectCleanerLogsArtifactCleanupFailuresButStillSucceeds(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+
+	artifactCleaner := &fakeRegistryArtifactCleaner{err: errors.New("registry delete failed")}
+	logs := captureTestLogs(t, func() {
+		err := newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, artifactCleaner).Cleanup(context.Background(), "demo-app")
+		if err != nil {
+			t.Fatalf("expected cleanup to succeed, got error: %v", err)
+		}
+	})
+
+	if !strings.Contains(logs, `warning: failed to clean up project "demo-app" image "localhost:5001/alces-demo-app:dep-current": registry delete failed`) {
+		t.Fatalf("expected cleanup warning log, got %q", logs)
 	}
 }
 
@@ -340,6 +407,12 @@ type fakeProjectCleanupRuntime struct {
 	sequence      []string
 }
 
+type fakeRegistryArtifactCleaner struct {
+	cleanedRefs []string
+	err         error
+	errByRef    map[string]error
+}
+
 func (runtime *fakeProjectCleanupRuntime) ListProjectApps(_ context.Context, projectName string) ([]projectAppRuntime, error) {
 	if runtime.listErr != nil {
 		return nil, runtime.listErr
@@ -363,10 +436,37 @@ func (runtime *fakeProjectCleanupRuntime) RemoveProjectNetwork(_ context.Context
 	return runtime.removeNetErr
 }
 
+func (cleaner *fakeRegistryArtifactCleaner) CleanupImage(_ context.Context, imageRef string) error {
+	cleaner.cleanedRefs = append(cleaner.cleanedRefs, imageRef)
+	if cleaner.errByRef != nil {
+		if err, ok := cleaner.errByRef[imageRef]; ok {
+			return err
+		}
+	}
+
+	return cleaner.err
+}
+
 type failingProjectCleaner struct {
 	err error
 }
 
 func (cleaner failingProjectCleaner) Cleanup(context.Context, string) error {
 	return cleaner.err
+}
+
+func captureTestLogs(t *testing.T, run func()) string {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	originalWriter := log.Writer()
+	log.SetOutput(&buffer)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+	})
+
+	run()
+	log.SetOutput(originalWriter)
+
+	return buffer.String()
 }

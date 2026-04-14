@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"log"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -334,6 +338,144 @@ func TestJobManagerKeepsProjectRunningWhenNewDeploymentFailsOverExistingRuntime(
 	}
 }
 
+func TestJobManagerCleansUpSupersededDeploymentImageAfterSuccessfulPromotion(t *testing.T) {
+	db := newTestDB(t)
+	firstJob, err := createQueuedJob(db, "demo-app", "https://example.com/first.git")
+	if err != nil {
+		t.Fatalf("expected first job creation to succeed, got error: %v", err)
+	}
+	secondJob, err := createQueuedJob(db, "demo-app", "https://example.com/second.git")
+	if err != nil {
+		t.Fatalf("expected second job creation to succeed, got error: %v", err)
+	}
+
+	artifactCleaner := &fakeRegistryArtifactCleaner{}
+	manager := newJobManager(db, processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
+		result := deploymentResult{
+			LogPath:                 "/tmp/build.log",
+			ImageRef:                "localhost:5001/alces-demo-app:" + job.ID,
+			AppContainerName:        appContainerName(job.ProjectName, job.ID),
+			NetworkName:             projectNetworkName(job.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(job.ProjectName),
+		}
+		if job.ID == secondJob.ID {
+			result.SupersededDeploymentID = firstJob.ID
+		}
+
+		return result, nil
+	}), artifactCleaner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(firstJob.ID)
+	manager.Enqueue(secondJob.ID)
+
+	waitForJobStatus(t, db, firstJob.ID, jobStatusSucceeded)
+	waitForJobStatus(t, db, secondJob.ID, jobStatusSucceeded)
+	waitForArtifactCleanup(t, artifactCleaner, 1)
+
+	wantImageRefs := []string{"localhost:5001/alces-demo-app:" + firstJob.ID}
+	if !reflect.DeepEqual(artifactCleaner.cleanedRefs, wantImageRefs) {
+		t.Fatalf("expected cleaned refs %#v, got %#v", wantImageRefs, artifactCleaner.cleanedRefs)
+	}
+}
+
+func TestJobManagerLogsArtifactCleanupFailuresButKeepsSuccessfulJobState(t *testing.T) {
+	db := newTestDB(t)
+	firstJob, err := createQueuedJob(db, "demo-app", "https://example.com/first.git")
+	if err != nil {
+		t.Fatalf("expected first job creation to succeed, got error: %v", err)
+	}
+	secondJob, err := createQueuedJob(db, "demo-app", "https://example.com/second.git")
+	if err != nil {
+		t.Fatalf("expected second job creation to succeed, got error: %v", err)
+	}
+
+	artifactCleaner := &fakeRegistryArtifactCleaner{err: errors.New("registry delete failed")}
+	manager := newJobManager(db, processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
+		result := deploymentResult{
+			LogPath:                 "/tmp/build.log",
+			ImageRef:                "localhost:5001/alces-demo-app:" + job.ID,
+			AppContainerName:        appContainerName(job.ProjectName, job.ID),
+			NetworkName:             projectNetworkName(job.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(job.ProjectName),
+		}
+		if job.ID == secondJob.ID {
+			result.SupersededDeploymentID = firstJob.ID
+		}
+
+		return result, nil
+	}), artifactCleaner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	logs := captureWorkerLogs(t, func() {
+		manager.Enqueue(firstJob.ID)
+		manager.Enqueue(secondJob.ID)
+		waitForJobStatus(t, db, firstJob.ID, jobStatusSucceeded)
+		waitForJobStatus(t, db, secondJob.ID, jobStatusSucceeded)
+		waitForArtifactCleanup(t, artifactCleaner, 1)
+	})
+
+	if !strings.Contains(logs, `warning: failed to clean up superseded deployment "`) {
+		t.Fatalf("expected cleanup warning log, got %q", logs)
+	}
+	if got := getProjectCurrentDeploymentID(t, db, secondJob.ProjectName); got != secondJob.ID {
+		t.Fatalf("expected current deployment ID %q, got %q", secondJob.ID, got)
+	}
+	if got := getProjectStatus(t, db, secondJob.ProjectName); got != projectStatusRunning {
+		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
+	}
+}
+
+func TestJobManagerDoesNotCleanUpArtifactsForFailedJobs(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	artifactCleaner := &fakeRegistryArtifactCleaner{}
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:                "/tmp/build.log",
+			ImageRef:               "localhost:5001/alces-demo-app:" + currentJob.ID,
+			SupersededDeploymentID: "dep-current",
+		}, errors.New("build failed")
+	}), artifactCleaner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+	waitForJobStatus(t, db, createdJob.ID, jobStatusFailed)
+
+	if len(artifactCleaner.cleanedRefs) != 0 {
+		t.Fatalf("expected no artifact cleanup on failure, got %#v", artifactCleaner.cleanedRefs)
+	}
+}
+
 type processorFunc func(ctx context.Context, job job) (deploymentResult, error)
 
 func (process processorFunc) Process(ctx context.Context, job job) (deploymentResult, error) {
@@ -462,4 +604,35 @@ func getProjectStatus(t *testing.T, db *sql.DB, projectName string) string {
 	}
 
 	return status
+}
+
+func captureWorkerLogs(t *testing.T, run func()) string {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	originalWriter := log.Writer()
+	log.SetOutput(&buffer)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+	})
+
+	run()
+	log.SetOutput(originalWriter)
+
+	return buffer.String()
+}
+
+func waitForArtifactCleanup(t *testing.T, cleaner *fakeRegistryArtifactCleaner, wantCount int) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(cleaner.cleanedRefs) >= wantCount {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("expected at least %d cleaned refs, got %#v", wantCount, cleaner.cleanedRefs)
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -23,14 +24,21 @@ type projectCleanupRuntime interface {
 }
 
 type managedProjectCleaner struct {
-	db      *sql.DB
-	runtime projectCleanupRuntime
+	db              *sql.DB
+	runtime         projectCleanupRuntime
+	artifactCleaner registryArtifactCleaner
 }
 
-func newManagedProjectCleaner(db *sql.DB, runtime projectCleanupRuntime) managedProjectCleaner {
+func newManagedProjectCleaner(db *sql.DB, runtime projectCleanupRuntime, artifactCleaners ...registryArtifactCleaner) managedProjectCleaner {
+	var artifactCleaner registryArtifactCleaner
+	if len(artifactCleaners) > 0 {
+		artifactCleaner = artifactCleaners[0]
+	}
+
 	return managedProjectCleaner{
-		db:      db,
-		runtime: runtime,
+		db:              db,
+		runtime:         runtime,
+		artifactCleaner: artifactCleaner,
 	}
 }
 
@@ -41,6 +49,11 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 	}
 	if !exists {
 		return errProjectNotFound
+	}
+
+	imageRefs, err := listProjectDeploymentImageRefs(cleaner.db, projectName)
+	if err != nil {
+		log.Printf("warning: failed to list deployment images for project %q cleanup: %v", projectName, err)
 	}
 
 	apps, err := cleaner.runtime.ListProjectApps(ctx, projectName)
@@ -62,8 +75,21 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 	if err := clearProjectRuntimeState(cleaner.db, projectName); err != nil {
 		return err
 	}
+	cleaner.cleanupProjectImages(ctx, projectName, imageRefs)
 
 	return nil
+}
+
+func (cleaner managedProjectCleaner) cleanupProjectImages(ctx context.Context, projectName string, imageRefs []string) {
+	if cleaner.artifactCleaner == nil {
+		return
+	}
+
+	for _, imageRef := range dedupeStrings(imageRefs) {
+		if err := cleaner.artifactCleaner.CleanupImage(ctx, imageRef); err != nil {
+			log.Printf("warning: failed to clean up project %q image %q: %v", projectName, imageRef, err)
+		}
+	}
 }
 
 func handleDeleteProjectRuntime(cleaner projectCleanupService) http.HandlerFunc {

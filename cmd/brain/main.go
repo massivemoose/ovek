@@ -52,9 +52,14 @@ func main() {
 		cfg.ProjectsHostDataDir,
 		cfg.PocketBaseImage,
 	)
-	cleaner := newManagedProjectCleaner(db, runtime)
+	artifactCleaner := newRegistryArtifactCleaner(
+		cfg.RuntimeRegistryHost,
+		cfg.RegistryAPIBaseURL,
+		&http.Client{},
+	)
+	cleaner := newManagedProjectCleaner(db, runtime, artifactCleaner)
 	projectRuntimeService := newManagedProjectRuntimeService(db, runtime)
-	jobManager := newJobManager(db, processor)
+	jobManager := newJobManager(db, processor, artifactCleaner)
 	workerContext, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
 

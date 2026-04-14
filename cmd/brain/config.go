@@ -13,6 +13,7 @@ const defaultProjectsHostDataDir = "/var/lib/alces/projects"
 const defaultPocketBaseImage = "elestio/pocketbase:latest"
 const defaultBuildRegistryPublishHost = "host.docker.internal:5001"
 const defaultRuntimeRegistryHost = "localhost:5001"
+const defaultRegistryAPIBaseURL = "http://registry:5000"
 const defaultRailpackFrontendImage = "ghcr.io/railwayapp/railpack-frontend"
 const defaultRegistryInsecure = true
 
@@ -22,6 +23,7 @@ type config struct {
 	BuildKitHost             string
 	BuildRegistryPublishHost string
 	RuntimeRegistryHost      string
+	RegistryAPIBaseURL       string
 	RailpackFrontendImage    string
 	RegistryInsecure         bool
 	ProjectsHostDataDir      string
@@ -47,6 +49,11 @@ func loadConfig() (config, error) {
 	runtimeRegistryHost := strings.TrimSpace(os.Getenv("RUNTIME_REGISTRY_HOST"))
 	if runtimeRegistryHost == "" {
 		runtimeRegistryHost = defaultRuntimeRegistryHost
+	}
+
+	registryAPIBaseURL := strings.TrimSpace(os.Getenv("REGISTRY_API_BASE_URL"))
+	if registryAPIBaseURL == "" {
+		registryAPIBaseURL = defaultRegistryAPIBaseURL
 	}
 
 	railpackFrontendImage := strings.TrimSpace(os.Getenv("RAILPACK_FRONTEND_IMAGE"))
@@ -79,6 +86,7 @@ func loadConfig() (config, error) {
 		BuildKitHost:             buildKitHost,
 		BuildRegistryPublishHost: buildRegistryPublishHost,
 		RuntimeRegistryHost:      runtimeRegistryHost,
+		RegistryAPIBaseURL:       registryAPIBaseURL,
 		RailpackFrontendImage:    railpackFrontendImage,
 		RegistryInsecure:         registryInsecure,
 		ProjectsHostDataDir:      projectsHostDataDir,
