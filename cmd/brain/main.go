@@ -39,7 +39,15 @@ func main() {
 
 	processor := newManagedDeploymentProcessor(
 		db,
-		newBuildProcessor(cfg.DataDir, cfg.BuildKitHost, systemCommandRunner{}),
+		newBuildProcessor(
+			cfg.DataDir,
+			cfg.BuildKitHost,
+			cfg.BuildRegistryPublishHost,
+			cfg.RuntimeRegistryHost,
+			cfg.RailpackFrontendImage,
+			cfg.RegistryInsecure,
+			systemCommandRunner{},
+		),
 		runtime,
 		cfg.ProjectsHostDataDir,
 		cfg.PocketBaseImage,

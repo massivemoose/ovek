@@ -96,6 +96,10 @@ func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, ima
 		return "", fmt.Errorf("inspect app container %q: %w", spec.Name, err)
 	}
 
+	if err := runtime.PullImage(ctx, spec.Config.Image); err != nil {
+		return "", err
+	}
+
 	createResponse, err := runtime.client.ContainerCreate(
 		ctx,
 		spec.Config,

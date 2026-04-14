@@ -9,10 +9,11 @@ COPY cmd/brain ./cmd/brain
 RUN CGO_ENABLED=0 go build -o /out/brain ./cmd/brain
 
 FROM docker:28.3.3-cli AS dockercli
+FROM moby/buildkit:v0.28.1 AS buildkitcli
 
 FROM debian:bookworm-slim
 
-ARG RAILPACK_VERSION=0.15.1
+ARG RAILPACK_VERSION=0.23.0
 ARG TARGETARCH
 
 RUN apt-get update \
@@ -29,6 +30,7 @@ RUN case "${TARGETARCH}" in \
  && rm /tmp/railpack.tar.gz
 
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=buildkitcli /usr/bin/buildctl /usr/local/bin/buildctl
 COPY --from=build /out/brain /usr/local/bin/brain
 
 EXPOSE 8081

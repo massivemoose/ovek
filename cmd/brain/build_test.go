@@ -9,18 +9,33 @@ import (
 	"testing"
 )
 
-func TestBuildProcessorRunsGitCloneAndRailpackBuild(t *testing.T) {
+func TestBuildProcessorRunsGitCloneAndBuildctl(t *testing.T) {
 	dataDir := t.TempDir()
-	runner := &recordingCommandRunner{}
-	processor := newBuildProcessor(dataDir, "tcp://buildkitd:1234", runner)
+	runner := &recordingCommandRunner{
+		runFunc: func(command commandSpec) error {
+			if command.Name == "railpack" && len(command.Args) >= 4 && command.Args[0] == "prepare" && command.Args[2] == "--plan-out" {
+				return os.WriteFile(command.Args[3], []byte("{}"), 0o644)
+			}
+			return nil
+		},
+	}
+	processor := newBuildProcessor(
+		dataDir,
+		"docker-container://buildkit",
+		"host.docker.internal:5001",
+		"localhost:5001",
+		"ghcr.io/railwayapp/railpack-frontend",
+		true,
+		runner,
+	)
 
-	job := job{
+	currentJob := job{
 		ID:          "job-123",
 		ProjectName: "demo-app",
 		RepoURL:     "https://example.com/demo.git",
 	}
 
-	result, err := processor.Process(context.Background(), job)
+	result, err := processor.Process(context.Background(), currentJob)
 	if err != nil {
 		t.Fatalf("expected build to succeed, got error: %v", err)
 	}
@@ -28,12 +43,12 @@ func TestBuildProcessorRunsGitCloneAndRailpackBuild(t *testing.T) {
 	if result.LogPath != filepath.Join(dataDir, jobLogsDirName, "job-123.log") {
 		t.Fatalf("expected log path %q, got %q", filepath.Join(dataDir, jobLogsDirName, "job-123.log"), result.LogPath)
 	}
-	if result.ImageRef != "alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", result.ImageRef)
+	if result.ImageRef != "localhost:5001/alces-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-123", result.ImageRef)
 	}
 
-	if len(runner.commands) != 2 {
-		t.Fatalf("expected 2 commands, got %d", len(runner.commands))
+	if len(runner.commands) != 3 {
+		t.Fatalf("expected 3 commands, got %d", len(runner.commands))
 	}
 	if runner.commands[0].Name != "git" {
 		t.Fatalf("expected first command %q, got %q", "git", runner.commands[0].Name)
@@ -46,12 +61,43 @@ func TestBuildProcessorRunsGitCloneAndRailpackBuild(t *testing.T) {
 	}
 
 	workspace := runner.commands[0].Args[4]
-	wantRailpackArgs := []string{"build", "--name", "alces-demo-app:job-123", workspace}
-	if strings.Join(runner.commands[1].Args, " ") != strings.Join(wantRailpackArgs, " ") {
-		t.Fatalf("expected railpack args %q, got %q", strings.Join(wantRailpackArgs, " "), strings.Join(runner.commands[1].Args, " "))
+	planDir := filepath.Join(workspace, railpackPlanDirName)
+	wantPrepareArgs := []string{
+		"prepare",
+		workspace,
+		"--plan-out",
+		filepath.Join(planDir, railpackPlanFileName),
+		"--info-out",
+		filepath.Join(planDir, railpackInfoFileName),
+		"--hide-pretty-plan",
 	}
-	if len(runner.commands[1].Env) != 1 || runner.commands[1].Env[0] != "BUILDKIT_HOST=tcp://buildkitd:1234" {
-		t.Fatalf("expected railpack env %q, got %#v", "BUILDKIT_HOST=tcp://buildkitd:1234", runner.commands[1].Env)
+	if strings.Join(runner.commands[1].Args, " ") != strings.Join(wantPrepareArgs, " ") {
+		t.Fatalf("expected railpack prepare args %q, got %q", strings.Join(wantPrepareArgs, " "), strings.Join(runner.commands[1].Args, " "))
+	}
+	if len(runner.commands[1].Env) != 1 || runner.commands[1].Env[0] != "BUILDKIT_HOST=docker-container://buildkit" {
+		t.Fatalf("expected railpack env %q, got %#v", "BUILDKIT_HOST=docker-container://buildkit", runner.commands[1].Env)
+	}
+
+	if runner.commands[2].Name != "buildctl" {
+		t.Fatalf("expected third command %q, got %q", "buildctl", runner.commands[2].Name)
+	}
+	buildArgs := strings.Join(runner.commands[2].Args, " ")
+	for _, want := range []string{
+		"--addr docker-container://buildkit",
+		"build",
+		"--progress=plain",
+		"--local context=" + workspace,
+		"--local dockerfile=" + planDir,
+		"--frontend=gateway.v0",
+		"--opt source=ghcr.io/railwayapp/railpack-frontend",
+		"--output type=image,name=host.docker.internal:5001/alces-demo-app:job-123,push=true,registry.insecure=true",
+	} {
+		if !strings.Contains(buildArgs, want) {
+			t.Fatalf("expected buildctl args to contain %q, got %q", want, buildArgs)
+		}
+	}
+	if len(runner.commands[2].Env) != 0 {
+		t.Fatalf("expected buildctl env to be empty, got %#v", runner.commands[2].Env)
 	}
 
 	if _, err := os.Stat(workspace); !errors.Is(err, os.ErrNotExist) {
@@ -65,8 +111,11 @@ func TestBuildProcessorRunsGitCloneAndRailpackBuild(t *testing.T) {
 	if !strings.Contains(string(logContents), "$ git clone --depth 1 https://example.com/demo.git") {
 		t.Fatalf("expected git command in log, got %q", string(logContents))
 	}
-	if !strings.Contains(string(logContents), "$ railpack build --name alces-demo-app:job-123") {
-		t.Fatalf("expected railpack command in log, got %q", string(logContents))
+	if !strings.Contains(string(logContents), "$ railpack prepare "+workspace+" --plan-out "+filepath.Join(planDir, railpackPlanFileName)+" --info-out "+filepath.Join(planDir, railpackInfoFileName)+" --hide-pretty-plan") {
+		t.Fatalf("expected railpack prepare command in log, got %q", string(logContents))
+	}
+	if !strings.Contains(string(logContents), "$ buildctl --addr docker-container://buildkit build --progress=plain") {
+		t.Fatalf("expected buildctl command in log, got %q", string(logContents))
 	}
 }
 
@@ -80,7 +129,15 @@ func TestBuildProcessorCleansUpWorkspaceOnCloneFailure(t *testing.T) {
 			return nil
 		},
 	}
-	processor := newBuildProcessor(dataDir, defaultBuildKitHost, runner)
+	processor := newBuildProcessor(
+		dataDir,
+		defaultBuildKitHost,
+		defaultBuildRegistryPublishHost,
+		defaultRuntimeRegistryHost,
+		defaultRailpackFrontendImage,
+		defaultRegistryInsecure,
+		runner,
+	)
 
 	result, err := processor.Process(context.Background(), job{
 		ID:          "job-456",
@@ -106,17 +163,28 @@ func TestBuildProcessorCleansUpWorkspaceOnCloneFailure(t *testing.T) {
 	}
 }
 
-func TestBuildProcessorReturnsMetadataOnRailpackFailure(t *testing.T) {
+func TestBuildProcessorReturnsMetadataOnBuildctlFailure(t *testing.T) {
 	dataDir := t.TempDir()
 	runner := &recordingCommandRunner{
 		runFunc: func(command commandSpec) error {
-			if command.Name == "railpack" {
-				return errors.New("railpack failed")
+			if command.Name == "railpack" && len(command.Args) > 0 && command.Args[0] == "prepare" {
+				return os.WriteFile(command.Args[3], []byte("{}"), 0o644)
+			}
+			if command.Name == "buildctl" {
+				return errors.New("buildctl failed")
 			}
 			return nil
 		},
 	}
-	processor := newBuildProcessor(dataDir, defaultBuildKitHost, runner)
+	processor := newBuildProcessor(
+		dataDir,
+		defaultBuildKitHost,
+		defaultBuildRegistryPublishHost,
+		defaultRuntimeRegistryHost,
+		defaultRailpackFrontendImage,
+		defaultRegistryInsecure,
+		runner,
+	)
 
 	result, err := processor.Process(context.Background(), job{
 		ID:          "job-789",
@@ -126,14 +194,37 @@ func TestBuildProcessorReturnsMetadataOnRailpackFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected build to fail")
 	}
-	if !strings.Contains(err.Error(), "railpack build: railpack failed") {
-		t.Fatalf("expected railpack failure, got %v", err)
+	if !strings.Contains(err.Error(), "buildctl build: buildctl failed") {
+		t.Fatalf("expected buildctl failure, got %v", err)
 	}
-	if result.ImageRef != "alces-demo-app:job-789" {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-789", result.ImageRef)
+	if result.ImageRef != "localhost:5001/alces-demo-app:job-789" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-789", result.ImageRef)
 	}
 	if result.LogPath != filepath.Join(dataDir, jobLogsDirName, "job-789.log") {
 		t.Fatalf("expected log path %q, got %q", filepath.Join(dataDir, jobLogsDirName, "job-789.log"), result.LogPath)
+	}
+}
+
+func TestJobImageRefUsesOptionalRegistryHost(t *testing.T) {
+	currentJob := job{
+		ID:          "job-123",
+		ProjectName: "demo-app",
+	}
+
+	if got := jobImageRef(currentJob, ""); got != "alces-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", got)
+	}
+	if got := jobImageRef(currentJob, "localhost:5001"); got != "localhost:5001/alces-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-123", got)
+	}
+}
+
+func TestBuildctlImageOutputIncludesInsecureRegistryWhenRequested(t *testing.T) {
+	if got := buildctlImageOutput("example.com/demo:job-123", true); got != "type=image,name=example.com/demo:job-123,push=true,registry.insecure=true" {
+		t.Fatalf("unexpected insecure buildctl output: %q", got)
+	}
+	if got := buildctlImageOutput("example.com/demo:job-123", false); got != "type=image,name=example.com/demo:job-123,push=true" {
+		t.Fatalf("unexpected secure buildctl output: %q", got)
 	}
 }
 

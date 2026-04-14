@@ -3,20 +3,29 @@ package main
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 )
 
 const defaultDataDir = "/var/lib/alces"
-const defaultBuildKitHost = "tcp://buildkitd:1234"
+const defaultBuildKitHost = "docker-container://buildkit"
 const defaultProjectsHostDataDir = "/var/lib/alces/projects"
 const defaultPocketBaseImage = "elestio/pocketbase:latest"
+const defaultBuildRegistryPublishHost = "host.docker.internal:5001"
+const defaultRuntimeRegistryHost = "localhost:5001"
+const defaultRailpackFrontendImage = "ghcr.io/railwayapp/railpack-frontend"
+const defaultRegistryInsecure = true
 
 type config struct {
-	BrainAPIKey         string
-	DataDir             string
-	BuildKitHost        string
-	ProjectsHostDataDir string
-	PocketBaseImage     string
+	BrainAPIKey              string
+	DataDir                  string
+	BuildKitHost             string
+	BuildRegistryPublishHost string
+	RuntimeRegistryHost      string
+	RailpackFrontendImage    string
+	RegistryInsecure         bool
+	ProjectsHostDataDir      string
+	PocketBaseImage          string
 }
 
 func loadConfig() (config, error) {
@@ -30,6 +39,30 @@ func loadConfig() (config, error) {
 		buildKitHost = defaultBuildKitHost
 	}
 
+	buildRegistryPublishHost := strings.TrimSpace(os.Getenv("BUILD_REGISTRY_PUBLISH_HOST"))
+	if buildRegistryPublishHost == "" {
+		buildRegistryPublishHost = defaultBuildRegistryPublishHost
+	}
+
+	runtimeRegistryHost := strings.TrimSpace(os.Getenv("RUNTIME_REGISTRY_HOST"))
+	if runtimeRegistryHost == "" {
+		runtimeRegistryHost = defaultRuntimeRegistryHost
+	}
+
+	railpackFrontendImage := strings.TrimSpace(os.Getenv("RAILPACK_FRONTEND_IMAGE"))
+	if railpackFrontendImage == "" {
+		railpackFrontendImage = defaultRailpackFrontendImage
+	}
+
+	registryInsecure := defaultRegistryInsecure
+	if registryInsecureValue := strings.TrimSpace(os.Getenv("REGISTRY_INSECURE")); registryInsecureValue != "" {
+		parsedRegistryInsecure, err := strconv.ParseBool(registryInsecureValue)
+		if err != nil {
+			return config{}, errors.New("REGISTRY_INSECURE must be a boolean")
+		}
+		registryInsecure = parsedRegistryInsecure
+	}
+
 	projectsHostDataDir := strings.TrimSpace(os.Getenv("PROJECTS_HOST_DATA_DIR"))
 	if projectsHostDataDir == "" {
 		projectsHostDataDir = defaultProjectsHostDataDir
@@ -41,10 +74,14 @@ func loadConfig() (config, error) {
 	}
 
 	return config{
-		BrainAPIKey:         apiKey,
-		DataDir:             defaultDataDir,
-		BuildKitHost:        buildKitHost,
-		ProjectsHostDataDir: projectsHostDataDir,
-		PocketBaseImage:     pocketBaseImage,
+		BrainAPIKey:              apiKey,
+		DataDir:                  defaultDataDir,
+		BuildKitHost:             buildKitHost,
+		BuildRegistryPublishHost: buildRegistryPublishHost,
+		RuntimeRegistryHost:      runtimeRegistryHost,
+		RailpackFrontendImage:    railpackFrontendImage,
+		RegistryInsecure:         registryInsecure,
+		ProjectsHostDataDir:      projectsHostDataDir,
+		PocketBaseImage:          pocketBaseImage,
 	}, nil
 }

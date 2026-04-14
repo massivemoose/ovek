@@ -11,11 +11,20 @@ import (
 )
 
 const jobLogsDirName = "job-logs"
+const (
+	railpackPlanDirName  = "railpack-plan"
+	railpackPlanFileName = "railpack-plan.json"
+	railpackInfoFileName = "railpack-info.json"
+)
 
 type buildProcessor struct {
-	dataDir      string
-	buildKitHost string
-	runner       commandRunner
+	dataDir                  string
+	buildKitHost             string
+	buildRegistryPublishHost string
+	runtimeRegistryHost      string
+	railpackFrontendImage    string
+	registryInsecure         bool
+	runner                   commandRunner
 }
 
 type commandSpec struct {
@@ -32,22 +41,34 @@ type commandRunner interface {
 
 type systemCommandRunner struct{}
 
-func newBuildProcessor(dataDir string, buildKitHost string, runner commandRunner) buildProcessor {
+func newBuildProcessor(
+	dataDir string,
+	buildKitHost string,
+	buildRegistryPublishHost string,
+	runtimeRegistryHost string,
+	railpackFrontendImage string,
+	registryInsecure bool,
+	runner commandRunner,
+) buildProcessor {
 	if runner == nil {
 		runner = systemCommandRunner{}
 	}
 
 	return buildProcessor{
-		dataDir:      dataDir,
-		buildKitHost: buildKitHost,
-		runner:       runner,
+		dataDir:                  dataDir,
+		buildKitHost:             buildKitHost,
+		buildRegistryPublishHost: buildRegistryPublishHost,
+		runtimeRegistryHost:      runtimeRegistryHost,
+		railpackFrontendImage:    railpackFrontendImage,
+		registryInsecure:         registryInsecure,
+		runner:                   runner,
 	}
 }
 
 func (processor buildProcessor) Process(ctx context.Context, job job) (deploymentResult, error) {
 	result := deploymentResult{
 		LogPath:  jobLogPath(processor.dataDir, job.ID),
-		ImageRef: jobImageRef(job),
+		ImageRef: jobImageRef(job, processor.runtimeRegistryHost),
 	}
 
 	logFile, err := processor.createLogFile(result.LogPath)
@@ -75,17 +96,37 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 		return result, fmt.Errorf("git clone: %w", err)
 	}
 
+	planDir := filepath.Join(workspace, railpackPlanDirName)
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		return result, fmt.Errorf("create railpack plan directory: %w", err)
+	}
+
+	planPath := filepath.Join(planDir, railpackPlanFileName)
+	infoPath := filepath.Join(planDir, railpackInfoFileName)
 	if err := processor.runCommand(
 		ctx,
 		commandSpec{
 			Name:   "railpack",
-			Args:   []string{"build", "--name", result.ImageRef, workspace},
+			Args:   []string{"prepare", workspace, "--plan-out", planPath, "--info-out", infoPath, "--hide-pretty-plan"},
 			Env:    processor.commandEnv(),
 			Stdout: logFile,
 			Stderr: logFile,
 		},
 	); err != nil {
-		return result, fmt.Errorf("railpack build: %w", err)
+		return result, fmt.Errorf("railpack prepare: %w", err)
+	}
+
+	if err := processor.runCommand(
+		ctx,
+		commandSpec{
+			Name:   "buildctl",
+			Args:   processor.buildctlBuildArgs(workspace, planDir, job),
+			Env:    nil,
+			Stdout: logFile,
+			Stderr: logFile,
+		},
+	); err != nil {
+		return result, fmt.Errorf("buildctl build: %w", err)
 	}
 
 	return result, nil
@@ -130,6 +171,45 @@ func jobLogPath(dataDir string, jobID string) string {
 	return filepath.Join(dataDir, jobLogsDirName, jobID+".log")
 }
 
-func jobImageRef(job job) string {
+func (processor buildProcessor) buildctlBuildArgs(workspace string, planDir string, job job) []string {
+	args := make([]string, 0, 13)
+	if processor.buildKitHost != "" {
+		args = append(args, "--addr", processor.buildKitHost)
+	}
+
+	args = append(
+		args,
+		"build",
+		"--progress=plain",
+		"--local", "context="+workspace,
+		"--local", "dockerfile="+planDir,
+		"--frontend=gateway.v0",
+		"--opt", "source="+processor.railpackFrontendImage,
+		"--output", buildctlImageOutput(jobImageRef(job, processor.buildRegistryPublishHost), processor.registryInsecure),
+	)
+
+	return args
+}
+
+func jobImageName(job job) string {
 	return "alces-" + job.ProjectName + ":" + job.ID
+}
+
+func jobImageRef(job job, registryHost string) string {
+	imageName := jobImageName(job)
+	registryHost = strings.TrimSpace(registryHost)
+	if registryHost == "" {
+		return imageName
+	}
+
+	return strings.TrimRight(registryHost, "/") + "/" + imageName
+}
+
+func buildctlImageOutput(imageRef string, insecure bool) string {
+	output := "type=image,name=" + imageRef + ",push=true"
+	if insecure {
+		output += ",registry.insecure=true"
+	}
+
+	return output
 }

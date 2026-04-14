@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
+	dockerimage "github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -162,6 +164,10 @@ type fakeDockerClient struct {
 	containerInspectCalls           int
 	containerInspectResponse        dockercontainer.InspectResponse
 	containerInspectErr             error
+	imagePullRef                    string
+	imagePullOptions                dockerimage.PullOptions
+	imagePullResponse               io.ReadCloser
+	imagePullErr                    error
 	containerCreateName             string
 	containerCreateConfig           *dockercontainer.Config
 	containerCreateHostConfig       *dockercontainer.HostConfig
@@ -213,6 +219,19 @@ func (client *fakeDockerClient) ContainerInspect(_ context.Context, containerID 
 	client.containerInspectName = containerID
 	client.containerInspectCalls++
 	return client.containerInspectResponse, client.containerInspectErr
+}
+
+func (client *fakeDockerClient) ImagePull(_ context.Context, refStr string, options dockerimage.PullOptions) (io.ReadCloser, error) {
+	client.imagePullRef = refStr
+	client.imagePullOptions = options
+	if client.imagePullErr != nil {
+		return nil, client.imagePullErr
+	}
+	if client.imagePullResponse != nil {
+		return client.imagePullResponse, nil
+	}
+
+	return io.NopCloser(strings.NewReader("")), nil
 }
 
 func (client *fakeDockerClient) ContainerCreate(_ context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error) {

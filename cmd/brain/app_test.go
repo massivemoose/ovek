@@ -106,6 +106,9 @@ func TestDockerRuntimeEnsureProjectAppCreatesConnectsAndStartsManagedContainer(t
 	if client.containerCreateName != "alces-demo-app-app-dep-123" {
 		t.Fatalf("expected create name %q, got %q", "alces-demo-app-app-dep-123", client.containerCreateName)
 	}
+	if client.imagePullRef != "alces-demo-app:dep-123" {
+		t.Fatalf("expected image pull ref %q, got %q", "alces-demo-app:dep-123", client.imagePullRef)
+	}
 	if client.networkConnectNetwork != alcesEdgeNetworkName {
 		t.Fatalf("expected edge network %q, got %q", alcesEdgeNetworkName, client.networkConnectNetwork)
 	}
@@ -176,6 +179,9 @@ func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T
 	if client.containerCreateName != "" {
 		t.Fatalf("expected create not to be called, got %q", client.containerCreateName)
 	}
+	if client.imagePullRef != "" {
+		t.Fatalf("expected image pull not to be called, got %q", client.imagePullRef)
+	}
 	if client.networkConnectNetwork != "" {
 		t.Fatalf("expected edge connect not to be called, got %q", client.networkConnectNetwork)
 	}
@@ -242,8 +248,42 @@ func TestDockerRuntimeEnsureProjectAppConnectsStoppedContainerToEdgeNetworkAndSt
 	if client.networkConnectNetwork != alcesEdgeNetworkName {
 		t.Fatalf("expected edge network connect %q, got %q", alcesEdgeNetworkName, client.networkConnectNetwork)
 	}
+	if client.imagePullRef != "" {
+		t.Fatalf("expected image pull not to be called for an existing container, got %q", client.imagePullRef)
+	}
 	if client.containerStartID != "container-123" {
 		t.Fatalf("expected start ID %q, got %q", "container-123", client.containerStartID)
+	}
+}
+
+func TestDockerRuntimeEnsureProjectAppReturnsImagePullFailure(t *testing.T) {
+	client := &fakeDockerClient{
+		networkInspectResponse: dockernetwork.Inspect{
+			ID:   "network-123",
+			Name: "demo-app-net",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRoleProjectNetwork,
+			},
+		},
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		imagePullErr:        errors.New("pull failed"),
+	}
+	runtime := newDockerRuntime(client)
+
+	_, err := runtime.EnsureProjectApp(context.Background(), job{
+		ID:          "dep-123",
+		ProjectName: "demo-app",
+	}, "alces-demo-app:dep-123")
+	if err == nil {
+		t.Fatal("expected image pull failure")
+	}
+	if err.Error() != `pull image "alces-demo-app:dep-123": pull failed` {
+		t.Fatalf("expected image pull error, got %q", err.Error())
+	}
+	if client.containerCreateName != "" {
+		t.Fatalf("expected create not to be called after pull failure, got %q", client.containerCreateName)
 	}
 }
 
