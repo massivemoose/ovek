@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -266,6 +270,80 @@ func TestGetJobLogsStreamReturnsInternalServerErrorWhenInitialLogFileCannotBeRea
 	assertAPIError(t, recorder, http.StatusInternalServerError, errorCodeFetchJobLogsFailed, "failed to fetch job logs")
 }
 
+func TestStreamSSELogReaderBuffersSplitReadsUntilCompleteLine(t *testing.T) {
+	var body bytes.Buffer
+	flusher := &countingFlusher{}
+
+	logs := newScriptedReadCloser([]scriptedRead{
+		{data: "first "},
+		{data: "line\nsecond line\n", err: io.EOF},
+	})
+
+	err := streamSSELogReader(context.Background(), &body, flusher, logs)
+	if err != nil {
+		t.Fatalf("expected stream to succeed, got error: %v", err)
+	}
+
+	if got := body.String(); got != "data: first line\n\ndata: second line\n\n" {
+		t.Fatalf("expected combined SSE body, got %q", got)
+	}
+	if flusher.flushes != 1 {
+		t.Fatalf("expected 1 flush for complete lines, got %d", flusher.flushes)
+	}
+}
+
+func TestStreamSSELogReaderEmitsFinalUnterminatedLineAtEOF(t *testing.T) {
+	var body bytes.Buffer
+	flusher := &countingFlusher{}
+
+	logs := newScriptedReadCloser([]scriptedRead{
+		{data: "last line", err: io.EOF},
+	})
+
+	err := streamSSELogReader(context.Background(), &body, flusher, logs)
+	if err != nil {
+		t.Fatalf("expected stream to succeed, got error: %v", err)
+	}
+
+	if got := body.String(); got != "data: last line\n\n" {
+		t.Fatalf("expected final unterminated line to be emitted, got %q", got)
+	}
+	if flusher.flushes != 1 {
+		t.Fatalf("expected 1 flush at EOF, got %d", flusher.flushes)
+	}
+}
+
+func TestStreamSSELogReaderReturnsNilOnContextCancellation(t *testing.T) {
+	var body bytes.Buffer
+	flusher := &countingFlusher{}
+
+	logs := newBlockingReadCloser()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- streamSSELogReader(ctx, &body, flusher, logs)
+	}()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected cancellation to end cleanly, got error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected stream reader to exit after context cancellation")
+	}
+
+	if !logs.closed {
+		t.Fatal("expected blocking reader to be closed on cancellation")
+	}
+	if got := body.String(); got != "" {
+		t.Fatalf("expected no SSE body on cancellation, got %q", got)
+	}
+}
+
 func newJobLogsTestHandler(t *testing.T) (http.Handler, *sql.DB, string) {
 	t.Helper()
 
@@ -318,4 +396,74 @@ func assertSSEResponse(t *testing.T, recorder *httptest.ResponseRecorder, wantSt
 	if got := recorder.Body.String(); got != wantBody {
 		t.Fatalf("expected body %q, got %q", wantBody, got)
 	}
+}
+
+type countingFlusher struct {
+	flushes int
+}
+
+func (flusher *countingFlusher) Flush() {
+	flusher.flushes++
+}
+
+type scriptedRead struct {
+	data string
+	err  error
+}
+
+type scriptedReadCloser struct {
+	reads  []scriptedRead
+	closed bool
+}
+
+func newScriptedReadCloser(reads []scriptedRead) *scriptedReadCloser {
+	return &scriptedReadCloser{
+		reads: append([]scriptedRead(nil), reads...),
+	}
+}
+
+func (reader *scriptedReadCloser) Read(p []byte) (int, error) {
+	if len(reader.reads) == 0 {
+		return 0, io.EOF
+	}
+
+	next := reader.reads[0]
+	reader.reads = reader.reads[1:]
+	count := copy(p, next.data)
+	if count != len(next.data) {
+		panic("scripted read larger than destination buffer")
+	}
+
+	return count, next.err
+}
+
+func (reader *scriptedReadCloser) Close() error {
+	reader.closed = true
+	return nil
+}
+
+var errBlockingReadClosed = errors.New("blocking read closed")
+
+type blockingReadCloser struct {
+	closed    bool
+	closeOnce sync.Once
+	done      chan struct{}
+}
+
+func newBlockingReadCloser() *blockingReadCloser {
+	return &blockingReadCloser{done: make(chan struct{})}
+}
+
+func (reader *blockingReadCloser) Read(_ []byte) (int, error) {
+	<-reader.done
+	return 0, errBlockingReadClosed
+}
+
+func (reader *blockingReadCloser) Close() error {
+	reader.closeOnce.Do(func() {
+		reader.closed = true
+		close(reader.done)
+	})
+
+	return nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -322,6 +323,55 @@ func TestGetProjectRuntimeLogsStreamReturnsSSELogs(t *testing.T) {
 	assertSSEResponse(t, recorder, http.StatusOK, "data: first line\n\ndata: second line\n\n")
 }
 
+func TestGetProjectRuntimeLogsStreamReturnsInternalServerErrorWhenWriterCannotFlush(t *testing.T) {
+	handler := handleGetProjectRuntimeLogsStream(fakeProjectRuntimeService{
+		streamReader: newScriptedReadCloser([]scriptedRead{{data: "hello\n", err: io.EOF}}),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime/logs/stream", nil)
+	request.SetPathValue("projectName", "alpha-app")
+	writer := newNonFlushingResponseWriter()
+
+	handler.ServeHTTP(writer, request)
+
+	assertGenericAPIError(t, writer.status, writer.header, writer.body.String(), http.StatusInternalServerError, errorCodeFetchRuntimeLogsFailed, "failed to fetch runtime logs")
+}
+
+func TestGetProjectRuntimeLogsStreamWritesSSEErrorEventAfterReadFailure(t *testing.T) {
+	handler := handleGetProjectRuntimeLogsStream(fakeProjectRuntimeService{
+		streamReader: newScriptedReadCloser([]scriptedRead{
+			{data: "first line\n"},
+			{err: errors.New("boom")},
+		}),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime/logs/stream", nil)
+	request.SetPathValue("projectName", "alpha-app")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertSSEResponse(t, recorder, http.StatusOK, "data: first line\n\nevent: error\ndata: failed to fetch runtime logs\n\n")
+}
+
+func TestGetProjectRuntimeLogsStreamBuffersChunkedReadsIntoCompleteLines(t *testing.T) {
+	handler := handleGetProjectRuntimeLogsStream(fakeProjectRuntimeService{
+		streamReader: newScriptedReadCloser([]scriptedRead{
+			{data: "first "},
+			{data: "line\nsecond"},
+			{data: " line", err: io.EOF},
+		}),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime/logs/stream", nil)
+	request.SetPathValue("projectName", "alpha-app")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertSSEResponse(t, recorder, http.StatusOK, "data: first line\n\ndata: second line\n\n")
+}
+
 func TestGetProjectRuntimeRejectsInvalidProjectName(t *testing.T) {
 	handler := handleGetProjectRuntime(noopProjectRuntimeService{})
 
@@ -499,6 +549,7 @@ type fakeProjectRuntimeService struct {
 	logsErr       error
 	streamLogs    string
 	streamLogsErr error
+	streamReader  io.ReadCloser
 }
 
 func (service fakeProjectRuntimeService) GetRuntime(context.Context, string) (projectRuntimeView, error) {
@@ -517,6 +568,9 @@ func (service fakeProjectRuntimeService) StreamRuntimeLogs(context.Context, stri
 	if service.streamLogsErr != nil {
 		return nil, service.streamLogsErr
 	}
+	if service.streamReader != nil {
+		return service.streamReader, nil
+	}
 
 	return io.NopCloser(bytes.NewBufferString(service.streamLogs)), nil
 }
@@ -526,5 +580,55 @@ func assertJSONContains(t *testing.T, body string, want string) {
 
 	if !strings.Contains(body, want) {
 		t.Fatalf("expected body to contain %q, got %q", want, body)
+	}
+}
+
+type nonFlushingResponseWriter struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func newNonFlushingResponseWriter() *nonFlushingResponseWriter {
+	return &nonFlushingResponseWriter{
+		header: make(http.Header),
+	}
+}
+
+func (writer *nonFlushingResponseWriter) Header() http.Header {
+	return writer.header
+}
+
+func (writer *nonFlushingResponseWriter) Write(data []byte) (int, error) {
+	if writer.status == 0 {
+		writer.status = http.StatusOK
+	}
+
+	return writer.body.Write(data)
+}
+
+func (writer *nonFlushingResponseWriter) WriteHeader(statusCode int) {
+	writer.status = statusCode
+}
+
+func assertGenericAPIError(t *testing.T, gotStatus int, headers http.Header, body string, wantStatus int, wantCode string, wantMessage string) {
+	t.Helper()
+
+	if gotStatus != wantStatus {
+		t.Fatalf("expected status %d, got %d", wantStatus, gotStatus)
+	}
+	if got := headers.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("expected Content-Type %q, got %q", "application/json", got)
+	}
+
+	var response apiError
+	if err := json.Unmarshal([]byte(body), &response); err != nil {
+		t.Fatalf("expected error response body to decode, got error: %v", err)
+	}
+	if response.Code != wantCode {
+		t.Fatalf("expected error code %q, got %q", wantCode, response.Code)
+	}
+	if response.Message != wantMessage {
+		t.Fatalf("expected error message %q, got %q", wantMessage, response.Message)
 	}
 }
