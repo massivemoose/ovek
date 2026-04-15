@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,7 +60,7 @@ func TestManagedProjectCleanerRemovesManagedResourcesInOrderAndClearsRuntimeStat
 		},
 	}
 
-	err := newManagedProjectCleaner(db, runtime).Cleanup(context.Background(), "demo-app")
+	err := newManagedProjectCleaner(db, runtime, defaultDataDir).Cleanup(context.Background(), "demo-app")
 	if err != nil {
 		t.Fatalf("expected cleanup to succeed, got error: %v", err)
 	}
@@ -113,7 +115,7 @@ func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t 
 		removeAppErr: errors.New("stop failed"),
 	}
 
-	err := newManagedProjectCleaner(db, runtime).Cleanup(context.Background(), "demo-app")
+	err := newManagedProjectCleaner(db, runtime, defaultDataDir).Cleanup(context.Background(), "demo-app")
 	if err == nil {
 		t.Fatal("expected cleanup to fail")
 	}
@@ -148,7 +150,7 @@ func TestManagedProjectCleanerIsIdempotentWhenRuntimeResourcesAreAlreadyGone(t *
 	})
 
 	runtime := &fakeProjectCleanupRuntime{}
-	cleaner := newManagedProjectCleaner(db, runtime)
+	cleaner := newManagedProjectCleaner(db, runtime, defaultDataDir)
 
 	if err := cleaner.Cleanup(context.Background(), "demo-app"); err != nil {
 		t.Fatalf("expected first cleanup to succeed, got error: %v", err)
@@ -199,7 +201,7 @@ func TestManagedProjectCleanerCleansUpDeploymentImagesAfterRuntimeTeardown(t *te
 	})
 
 	artifactCleaner := &fakeRegistryArtifactCleaner{}
-	err := newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, artifactCleaner).Cleanup(context.Background(), "demo-app")
+	err := newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, defaultDataDir, artifactCleaner).Cleanup(context.Background(), "demo-app")
 	if err != nil {
 		t.Fatalf("expected cleanup to succeed, got error: %v", err)
 	}
@@ -228,7 +230,7 @@ func TestManagedProjectCleanerLogsArtifactCleanupFailuresButStillSucceeds(t *tes
 
 	artifactCleaner := &fakeRegistryArtifactCleaner{err: errors.New("registry delete failed")}
 	logs := captureTestLogs(t, func() {
-		err := newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, artifactCleaner).Cleanup(context.Background(), "demo-app")
+		err := newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, defaultDataDir, artifactCleaner).Cleanup(context.Background(), "demo-app")
 		if err != nil {
 			t.Fatalf("expected cleanup to succeed, got error: %v", err)
 		}
@@ -239,11 +241,166 @@ func TestManagedProjectCleanerLogsArtifactCleanupFailuresButStillSucceeds(t *tes
 	}
 }
 
+func TestManagedProjectCleanerRemovesManagedProjectJobLogFiles(t *testing.T) {
+	dataDir := t.TempDir()
+	db, err := openBrainDB(dataDir)
+	if err != nil {
+		t.Fatalf("expected test database to open, got error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	demoJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected demo job creation to succeed, got error: %v", err)
+	}
+	otherJob, err := createQueuedJob(db, "other-app", "https://example.com/other.git")
+	if err != nil {
+		t.Fatalf("expected other job creation to succeed, got error: %v", err)
+	}
+
+	demoLogPath := jobLogPath(dataDir, demoJob.ID)
+	otherLogPath := jobLogPath(dataDir, otherJob.ID)
+	if err := os.MkdirAll(filepath.Dir(demoLogPath), 0o755); err != nil {
+		t.Fatalf("expected demo log dir creation to succeed, got error: %v", err)
+	}
+	if err := os.WriteFile(demoLogPath, []byte("demo logs\n"), 0o644); err != nil {
+		t.Fatalf("expected demo log write to succeed, got error: %v", err)
+	}
+	if err := os.WriteFile(otherLogPath, []byte("other logs\n"), 0o644); err != nil {
+		t.Fatalf("expected other log write to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET log_path = ? WHERE id = ?", demoLogPath, demoJob.ID); err != nil {
+		t.Fatalf("expected demo log path update to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET log_path = ? WHERE id = ?", otherLogPath, otherJob.ID); err != nil {
+		t.Fatalf("expected other log path update to succeed, got error: %v", err)
+	}
+
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+
+	err = newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir).Cleanup(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected cleanup to succeed, got error: %v", err)
+	}
+
+	if _, err := os.Stat(demoLogPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected demo log file %q to be removed, got error %v", demoLogPath, err)
+	}
+	if _, err := os.Stat(otherLogPath); err != nil {
+		t.Fatalf("expected other log file %q to remain, got error %v", otherLogPath, err)
+	}
+}
+
+func TestManagedProjectCleanerSkipsJobLogFilesOutsideManagedDirectory(t *testing.T) {
+	dataDir := t.TempDir()
+	db, err := openBrainDB(dataDir)
+	if err != nil {
+		t.Fatalf("expected test database to open, got error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	outsideLogPath := filepath.Join(t.TempDir(), "outside.log")
+	if err := os.WriteFile(outsideLogPath, []byte("outside\n"), 0o644); err != nil {
+		t.Fatalf("expected outside log write to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET log_path = ? WHERE id = ?", outsideLogPath, createdJob.ID); err != nil {
+		t.Fatalf("expected log path update to succeed, got error: %v", err)
+	}
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+
+	err = newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir).Cleanup(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected cleanup to succeed, got error: %v", err)
+	}
+
+	if _, err := os.Stat(outsideLogPath); err != nil {
+		t.Fatalf("expected outside log file %q to remain, got error %v", outsideLogPath, err)
+	}
+}
+
+func TestManagedProjectCleanerLogsJobLogCleanupFailuresButStillSucceeds(t *testing.T) {
+	dataDir := t.TempDir()
+	db, err := openBrainDB(dataDir)
+	if err != nil {
+		t.Fatalf("expected test database to open, got error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	logPath := jobLogPath(dataDir, createdJob.ID)
+	if err := os.MkdirAll(logPath, 0o755); err != nil {
+		t.Fatalf("expected failing log path setup to succeed, got error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logPath, "child.log"), []byte("child\n"), 0o644); err != nil {
+		t.Fatalf("expected child log write to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET log_path = ? WHERE id = ?", logPath, createdJob.ID); err != nil {
+		t.Fatalf("expected log path update to succeed, got error: %v", err)
+	}
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+
+	logs := captureTestLogs(t, func() {
+		err := newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir).Cleanup(context.Background(), "demo-app")
+		if err != nil {
+			t.Fatalf("expected cleanup to succeed, got error: %v", err)
+		}
+	})
+
+	if !strings.Contains(logs, `warning: failed to clean up project "demo-app" log file "`) {
+		t.Fatalf("expected log cleanup warning, got %q", logs)
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("expected failing log path %q to remain, got error %v", logPath, err)
+	}
+}
+
 func TestManagedProjectCleanerReturnsNotFoundForUnknownProject(t *testing.T) {
 	db := newTestDB(t)
 	runtime := &fakeProjectCleanupRuntime{}
 
-	err := newManagedProjectCleaner(db, runtime).Cleanup(context.Background(), "demo-app")
+	err := newManagedProjectCleaner(db, runtime, defaultDataDir).Cleanup(context.Background(), "demo-app")
 	if !errors.Is(err, errProjectNotFound) {
 		t.Fatalf("expected project not found error, got %v", err)
 	}
@@ -275,7 +432,7 @@ func TestDeleteProjectRuntimeEndpointReturnsNoContent(t *testing.T) {
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, noopEnqueuer{}, newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}), noopProjectRuntimeService{})
+	}, db, noopEnqueuer{}, newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir), noopProjectRuntimeService{})
 
 	request := httptest.NewRequest(http.MethodDelete, "/v1/projects/demo-app/runtime", nil)
 	request.Header.Set("X-API-Key", "test-key")
@@ -319,7 +476,7 @@ func TestDeleteProjectRuntimeEndpointReturnsNotFoundForUnknownProject(t *testing
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, noopEnqueuer{}, newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}), noopProjectRuntimeService{})
+	}, db, noopEnqueuer{}, newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir), noopProjectRuntimeService{})
 
 	request := httptest.NewRequest(http.MethodDelete, "/v1/projects/demo-app/runtime", nil)
 	request.Header.Set("X-API-Key", "test-key")

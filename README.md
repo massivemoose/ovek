@@ -83,13 +83,14 @@ The registry exposes host port `5001`, while the Brain container reaches its API
 Brain now treats registry-backed deployment images as managed artifacts.
 
 - When a deployment successfully supersedes an older deployment, Brain attempts to delete the superseded image manifest from the local managed registry.
-- When `DELETE /v1/projects/{projectName}/runtime` succeeds, Brain also attempts to delete the project's stored deployment image manifests.
+- When `DELETE /v1/projects/{projectName}/runtime` succeeds, Brain also attempts to delete the project's stored deployment image manifests and managed build log files.
 - Artifact cleanup is best-effort. Deploy success and runtime cleanup success do not get downgraded just because a manifest delete was skipped or failed.
 
 Current scope:
 
 - cleanup only targets refs that match `RUNTIME_REGISTRY_HOST`
 - cleanup removes manifest reachability through the registry API
+- cleanup only removes job log files that live under Brain's managed `job-logs` directory
 - offline blob garbage collection is still out of scope
 
 ## Local Validation

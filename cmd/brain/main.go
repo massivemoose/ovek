@@ -57,7 +57,7 @@ func main() {
 		cfg.RegistryAPIBaseURL,
 		&http.Client{},
 	)
-	cleaner := newManagedProjectCleaner(db, runtime, artifactCleaner)
+	cleaner := newManagedProjectCleaner(db, runtime, cfg.DataDir, artifactCleaner)
 	projectRuntimeService := newManagedProjectRuntimeService(db, runtime)
 	jobManager := newJobManager(db, processor, artifactCleaner)
 	workerContext, cancelWorker := context.WithCancel(context.Background())

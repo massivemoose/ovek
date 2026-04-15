@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -24,18 +26,24 @@ type projectCleanupRuntime interface {
 }
 
 type managedProjectCleaner struct {
+	dataDir         string
 	db              *sql.DB
 	runtime         projectCleanupRuntime
 	artifactCleaner registryArtifactCleaner
 }
 
-func newManagedProjectCleaner(db *sql.DB, runtime projectCleanupRuntime, artifactCleaners ...registryArtifactCleaner) managedProjectCleaner {
+func newManagedProjectCleaner(db *sql.DB, runtime projectCleanupRuntime, dataDir string, artifactCleaners ...registryArtifactCleaner) managedProjectCleaner {
 	var artifactCleaner registryArtifactCleaner
 	if len(artifactCleaners) > 0 {
 		artifactCleaner = artifactCleaners[0]
 	}
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		dataDir = defaultDataDir
+	}
 
 	return managedProjectCleaner{
+		dataDir:         dataDir,
 		db:              db,
 		runtime:         runtime,
 		artifactCleaner: artifactCleaner,
@@ -54,6 +62,10 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 	imageRefs, err := listProjectDeploymentImageRefs(cleaner.db, projectName)
 	if err != nil {
 		log.Printf("warning: failed to list deployment images for project %q cleanup: %v", projectName, err)
+	}
+	logPaths, err := listProjectJobLogPaths(cleaner.db, projectName)
+	if err != nil {
+		log.Printf("warning: failed to list job logs for project %q cleanup: %v", projectName, err)
 	}
 
 	apps, err := cleaner.runtime.ListProjectApps(ctx, projectName)
@@ -76,6 +88,7 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 		return err
 	}
 	cleaner.cleanupProjectImages(ctx, projectName, imageRefs)
+	cleaner.cleanupProjectLogFiles(projectName, logPaths)
 
 	return nil
 }
@@ -90,6 +103,46 @@ func (cleaner managedProjectCleaner) cleanupProjectImages(ctx context.Context, p
 			log.Printf("warning: failed to clean up project %q image %q: %v", projectName, imageRef, err)
 		}
 	}
+}
+
+func (cleaner managedProjectCleaner) cleanupProjectLogFiles(projectName string, logPaths []string) {
+	for _, logPath := range dedupeStrings(logPaths) {
+		managedLogPath, ok := managedJobLogPath(cleaner.dataDir, logPath)
+		if !ok {
+			continue
+		}
+		if err := os.Remove(managedLogPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			log.Printf("warning: failed to clean up project %q log file %q: %v", projectName, managedLogPath, err)
+		}
+	}
+}
+
+func managedJobLogPath(dataDir string, logPath string) (string, bool) {
+	logPath = strings.TrimSpace(logPath)
+	if logPath == "" {
+		return "", false
+	}
+
+	baseDir, err := filepath.Abs(filepath.Join(dataDir, jobLogsDirName))
+	if err != nil {
+		return "", false
+	}
+	candidatePath, err := filepath.Abs(logPath)
+	if err != nil {
+		return "", false
+	}
+	relativePath, err := filepath.Rel(baseDir, candidatePath)
+	if err != nil {
+		return "", false
+	}
+	if relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+
+	return candidatePath, true
 }
 
 func handleDeleteProjectRuntime(cleaner projectCleanupService) http.HandlerFunc {
@@ -163,4 +216,35 @@ func clearProjectRuntimeState(db *sql.DB, projectName string) error {
 	}
 
 	return nil
+}
+
+func listProjectJobLogPaths(db *sql.DB, projectName string) ([]string, error) {
+	rows, err := db.Query(
+		`SELECT log_path
+		 FROM jobs
+		 WHERE project_name = ? AND log_path IS NOT NULL
+		 ORDER BY created_at ASC`,
+		projectName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list job log paths for project %q: %w", projectName, err)
+	}
+	defer rows.Close()
+
+	var logPaths []string
+	for rows.Next() {
+		var logPath sql.NullString
+		if err := rows.Scan(&logPath); err != nil {
+			return nil, fmt.Errorf("scan job log path for project %q: %w", projectName, err)
+		}
+		if logPath.Valid {
+			logPaths = append(logPaths, logPath.String)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate job log paths for project %q: %w", projectName, err)
+	}
+
+	return logPaths, nil
 }
