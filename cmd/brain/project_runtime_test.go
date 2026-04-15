@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -80,6 +83,52 @@ func TestManagedProjectRuntimeServiceReturnsProjectNotFound(t *testing.T) {
 	}
 }
 
+func TestManagedProjectRuntimeServiceReadsCurrentRuntimeLogs(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-alpha",
+		ProjectName:             "alpha-app",
+		ImageRef:                "alces-alpha-app:dep-alpha",
+		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		NetworkName:             "alpha-app-net",
+		PocketBaseContainerName: "alces-alpha-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-10T00:00:00Z",
+	})
+
+	service := newManagedProjectRuntimeService(db, fakeProjectRuntimeReader{
+		logsByDeploymentID: map[string]string{
+			"dep-alpha": "hello from app\n",
+		},
+	})
+
+	logs, err := service.ReadRuntimeLogs(context.Background(), "alpha-app")
+	if err != nil {
+		t.Fatalf("expected runtime log read to succeed, got error: %v", err)
+	}
+	defer logs.Close()
+
+	body, err := io.ReadAll(logs)
+	if err != nil {
+		t.Fatalf("expected runtime log stream to read, got error: %v", err)
+	}
+
+	if string(body) != "hello from app\n" {
+		t.Fatalf("expected body %q, got %q", "hello from app\n", string(body))
+	}
+}
+
+func TestManagedProjectRuntimeServiceReturnsRuntimeNotFoundWithoutCurrentDeployment(t *testing.T) {
+	db := newTestDB(t)
+	seedProjectRecord(t, db, "alpha-app")
+	service := newManagedProjectRuntimeService(db, fakeProjectRuntimeReader{})
+
+	_, err := service.ReadRuntimeLogs(context.Background(), "alpha-app")
+	if !errors.Is(err, errProjectRuntimeNotFound) {
+		t.Fatalf("expected runtime not found error, got %v", err)
+	}
+}
+
 func TestGetProjectRuntimeReturnsRuntimeSummary(t *testing.T) {
 	dataDir := t.TempDir()
 	db, err := openBrainDB(dataDir)
@@ -153,10 +202,67 @@ func TestGetProjectRuntimeReturnsRuntimeSummary(t *testing.T) {
 	assertJSONContains(t, recorder.Body.String(), `"network":{"name":"alpha-app-net"}`)
 }
 
+func TestGetProjectRuntimeLogsReturnsPlainTextLogs(t *testing.T) {
+	dataDir := t.TempDir()
+	db, err := openBrainDB(dataDir)
+	if err != nil {
+		t.Fatalf("expected test database to open, got error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-alpha",
+		ProjectName:             "alpha-app",
+		ImageRef:                "alces-alpha-app:dep-alpha",
+		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		NetworkName:             "alpha-app-net",
+		PocketBaseContainerName: "alces-alpha-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-10T00:00:00Z",
+	})
+
+	handler := newHandler(
+		config{
+			BrainAPIKey: "test-key",
+			DataDir:     dataDir,
+		},
+		db,
+		noopEnqueuer{},
+		noopProjectCleaner{},
+		newManagedProjectRuntimeService(db, fakeProjectRuntimeReader{
+			logsByDeploymentID: map[string]string{
+				"dep-alpha": "hello from app\n",
+			},
+		}),
+	)
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime/logs", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertTextResponse(t, recorder, http.StatusOK, "hello from app\n")
+}
+
 func TestGetProjectRuntimeRejectsInvalidProjectName(t *testing.T) {
 	handler := handleGetProjectRuntime(noopProjectRuntimeService{})
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/projects/demo-app/runtime", nil)
+	request.SetPathValue("projectName", "Demo App")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+}
+
+func TestGetProjectRuntimeLogsRejectsInvalidProjectName(t *testing.T) {
+	handler := handleGetProjectRuntimeLogs(noopProjectRuntimeService{})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/demo-app/runtime/logs", nil)
 	request.SetPathValue("projectName", "Demo App")
 	recorder := httptest.NewRecorder()
 
@@ -177,13 +283,51 @@ func TestGetProjectRuntimeReturnsNotFoundForUnknownProject(t *testing.T) {
 	assertAPIError(t, recorder, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
 }
 
+func TestGetProjectRuntimeLogsReturnsNotFoundForUnknownProject(t *testing.T) {
+	handler := handleGetProjectRuntimeLogs(fakeProjectRuntimeService{logsErr: errProjectNotFound})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/missing-app/runtime/logs", nil)
+	request.SetPathValue("projectName", "missing-app")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+}
+
+func TestGetProjectRuntimeLogsReturnsNotFoundWhenProjectHasNoCurrentRuntime(t *testing.T) {
+	handler := handleGetProjectRuntimeLogs(fakeProjectRuntimeService{logsErr: errProjectRuntimeNotFound})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime/logs", nil)
+	request.SetPathValue("projectName", "alpha-app")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusNotFound, errorCodeProjectRuntimeNotFound, "project runtime not found")
+}
+
+func TestGetProjectRuntimeLogsReturnsInternalServerErrorOnReadFailure(t *testing.T) {
+	handler := handleGetProjectRuntimeLogs(fakeProjectRuntimeService{logsErr: errors.New("boom")})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime/logs", nil)
+	request.SetPathValue("projectName", "alpha-app")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusInternalServerError, errorCodeFetchRuntimeLogsFailed, "failed to fetch runtime logs")
+}
+
 type fakeProjectRuntimeReader struct {
 	appsByProject       map[string][]projectAppRuntime
 	pocketBaseByProject map[string]projectRuntimeContainer
 	networkByProject    map[string]projectRuntimeNetwork
+	logsByDeploymentID  map[string]string
 	listErr             error
 	pocketBaseErr       error
 	networkErr          error
+	logsErr             error
 }
 
 func (runtime fakeProjectRuntimeReader) ListProjectApps(_ context.Context, projectName string) ([]projectAppRuntime, error) {
@@ -212,13 +356,31 @@ func (runtime fakeProjectRuntimeReader) GetProjectNetworkRuntime(_ context.Conte
 	return network, ok, nil
 }
 
+func (runtime fakeProjectRuntimeReader) ReadProjectAppLogs(_ context.Context, deployment deploymentRecord, _ projectAppLogsOptions) (io.ReadCloser, error) {
+	if runtime.logsErr != nil {
+		return nil, runtime.logsErr
+	}
+
+	return io.NopCloser(strings.NewReader(runtime.logsByDeploymentID[deployment.ID])), nil
+}
+
 type fakeProjectRuntimeService struct {
 	runtimeView projectRuntimeView
 	err         error
+	logs        string
+	logsErr     error
 }
 
 func (service fakeProjectRuntimeService) GetRuntime(context.Context, string) (projectRuntimeView, error) {
 	return service.runtimeView, service.err
+}
+
+func (service fakeProjectRuntimeService) ReadRuntimeLogs(context.Context, string) (io.ReadCloser, error) {
+	if service.logsErr != nil {
+		return nil, service.logsErr
+	}
+
+	return io.NopCloser(bytes.NewBufferString(service.logs)), nil
 }
 
 func assertJSONContains(t *testing.T, body string, want string) {

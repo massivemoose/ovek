@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -37,12 +38,14 @@ type projectRuntimeView struct {
 
 type projectRuntimeService interface {
 	GetRuntime(ctx context.Context, projectName string) (projectRuntimeView, error)
+	ReadRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error)
 }
 
 type projectRuntimeReader interface {
 	ListProjectApps(ctx context.Context, projectName string) ([]projectAppRuntime, error)
 	GetProjectPocketBaseRuntime(ctx context.Context, projectName string) (projectRuntimeContainer, bool, error)
 	GetProjectNetworkRuntime(ctx context.Context, projectName string) (projectRuntimeNetwork, bool, error)
+	ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options projectAppLogsOptions) (io.ReadCloser, error)
 }
 
 type managedProjectRuntimeService struct {
@@ -76,6 +79,35 @@ func handleGetProjectRuntime(service projectRuntimeService) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, runtimeView)
+	}
+}
+
+func handleGetProjectRuntimeLogs(service projectRuntimeService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		logs, err := service.ReadRuntimeLogs(r.Context(), projectName)
+		if errors.Is(err, errProjectNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+			return
+		}
+		if errors.Is(err, errProjectRuntimeNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectRuntimeNotFound, "project runtime not found")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeFetchRuntimeLogsFailed, "failed to fetch runtime logs")
+			return
+		}
+		defer logs.Close()
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, logs)
 	}
 }
 
@@ -135,6 +167,37 @@ func (service managedProjectRuntimeService) GetRuntime(ctx context.Context, proj
 	}
 
 	return runtimeView, nil
+}
+
+var errProjectRuntimeNotFound = errors.New("project runtime not found")
+
+func (service managedProjectRuntimeService) ReadRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error) {
+	project, err := getProject(service.db, projectName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errProjectNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get project %q: %w", projectName, err)
+	}
+
+	if project.CurrentDeploymentID == nil || strings.TrimSpace(*project.CurrentDeploymentID) == "" {
+		return nil, errProjectRuntimeNotFound
+	}
+
+	currentDeployment, found, err := getProjectCurrentDeployment(service.db, projectName)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errProjectRuntimeNotFound
+	}
+
+	logs, err := service.runtime.ReadProjectAppLogs(ctx, currentDeployment, projectAppLogsOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("read runtime logs for project %q: %w", projectName, err)
+	}
+
+	return logs, nil
 }
 
 func (runtime *dockerRuntime) GetProjectPocketBaseRuntime(ctx context.Context, projectName string) (projectRuntimeContainer, bool, error) {

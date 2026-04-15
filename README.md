@@ -26,6 +26,11 @@ The local Compose stack includes:
 
 Brain creates tenant app containers and per-project PocketBase sidecars dynamically through the Docker API. Those app containers are not part of the static Compose file.
 
+Current project runtime reads now include:
+
+- `GET /v1/projects/{projectName}/runtime`
+- `GET /v1/projects/{projectName}/runtime/logs`
+
 ## Registry And Builder Config
 
 Brain currently supports these registry- and builder-related settings:
