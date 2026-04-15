@@ -164,6 +164,10 @@ type fakeDockerClient struct {
 	containerInspectCalls           int
 	containerInspectResponse        dockercontainer.InspectResponse
 	containerInspectErr             error
+	containerLogsName               string
+	containerLogsOptions            dockercontainer.LogsOptions
+	containerLogsResponse           io.ReadCloser
+	containerLogsErr                error
 	imagePullRef                    string
 	imagePullOptions                dockerimage.PullOptions
 	imagePullResponse               io.ReadCloser
@@ -219,6 +223,19 @@ func (client *fakeDockerClient) ContainerInspect(_ context.Context, containerID 
 	client.containerInspectName = containerID
 	client.containerInspectCalls++
 	return client.containerInspectResponse, client.containerInspectErr
+}
+
+func (client *fakeDockerClient) ContainerLogs(_ context.Context, container string, options dockercontainer.LogsOptions) (io.ReadCloser, error) {
+	client.containerLogsName = container
+	client.containerLogsOptions = options
+	if client.containerLogsErr != nil {
+		return nil, client.containerLogsErr
+	}
+	if client.containerLogsResponse != nil {
+		return client.containerLogsResponse, nil
+	}
+
+	return io.NopCloser(strings.NewReader("")), nil
 }
 
 func (client *fakeDockerClient) ImagePull(_ context.Context, refStr string, options dockerimage.PullOptions) (io.ReadCloser, error) {

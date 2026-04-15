@@ -46,6 +46,7 @@ type dockerClient interface {
 	NetworkRemove(ctx context.Context, networkID string) error
 	ContainerList(ctx context.Context, options dockercontainer.ListOptions) ([]dockercontainer.Summary, error)
 	ContainerInspect(ctx context.Context, containerID string) (dockercontainer.InspectResponse, error)
+	ContainerLogs(ctx context.Context, container string, options dockercontainer.LogsOptions) (io.ReadCloser, error)
 	ImagePull(ctx context.Context, refStr string, options dockerimage.PullOptions) (io.ReadCloser, error)
 	ContainerCreate(ctx context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string, options dockercontainer.StartOptions) error
