@@ -204,6 +204,10 @@ func (noopProjectRuntimeService) ReadRuntimeLogs(context.Context, string) (io.Re
 	return io.NopCloser(strings.NewReader("")), nil
 }
 
+func (noopProjectRuntimeService) StreamRuntimeLogs(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
 type recordingEnqueuer struct {
 	jobIDs []string
 }
