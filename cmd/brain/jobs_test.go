@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -197,6 +198,10 @@ type noopProjectRuntimeService struct{}
 
 func (noopProjectRuntimeService) GetRuntime(context.Context, string) (projectRuntimeView, error) {
 	return projectRuntimeView{}, nil
+}
+
+func (noopProjectRuntimeService) ReadRuntimeLogs(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
 }
 
 type recordingEnqueuer struct {

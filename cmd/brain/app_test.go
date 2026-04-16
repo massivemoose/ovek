@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 func TestNewAppContainerSpec(t *testing.T) {
@@ -106,6 +108,9 @@ func TestDockerRuntimeEnsureProjectAppCreatesConnectsAndStartsManagedContainer(t
 	if client.containerCreateName != "alces-demo-app-app-dep-123" {
 		t.Fatalf("expected create name %q, got %q", "alces-demo-app-app-dep-123", client.containerCreateName)
 	}
+	if client.imagePullRef != "alces-demo-app:dep-123" {
+		t.Fatalf("expected image pull ref %q, got %q", "alces-demo-app:dep-123", client.imagePullRef)
+	}
 	if client.networkConnectNetwork != alcesEdgeNetworkName {
 		t.Fatalf("expected edge network %q, got %q", alcesEdgeNetworkName, client.networkConnectNetwork)
 	}
@@ -176,6 +181,9 @@ func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T
 	if client.containerCreateName != "" {
 		t.Fatalf("expected create not to be called, got %q", client.containerCreateName)
 	}
+	if client.imagePullRef != "" {
+		t.Fatalf("expected image pull not to be called, got %q", client.imagePullRef)
+	}
 	if client.networkConnectNetwork != "" {
 		t.Fatalf("expected edge connect not to be called, got %q", client.networkConnectNetwork)
 	}
@@ -242,8 +250,42 @@ func TestDockerRuntimeEnsureProjectAppConnectsStoppedContainerToEdgeNetworkAndSt
 	if client.networkConnectNetwork != alcesEdgeNetworkName {
 		t.Fatalf("expected edge network connect %q, got %q", alcesEdgeNetworkName, client.networkConnectNetwork)
 	}
+	if client.imagePullRef != "" {
+		t.Fatalf("expected image pull not to be called for an existing container, got %q", client.imagePullRef)
+	}
 	if client.containerStartID != "container-123" {
 		t.Fatalf("expected start ID %q, got %q", "container-123", client.containerStartID)
+	}
+}
+
+func TestDockerRuntimeEnsureProjectAppReturnsImagePullFailure(t *testing.T) {
+	client := &fakeDockerClient{
+		networkInspectResponse: dockernetwork.Inspect{
+			ID:   "network-123",
+			Name: "demo-app-net",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRoleProjectNetwork,
+			},
+		},
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		imagePullErr:        errors.New("pull failed"),
+	}
+	runtime := newDockerRuntime(client)
+
+	_, err := runtime.EnsureProjectApp(context.Background(), job{
+		ID:          "dep-123",
+		ProjectName: "demo-app",
+	}, "alces-demo-app:dep-123")
+	if err == nil {
+		t.Fatal("expected image pull failure")
+	}
+	if err.Error() != `pull image "alces-demo-app:dep-123": pull failed` {
+		t.Fatalf("expected image pull error, got %q", err.Error())
+	}
+	if client.containerCreateName != "" {
+		t.Fatalf("expected create not to be called after pull failure, got %q", client.containerCreateName)
 	}
 }
 
@@ -454,6 +496,163 @@ func TestDockerRuntimeListProjectAppsReturnsManagedProjectApps(t *testing.T) {
 	}
 	if !client.containerListOptions.All {
 		t.Fatal("expected container listing to include stopped containers")
+	}
+}
+
+func TestDockerRuntimeReadProjectAppLogsReturnsCombinedManagedContainerLogs(t *testing.T) {
+	var rawLogs bytes.Buffer
+	if _, err := stdcopy.NewStdWriter(&rawLogs, stdcopy.Stdout).Write([]byte("app line\n")); err != nil {
+		t.Fatalf("expected stdout frame write to succeed, got error: %v", err)
+	}
+	if _, err := stdcopy.NewStdWriter(&rawLogs, stdcopy.Stderr).Write([]byte("warn line\n")); err != nil {
+		t.Fatalf("expected stderr frame write to succeed, got error: %v", err)
+	}
+
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+			},
+			Config: &dockercontainer.Config{
+				Labels: map[string]string{
+					managedLabelKey:    managedLabelValue,
+					projectLabelKey:    "demo-app",
+					roleLabelKey:       resourceRoleApp,
+					deploymentLabelKey: "dep-current",
+				},
+			},
+		},
+		containerLogsResponse: io.NopCloser(bytes.NewReader(rawLogs.Bytes())),
+	}
+	runtime := newDockerRuntime(client)
+
+	logs, err := runtime.ReadProjectAppLogs(context.Background(), deploymentRecord{
+		ID:               "dep-current",
+		ProjectName:      "demo-app",
+		AppContainerName: "alces-demo-app-app-dep-current",
+	}, projectAppLogsOptions{})
+	if err != nil {
+		t.Fatalf("expected app log read to succeed, got error: %v", err)
+	}
+	defer logs.Close()
+
+	logBytes, err := io.ReadAll(logs)
+	if err != nil {
+		t.Fatalf("expected app log stream read to succeed, got error: %v", err)
+	}
+
+	if string(logBytes) != "app line\nwarn line\n" {
+		t.Fatalf("expected combined log output %q, got %q", "app line\nwarn line\n", string(logBytes))
+	}
+	if client.containerInspectName != "alces-demo-app-app-dep-current" {
+		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-app-dep-current", client.containerInspectName)
+	}
+	if client.containerLogsName != "alces-demo-app-app-dep-current" {
+		t.Fatalf("expected logs name %q, got %q", "alces-demo-app-app-dep-current", client.containerLogsName)
+	}
+	if !client.containerLogsOptions.ShowStdout || !client.containerLogsOptions.ShowStderr {
+		t.Fatalf("expected stdout and stderr logs to be enabled, got %#v", client.containerLogsOptions)
+	}
+	if client.containerLogsOptions.Follow {
+		t.Fatalf("expected follow false by default, got %#v", client.containerLogsOptions)
+	}
+	if client.containerLogsOptions.Tail != "all" {
+		t.Fatalf("expected tail %q, got %q", "all", client.containerLogsOptions.Tail)
+	}
+}
+
+func TestDockerRuntimeReadProjectAppLogsSupportsFollow(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+			},
+			Config: &dockercontainer.Config{
+				Labels: map[string]string{
+					managedLabelKey:    managedLabelValue,
+					projectLabelKey:    "demo-app",
+					roleLabelKey:       resourceRoleApp,
+					deploymentLabelKey: "dep-current",
+				},
+			},
+		},
+		containerLogsResponse: io.NopCloser(strings.NewReader("")),
+	}
+	runtime := newDockerRuntime(client)
+
+	logs, err := runtime.ReadProjectAppLogs(context.Background(), deploymentRecord{
+		ID:               "dep-current",
+		ProjectName:      "demo-app",
+		AppContainerName: "alces-demo-app-app-dep-current",
+	}, projectAppLogsOptions{Follow: true})
+	if err != nil {
+		t.Fatalf("expected app log read to succeed, got error: %v", err)
+	}
+	_ = logs.Close()
+
+	if !client.containerLogsOptions.Follow {
+		t.Fatalf("expected follow true, got %#v", client.containerLogsOptions)
+	}
+}
+
+func TestDockerRuntimeReadProjectAppLogsRejectsUnmanagedContainer(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+			},
+			Config: &dockercontainer.Config{
+				Labels: map[string]string{},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	_, err := runtime.ReadProjectAppLogs(context.Background(), deploymentRecord{
+		ID:               "dep-current",
+		ProjectName:      "demo-app",
+		AppContainerName: "alces-demo-app-app-dep-current",
+	}, projectAppLogsOptions{})
+	if err == nil {
+		t.Fatal("expected unmanaged app log read to fail")
+	}
+	if got := err.Error(); got != "alces-demo-app-app-dep-current already exists but is not managed by alces" {
+		t.Fatalf("expected unmanaged container error, got %q", got)
+	}
+	if client.containerLogsName != "" {
+		t.Fatalf("expected container logs not to be called, got %q", client.containerLogsName)
+	}
+}
+
+func TestDockerRuntimeReadProjectAppLogsReturnsContainerLogFailure(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+			},
+			Config: &dockercontainer.Config{
+				Labels: map[string]string{
+					managedLabelKey:    managedLabelValue,
+					projectLabelKey:    "demo-app",
+					roleLabelKey:       resourceRoleApp,
+					deploymentLabelKey: "dep-current",
+				},
+			},
+		},
+		containerLogsErr: errors.New("logs failed"),
+	}
+	runtime := newDockerRuntime(client)
+
+	_, err := runtime.ReadProjectAppLogs(context.Background(), deploymentRecord{
+		ID:               "dep-current",
+		ProjectName:      "demo-app",
+		AppContainerName: "alces-demo-app-app-dep-current",
+	}, projectAppLogsOptions{})
+	if err == nil {
+		t.Fatal("expected app log read to fail")
+	}
+	if got := err.Error(); got != `read app container "alces-demo-app-app-dep-current" logs: logs failed` {
+		t.Fatalf("expected container log error, got %q", got)
 	}
 }
 

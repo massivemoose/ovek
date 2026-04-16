@@ -39,14 +39,27 @@ func main() {
 
 	processor := newManagedDeploymentProcessor(
 		db,
-		newBuildProcessor(cfg.DataDir, cfg.BuildKitHost, systemCommandRunner{}),
+		newBuildProcessor(
+			cfg.DataDir,
+			cfg.BuildKitHost,
+			cfg.BuildRegistryPublishHost,
+			cfg.RuntimeRegistryHost,
+			cfg.RailpackFrontendImage,
+			cfg.RegistryInsecure,
+			systemCommandRunner{},
+		),
 		runtime,
 		cfg.ProjectsHostDataDir,
 		cfg.PocketBaseImage,
 	)
-	cleaner := newManagedProjectCleaner(db, runtime)
+	artifactCleaner := newRegistryArtifactCleaner(
+		cfg.RuntimeRegistryHost,
+		cfg.RegistryAPIBaseURL,
+		&http.Client{},
+	)
+	cleaner := newManagedProjectCleaner(db, runtime, cfg.DataDir, artifactCleaner)
 	projectRuntimeService := newManagedProjectRuntimeService(db, runtime)
-	jobManager := newJobManager(db, processor)
+	jobManager := newJobManager(db, processor, artifactCleaner)
 	workerContext, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
 
@@ -80,6 +93,7 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("GET /v1/projects", handleListProjects(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}", handleGetProject(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs", handleGetProjectRuntimeLogs(projectRuntimeService))
 	apiMux.HandleFunc("POST /v1/projects/{projectName}/deployments", handleCreateDeployment(db, enqueuer))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs", handleGetJobLogs(db, cfg.DataDir))

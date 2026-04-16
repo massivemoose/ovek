@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -45,16 +46,23 @@ type deploymentProcessor interface {
 }
 
 type jobManager struct {
-	db        *sql.DB
-	processor deploymentProcessor
-	queue     chan string
+	db              *sql.DB
+	processor       deploymentProcessor
+	artifactCleaner registryArtifactCleaner
+	queue           chan string
 }
 
-func newJobManager(db *sql.DB, processor deploymentProcessor) *jobManager {
+func newJobManager(db *sql.DB, processor deploymentProcessor, artifactCleaners ...registryArtifactCleaner) *jobManager {
+	var artifactCleaner registryArtifactCleaner
+	if len(artifactCleaners) > 0 {
+		artifactCleaner = artifactCleaners[0]
+	}
+
 	return &jobManager{
-		db:        db,
-		processor: processor,
-		queue:     make(chan string, defaultJobQueueSize),
+		db:              db,
+		processor:       processor,
+		artifactCleaner: artifactCleaner,
+		queue:           make(chan string, defaultJobQueueSize),
 	}
 }
 
@@ -124,7 +132,10 @@ func (manager *jobManager) processJob(ctx context.Context, jobID string) {
 	finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := markJobSucceeded(manager.db, job, finishedAt, result); err != nil {
 		log.Printf("failed to mark job %s as succeeded: %v", jobID, err)
+		return
 	}
+
+	manager.cleanupSupersededDeploymentImage(ctx, job.ProjectName, result.SupersededDeploymentID)
 }
 
 func listQueuedJobIDs(db *sql.DB) ([]string, error) {
@@ -439,4 +450,42 @@ func requireUpdatedRow(result sql.Result, operation string) error {
 	}
 
 	return nil
+}
+
+func (manager *jobManager) cleanupSupersededDeploymentImage(ctx context.Context, projectName string, deploymentID string) {
+	if manager.artifactCleaner == nil || strings.TrimSpace(deploymentID) == "" {
+		return
+	}
+
+	imageRef, found, err := getDeploymentImageRef(manager.db, projectName, deploymentID)
+	if err != nil {
+		log.Printf("warning: failed to load superseded deployment %q image for project %q cleanup: %v", deploymentID, projectName, err)
+		return
+	}
+	if !found {
+		log.Printf("warning: superseded deployment %q image for project %q was missing during cleanup", deploymentID, projectName)
+		return
+	}
+	if err := manager.artifactCleaner.CleanupImage(ctx, imageRef); err != nil {
+		log.Printf("warning: failed to clean up superseded deployment %q image %q: %v", deploymentID, imageRef, err)
+	}
+}
+
+func getDeploymentImageRef(db *sql.DB, projectName string, deploymentID string) (string, bool, error) {
+	var imageRef string
+	err := db.QueryRow(
+		`SELECT image_ref
+		 FROM deployments
+		 WHERE id = ? AND project_name = ?`,
+		deploymentID,
+		projectName,
+	).Scan(&imageRef)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("get deployment %q image ref for project %q: %w", deploymentID, projectName, err)
+	}
+
+	return imageRef, true, nil
 }

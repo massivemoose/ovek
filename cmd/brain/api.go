@@ -15,6 +15,8 @@ const (
 	errorCodeListProjectsFailed        = "list_projects_failed"
 	errorCodeFetchProjectFailed        = "fetch_project_failed"
 	errorCodeFetchProjectRuntimeFailed = "fetch_project_runtime_failed"
+	errorCodeProjectRuntimeNotFound    = "project_runtime_not_found"
+	errorCodeFetchRuntimeLogsFailed    = "fetch_runtime_logs_failed"
 	errorCodeJobIDRequired             = "job_id_required"
 	errorCodeJobNotFound               = "job_not_found"
 	errorCodeFetchJobFailed            = "fetch_job_failed"

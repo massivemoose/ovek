@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/pkg/stdcopy"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -62,6 +64,10 @@ type projectAppRuntime struct {
 	Running                 bool
 }
 
+type projectAppLogsOptions struct {
+	Follow bool
+}
+
 func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error) {
 	network, err := runtime.EnsureProjectNetwork(ctx, job.ProjectName)
 	if err != nil {
@@ -94,6 +100,10 @@ func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, ima
 	}
 	if !cerrdefs.IsNotFound(err) {
 		return "", fmt.Errorf("inspect app container %q: %w", spec.Name, err)
+	}
+
+	if err := runtime.PullImage(ctx, spec.Config.Image); err != nil {
+		return "", err
 	}
 
 	createResponse, err := runtime.client.ContainerCreate(
@@ -199,15 +209,44 @@ func (runtime *dockerRuntime) RemoveProjectApp(ctx context.Context, deployment d
 	if container.Config == nil {
 		return fmt.Errorf("app container %q is missing config", deployment.AppContainerName)
 	}
-	if err := requireManagedResourceOwnership(deployment.AppContainerName, container.Config.Labels, managedResourceMetadata{
-		ProjectName:  deployment.ProjectName,
-		Role:         resourceRoleApp,
-		DeploymentID: deployment.ID,
-	}); err != nil {
+	if err := validateManagedProjectAppContainer(deployment, container); err != nil {
 		return err
 	}
 
 	return runtime.removeManagedContainer(ctx, deployment.AppContainerName, container, "app container")
+}
+
+func (runtime *dockerRuntime) ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options projectAppLogsOptions) (io.ReadCloser, error) {
+	container, err := runtime.client.ContainerInspect(ctx, deployment.AppContainerName)
+	if err != nil {
+		return nil, fmt.Errorf("inspect app container %q: %w", deployment.AppContainerName, err)
+	}
+	if container.Config == nil {
+		return nil, fmt.Errorf("app container %q is missing config", deployment.AppContainerName)
+	}
+	if err := validateManagedProjectAppContainer(deployment, container); err != nil {
+		return nil, err
+	}
+
+	logs, err := runtime.client.ContainerLogs(ctx, deployment.AppContainerName, dockercontainer.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     options.Follow,
+		Tail:       "all",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read app container %q logs: %w", deployment.AppContainerName, err)
+	}
+
+	reader, writer := io.Pipe()
+	go func() {
+		defer logs.Close()
+
+		_, copyErr := stdcopy.StdCopy(writer, writer, logs)
+		_ = writer.CloseWithError(copyErr)
+	}()
+
+	return reader, nil
 }
 
 func (runtime *dockerRuntime) ListProjectApps(ctx context.Context, projectName string) ([]projectAppRuntime, error) {
@@ -325,6 +364,14 @@ func validateExistingAppContainer(container dockercontainer.InspectResponse, spe
 	}
 
 	return nil
+}
+
+func validateManagedProjectAppContainer(deployment deploymentRecord, container dockercontainer.InspectResponse) error {
+	return requireManagedResourceOwnership(deployment.AppContainerName, container.Config.Labels, managedResourceMetadata{
+		ProjectName:  deployment.ProjectName,
+		Role:         resourceRoleApp,
+		DeploymentID: deployment.ID,
+	})
 }
 
 func (runtime *dockerRuntime) ensureAppEdgeNetworkAttachment(ctx context.Context, containerID string, networkSettings *dockercontainer.NetworkSettings, spec appContainerSpec) error {

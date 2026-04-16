@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
+	dockerimage "github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -44,6 +46,8 @@ type dockerClient interface {
 	NetworkRemove(ctx context.Context, networkID string) error
 	ContainerList(ctx context.Context, options dockercontainer.ListOptions) ([]dockercontainer.Summary, error)
 	ContainerInspect(ctx context.Context, containerID string) (dockercontainer.InspectResponse, error)
+	ContainerLogs(ctx context.Context, container string, options dockercontainer.LogsOptions) (io.ReadCloser, error)
+	ImagePull(ctx context.Context, refStr string, options dockerimage.PullOptions) (io.ReadCloser, error)
 	ContainerCreate(ctx context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string, options dockercontainer.StartOptions) error
 	ContainerStop(ctx context.Context, containerID string, options dockercontainer.StopOptions) error
@@ -78,6 +82,20 @@ func newDockerRuntime(client dockerClient) *dockerRuntime {
 		dialContext: (&net.Dialer{Timeout: appReadinessDialTime}).DialContext,
 		sleep:       sleepWithContext,
 	}
+}
+
+func (runtime *dockerRuntime) PullImage(ctx context.Context, imageRef string) error {
+	pullResponse, err := runtime.client.ImagePull(ctx, imageRef, dockerimage.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pull image %q: %w", imageRef, err)
+	}
+	defer pullResponse.Close()
+
+	if _, err := io.Copy(io.Discard, pullResponse); err != nil {
+		return fmt.Errorf("read image pull response for %q: %w", imageRef, err)
+	}
+
+	return nil
 }
 
 func (runtime *dockerRuntime) removeManagedContainer(ctx context.Context, containerName string, container dockercontainer.InspectResponse, resourceType string) error {
