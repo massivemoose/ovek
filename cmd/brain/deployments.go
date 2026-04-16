@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -41,6 +42,39 @@ func handleListProjectDeployments(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func handleGetProjectDeployment(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		exists, err := projectExists(db, projectName)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeFetchDeploymentFailed, "failed to fetch deployment")
+			return
+		}
+		if !exists {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+			return
+		}
+
+		deploymentID := strings.TrimSpace(r.PathValue("deploymentID"))
+		deployment, err := getProjectDeployment(db, projectName, deploymentID)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, errorCodeDeploymentNotFound, "deployment not found")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeFetchDeploymentFailed, "failed to fetch deployment")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, deployment)
+	}
+}
+
 func listProjectDeployments(db *sql.DB, projectName string, limit int) ([]deploymentRecord, error) {
 	rows, err := db.Query(
 		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at
@@ -70,6 +104,18 @@ func listProjectDeployments(db *sql.DB, projectName string, limit int) ([]deploy
 	}
 
 	return deployments, nil
+}
+
+func getProjectDeployment(db *sql.DB, projectName string, deploymentID string) (deploymentRecord, error) {
+	return scanDeploymentRecord(
+		db.QueryRow(
+			`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at
+			 FROM deployments
+			 WHERE project_name = ? AND id = ?`,
+			projectName,
+			deploymentID,
+		),
+	)
 }
 
 type deploymentRecordScanner interface {
