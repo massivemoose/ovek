@@ -44,7 +44,7 @@ func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	brainClient, err := loadConfiguredClient(cmd.config)
+	brainClient, _, err := loadConfiguredClient(cmd.config, "")
 	if err != nil {
 		return err
 	}

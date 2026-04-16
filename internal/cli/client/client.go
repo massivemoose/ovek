@@ -42,6 +42,7 @@ func (err *APIError) Error() string {
 type Client struct {
 	baseURL      *url.URL
 	apiKey       string
+	reauthToken  string
 	httpClient   *http.Client
 	streamClient *http.Client
 }
@@ -111,6 +112,66 @@ func (client *Client) Ping(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (client *Client) Bootstrap(ctx context.Context, requestBody brainapi.BootstrapAuthRequest) (brainapi.BootstrapAuthResponse, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.BootstrapAuthResponse{}, fmt.Errorf("marshal bootstrap request: %w", err)
+	}
+
+	request, err := client.newRequest(ctx, http.MethodPost, "/v1/auth/bootstrap", bytes.NewReader(payload))
+	if err != nil {
+		return brainapi.BootstrapAuthResponse{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.BootstrapAuthResponse{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.BootstrapAuthResponse{}, err
+	}
+
+	var bootstrapResponse brainapi.BootstrapAuthResponse
+	if err := json.NewDecoder(response.Body).Decode(&bootstrapResponse); err != nil {
+		return brainapi.BootstrapAuthResponse{}, fmt.Errorf("decode bootstrap response: %w", err)
+	}
+
+	return bootstrapResponse, nil
+}
+
+func (client *Client) Reauth(ctx context.Context, password string) (brainapi.ReauthResponse, error) {
+	payload, err := json.Marshal(brainapi.ReauthRequest{Password: password})
+	if err != nil {
+		return brainapi.ReauthResponse{}, fmt.Errorf("marshal reauth request: %w", err)
+	}
+
+	request, err := client.newRequest(ctx, http.MethodPost, "/v1/auth/reauth", bytes.NewReader(payload))
+	if err != nil {
+		return brainapi.ReauthResponse{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.ReauthResponse{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.ReauthResponse{}, err
+	}
+
+	var reauthResponse brainapi.ReauthResponse
+	if err := json.NewDecoder(response.Body).Decode(&reauthResponse); err != nil {
+		return brainapi.ReauthResponse{}, fmt.Errorf("decode reauth response: %w", err)
+	}
+
+	return reauthResponse, nil
 }
 
 func (client *Client) GetProjects(ctx context.Context, limit int) ([]brainapi.ProjectSummary, error) {
@@ -352,8 +413,15 @@ func (client *Client) newRequest(ctx context.Context, method string, requestPath
 	if client.apiKey != "" {
 		request.Header.Set("X-API-Key", client.apiKey)
 	}
+	if client.reauthToken != "" {
+		request.Header.Set("X-Alces-Reauth-Token", client.reauthToken)
+	}
 
 	return request, nil
+}
+
+func (client *Client) SetReauthToken(token string) {
+	client.reauthToken = strings.TrimSpace(token)
 }
 
 func decodeAPIError(response *http.Response) error {

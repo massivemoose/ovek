@@ -23,7 +23,7 @@ func TestLogsReadsRuntimeSnapshot(t *testing.T) {
 	defer server.Close()
 
 	store := config.NewStore(t.TempDir())
-	if err := store.Save(config.Config{Host: server.URL, APIKey: "test-key"}); err != nil {
+	if err := store.SaveProfile("default", config.Profile{Host: server.URL, APIKey: "test-key"}, true); err != nil {
 		t.Fatalf("expected config save to succeed, got error: %v", err)
 	}
 
@@ -51,7 +51,7 @@ func TestLogsStreamsJobLogs(t *testing.T) {
 	defer server.Close()
 
 	store := config.NewStore(t.TempDir())
-	if err := store.Save(config.Config{Host: server.URL, APIKey: "test-key"}); err != nil {
+	if err := store.SaveProfile("default", config.Profile{Host: server.URL, APIKey: "test-key"}, true); err != nil {
 		t.Fatalf("expected config save to succeed, got error: %v", err)
 	}
 

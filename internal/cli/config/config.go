@@ -6,18 +6,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 const (
 	DefaultHost     = "http://brain.localhost"
+	DefaultProfile  = "default"
 	dirPermissions  = 0o700
 	filePermissions = 0o600
 )
 
 var ErrNotFound = errors.New("config not found")
+var ErrProfileNotFound = errors.New("profile not found")
+
+type Profile struct {
+	Host   string `json:"host"`
+	APIKey string `json:"apiKey"`
+}
 
 type Config struct {
+	ActiveProfile string             `json:"activeProfile"`
+	Profiles      map[string]Profile `json:"profiles"`
+}
+
+type legacyConfig struct {
 	Host   string `json:"host"`
 	APIKey string `json:"apiKey"`
 }
@@ -58,14 +71,28 @@ func (store *Store) Load() (Config, error) {
 	}
 
 	var cfg Config
-	if err := json.Unmarshal(payload, &cfg); err != nil {
+	if err := json.Unmarshal(payload, &cfg); err == nil && len(cfg.Profiles) > 0 {
+		return normalizeConfig(cfg), nil
+	}
+
+	var legacy legacyConfig
+	if err := json.Unmarshal(payload, &legacy); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
 
-	cfg.Host = normalizeHost(cfg.Host)
-	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
+	if strings.TrimSpace(legacy.Host) == "" && strings.TrimSpace(legacy.APIKey) == "" {
+		return Config{}, fmt.Errorf("decode config: invalid config schema")
+	}
 
-	return cfg, nil
+	return normalizeConfig(Config{
+		ActiveProfile: DefaultProfile,
+		Profiles: map[string]Profile{
+			DefaultProfile: {
+				Host:   legacy.Host,
+				APIKey: legacy.APIKey,
+			},
+		},
+	}), nil
 }
 
 func (store *Store) Save(cfg Config) error {
@@ -74,8 +101,7 @@ func (store *Store) Save(cfg Config) error {
 		return err
 	}
 
-	cfg.Host = normalizeHost(cfg.Host)
-	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
+	cfg = normalizeConfig(cfg)
 
 	if err := os.MkdirAll(filepath.Dir(configPath), dirPermissions); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
@@ -100,6 +126,91 @@ func (store *Store) Save(cfg Config) error {
 	return nil
 }
 
+func (store *Store) SaveProfile(profileName string, profile Profile, makeActive bool) error {
+	cfg, err := store.Load()
+	if errors.Is(err, ErrNotFound) {
+		cfg = Config{Profiles: map[string]Profile{}}
+	} else if err != nil {
+		return err
+	}
+
+	profileName = normalizeProfileName(profileName)
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]Profile{}
+	}
+	cfg.Profiles[profileName] = normalizeProfile(profile)
+	if makeActive || cfg.ActiveProfile == "" {
+		cfg.ActiveProfile = profileName
+	}
+
+	return store.Save(cfg)
+}
+
+func (store *Store) LoadProfile(profileName string) (string, Profile, error) {
+	cfg, err := store.Load()
+	if err != nil {
+		return "", Profile{}, err
+	}
+
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		profileName = strings.TrimSpace(cfg.ActiveProfile)
+	}
+	if profileName == "" {
+		return "", Profile{}, ErrProfileNotFound
+	}
+
+	profile, ok := cfg.Profiles[profileName]
+	if !ok {
+		return "", Profile{}, ErrProfileNotFound
+	}
+
+	return profileName, normalizeProfile(profile), nil
+}
+
+func (store *Store) SetActiveProfile(profileName string) error {
+	cfg, err := store.Load()
+	if err != nil {
+		return err
+	}
+
+	profileName = normalizeProfileName(profileName)
+	if _, ok := cfg.Profiles[profileName]; !ok {
+		return ErrProfileNotFound
+	}
+	cfg.ActiveProfile = profileName
+	return store.Save(cfg)
+}
+
+func (store *Store) RemoveProfile(profileName string) error {
+	cfg, err := store.Load()
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	profileName = strings.TrimSpace(profileName)
+	if profileName == "" {
+		profileName = strings.TrimSpace(cfg.ActiveProfile)
+	}
+	if profileName == "" {
+		return nil
+	}
+
+	delete(cfg.Profiles, profileName)
+	if len(cfg.Profiles) == 0 {
+		return store.Clear()
+	}
+	if cfg.ActiveProfile == profileName {
+		names := profileNames(cfg)
+		cfg.ActiveProfile = names[0]
+	}
+
+	return store.Save(cfg)
+}
+
 func (store *Store) Clear() error {
 	configPath, err := store.Path()
 	if err != nil {
@@ -115,6 +226,50 @@ func (store *Store) Clear() error {
 	return nil
 }
 
+func normalizeConfig(cfg Config) Config {
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]Profile{}
+	}
+
+	normalizedProfiles := make(map[string]Profile, len(cfg.Profiles))
+	for name, profile := range cfg.Profiles {
+		name = normalizeProfileName(name)
+		normalizedProfiles[name] = normalizeProfile(profile)
+	}
+	cfg.Profiles = normalizedProfiles
+
+	if strings.TrimSpace(cfg.ActiveProfile) == "" && len(cfg.Profiles) == 1 {
+		cfg.ActiveProfile = profileNames(cfg)[0]
+	}
+	cfg.ActiveProfile = strings.TrimSpace(cfg.ActiveProfile)
+	if cfg.ActiveProfile != "" {
+		if _, ok := cfg.Profiles[cfg.ActiveProfile]; !ok {
+			names := profileNames(cfg)
+			if len(names) > 0 {
+				cfg.ActiveProfile = names[0]
+			} else {
+				cfg.ActiveProfile = ""
+			}
+		}
+	}
+
+	return cfg
+}
+
+func normalizeProfile(profile Profile) Profile {
+	profile.Host = normalizeHost(profile.Host)
+	profile.APIKey = strings.TrimSpace(profile.APIKey)
+	return profile
+}
+
+func normalizeProfileName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return DefaultProfile
+	}
+	return name
+}
+
 func normalizeHost(host string) string {
 	host = strings.TrimSpace(host)
 	if host == "" {
@@ -122,4 +277,13 @@ func normalizeHost(host string) string {
 	}
 
 	return strings.TrimRight(host, "/")
+}
+
+func profileNames(cfg Config) []string {
+	names := make([]string, 0, len(cfg.Profiles))
+	for name := range cfg.Profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

@@ -83,6 +83,58 @@ func TestCreateDeploymentReturnsStructuredAPIError(t *testing.T) {
 	}
 }
 
+func TestBootstrapDecodesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(brainapi.BootstrapAuthResponse{
+			Username: "admin",
+			APIKey:   "ak_test",
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	response, err := client.Bootstrap(context.Background(), brainapi.BootstrapAuthRequest{
+		Username: "admin",
+		Password: "secret-pass",
+	})
+	if err != nil {
+		t.Fatalf("expected bootstrap to succeed, got error: %v", err)
+	}
+	if response.APIKey != "ak_test" || response.Username != "admin" {
+		t.Fatalf("expected bootstrap response to decode, got %#v", response)
+	}
+}
+
+func TestReauthSendsBaselineAPIKeyAndDecodesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-API-Key"); got != "test-key" {
+			t.Fatalf("expected api key header %q, got %q", "test-key", got)
+		}
+		_ = json.NewEncoder(w).Encode(brainapi.ReauthResponse{
+			ReauthToken: "rt_test",
+			ExpiresAt:   "2026-04-16T00:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	response, err := client.Reauth(context.Background(), "secret-pass")
+	if err != nil {
+		t.Fatalf("expected reauth to succeed, got error: %v", err)
+	}
+	if response.ReauthToken != "rt_test" {
+		t.Fatalf("expected reauth token %q, got %q", "rt_test", response.ReauthToken)
+	}
+}
+
 func TestReadSSEDataEmitsOnlyDataLines(t *testing.T) {
 	stream := strings.NewReader("event: message\ndata: first\n\ndata: second\n\n")
 	var lines []string

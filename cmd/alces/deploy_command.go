@@ -15,14 +15,16 @@ import (
 )
 
 type deployCommand struct {
-	stdout io.Writer
-	config *config.Store
+	stdout  io.Writer
+	config  *config.Store
+	prompts prompter
 }
 
-func newDeployCommand(stdout io.Writer, store *config.Store) command.Command {
+func newDeployCommand(stdout io.Writer, store *config.Store, prompts prompter) command.Command {
 	return &deployCommand{
-		stdout: stdout,
-		config: store,
+		stdout:  stdout,
+		config:  store,
+		prompts: prompts,
 	}
 }
 
@@ -46,7 +48,7 @@ func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 	projectName := flagSet.Arg(0)
 	repoURL := flagSet.Arg(1)
 
-	brainClient, err := loadConfiguredClient(cmd.config)
+	brainClient, _, err := loadConfiguredClient(cmd.config, "")
 	if err != nil {
 		return err
 	}

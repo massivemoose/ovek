@@ -12,15 +12,15 @@ import (
 )
 
 func main() {
-	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
-func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) int {
-	return runApp(ctx, args, stdout, stderr, config.NewStore(""))
+func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	return runApp(ctx, args, stdin, stdout, stderr, config.NewStore(""))
 }
 
-func runApp(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, store *config.Store) int {
-	router := newRootRouter(stdout, stderr, store)
+func runApp(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, store *config.Store) int {
+	router := newRootRouter(stdin, stdout, stderr, store)
 	err := router.Run(ctx, args)
 	switch {
 	case err == nil:
@@ -34,12 +34,13 @@ func runApp(ctx context.Context, args []string, stdout io.Writer, stderr io.Writ
 	}
 }
 
-func newRootRouter(stdout io.Writer, stderr io.Writer, store *config.Store) *command.Router {
+func newRootRouter(stdin io.Reader, stdout io.Writer, stderr io.Writer, store *config.Store) *command.Router {
+	prompts := newStdioPrompter(stdin, stdout)
 	return command.NewRouter(
 		"alces",
 		"Alces CLI for working with the Brain control plane.",
-		newAuthCommand(stdout, stderr, store),
-		newDeployCommand(stdout, store),
+		newAuthCommand(stdout, stderr, store, prompts),
+		newDeployCommand(stdout, store, prompts),
 		newLogsCommand(stdout, store),
 		newStatusCommand(stdout, store),
 	)
