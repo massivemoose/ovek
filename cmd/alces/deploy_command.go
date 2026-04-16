@@ -53,7 +53,7 @@ func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	job, err := brainClient.CreateDeployment(ctx, projectName, brainapi.CreateDeploymentRequest{RepoURL: repoURL})
+	job, err := cmd.createDeployment(ctx, brainClient, projectName, repoURL)
 	if err != nil {
 		return err
 	}
@@ -121,6 +121,34 @@ func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 
 func (cmd *deployCommand) Usage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "Usage:\n  alces deploy <project> <repoURL>\n")
+}
+
+func (cmd *deployCommand) createDeployment(ctx context.Context, brainClient *client.Client, projectName string, repoURL string) (brainapi.Job, error) {
+	job, err := brainClient.CreateDeployment(ctx, projectName, brainapi.CreateDeploymentRequest{RepoURL: repoURL})
+	if err == nil {
+		return job, nil
+	}
+
+	var apiErr *client.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "reauth_required" {
+		return brainapi.Job{}, err
+	}
+
+	password, promptErr := cmd.prompts.PromptPassword("Password: ")
+	if promptErr != nil {
+		return brainapi.Job{}, promptErr
+	}
+	if password == "" {
+		return brainapi.Job{}, fmt.Errorf("password is required")
+	}
+
+	reauthResponse, reauthErr := brainClient.Reauth(ctx, password)
+	if reauthErr != nil {
+		return brainapi.Job{}, fmt.Errorf("reauthenticate: %w", reauthErr)
+	}
+	brainClient.SetReauthToken(reauthResponse.ReauthToken)
+
+	return brainClient.CreateDeployment(ctx, projectName, brainapi.CreateDeploymentRequest{RepoURL: repoURL})
 }
 
 func (cmd *deployCommand) followJobLogs(ctx context.Context, brainClient *client.Client, jobID string) error {
