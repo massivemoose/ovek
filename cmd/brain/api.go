@@ -7,6 +7,10 @@ import (
 
 const (
 	errorCodeUnauthorized              = "unauthorized"
+	errorCodeReauthRequired            = "reauth_required"
+	errorCodeAuthBootstrapDisabled     = "auth_bootstrap_disabled"
+	errorCodeAuthBootstrapFailed       = "auth_bootstrap_failed"
+	errorCodeAuthReauthFailed          = "auth_reauth_failed"
 	errorCodeInvalidRequestBody        = "invalid_request_body"
 	errorCodeInvalidProjectName        = "invalid_project_name"
 	errorCodeInvalidLimit              = "invalid_limit"

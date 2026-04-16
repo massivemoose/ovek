@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestLoadConfigRequiresAPIKey(t *testing.T) {
+	t.Setenv("ALCES_AUTH_MODE", authModeDev)
 	t.Setenv("BRAIN_API_KEY", "")
 
 	_, err := loadConfig()
@@ -12,6 +13,7 @@ func TestLoadConfigRequiresAPIKey(t *testing.T) {
 }
 
 func TestLoadConfigReadsAPIKey(t *testing.T) {
+	t.Setenv("ALCES_AUTH_MODE", authModeDev)
 	t.Setenv("BRAIN_API_KEY", "test-key")
 
 	cfg, err := loadConfig()
@@ -50,9 +52,13 @@ func TestLoadConfigReadsAPIKey(t *testing.T) {
 	if cfg.PocketBaseImage != defaultPocketBaseImage {
 		t.Fatalf("expected PocketBase image %q, got %q", defaultPocketBaseImage, cfg.PocketBaseImage)
 	}
+	if cfg.AuthMode != authModeDev {
+		t.Fatalf("expected auth mode %q, got %q", authModeDev, cfg.AuthMode)
+	}
 }
 
 func TestLoadConfigReadsBuildKitHostOverride(t *testing.T) {
+	t.Setenv("ALCES_AUTH_MODE", authModeDev)
 	t.Setenv("BRAIN_API_KEY", "test-key")
 	t.Setenv("BUILDKIT_HOST", "docker-container://custom-buildkit")
 
@@ -67,6 +73,7 @@ func TestLoadConfigReadsBuildKitHostOverride(t *testing.T) {
 }
 
 func TestLoadConfigReadsRegistryAndProjectRuntimeOverrides(t *testing.T) {
+	t.Setenv("ALCES_AUTH_MODE", authModeDev)
 	t.Setenv("BRAIN_API_KEY", "test-key")
 	t.Setenv("BUILD_REGISTRY_PUBLISH_HOST", "build-registry.internal:5000")
 	t.Setenv("RUNTIME_REGISTRY_HOST", "runtime-registry.internal:5000")
@@ -105,11 +112,28 @@ func TestLoadConfigReadsRegistryAndProjectRuntimeOverrides(t *testing.T) {
 }
 
 func TestLoadConfigRejectsInvalidRegistryInsecureValue(t *testing.T) {
+	t.Setenv("ALCES_AUTH_MODE", authModeDev)
 	t.Setenv("BRAIN_API_KEY", "test-key")
 	t.Setenv("REGISTRY_INSECURE", "definitely-not-a-bool")
 
 	_, err := loadConfig()
 	if err == nil {
 		t.Fatal("expected invalid REGISTRY_INSECURE to fail")
+	}
+}
+
+func TestLoadConfigAllowsProdModeWithoutStaticAPIKey(t *testing.T) {
+	t.Setenv("ALCES_AUTH_MODE", authModeProd)
+	t.Setenv("BRAIN_API_KEY", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("expected prod config to load, got error: %v", err)
+	}
+	if cfg.AuthMode != authModeProd {
+		t.Fatalf("expected auth mode %q, got %q", authModeProd, cfg.AuthMode)
+	}
+	if cfg.BrainAPIKey != "" {
+		t.Fatalf("expected static api key to be empty in prod mode, got %q", cfg.BrainAPIKey)
 	}
 }

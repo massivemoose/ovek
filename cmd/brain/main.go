@@ -90,6 +90,7 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("pong"))
 	})
+	apiMux.HandleFunc("POST /v1/auth/reauth", handleReauth(db))
 	apiMux.HandleFunc("GET /v1/projects", handleListProjects(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}", handleGetProject(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/deployments", handleListProjectDeployments(db))
@@ -98,13 +99,14 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs", handleGetProjectRuntimeLogs(projectRuntimeService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs/stream", handleGetProjectRuntimeLogsStream(projectRuntimeService))
-	apiMux.HandleFunc("POST /v1/projects/{projectName}/deployments", handleCreateDeployment(db, enqueuer))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/deployments", requireCriticalReauth(cfg, db, "deploy.authorized", handleCreateDeployment(db, enqueuer)))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs", handleGetJobLogs(db, cfg.DataDir))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs/stream", handleGetJobLogsStream(db, cfg.DataDir))
-	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/runtime", handleDeleteProjectRuntime(cleaner))
+	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/runtime", requireCriticalReauth(cfg, db, "runtime_delete.authorized", handleDeleteProjectRuntime(cleaner)))
 
-	mux.Handle("/v1/", apiKeyMiddleware(cfg.BrainAPIKey, apiMux))
+	mux.HandleFunc("POST /v1/auth/bootstrap", handleBootstrapAuth(cfg, db))
+	mux.Handle("/v1/", authMiddleware(cfg, db, apiMux))
 
 	return mux
 }

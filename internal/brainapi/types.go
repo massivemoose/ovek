@@ -7,6 +7,25 @@ type APIError struct {
 	Message string `json:"message"`
 }
 
+type BootstrapAuthRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type BootstrapAuthResponse struct {
+	Username string `json:"username"`
+	APIKey   string `json:"apiKey"`
+}
+
+type ReauthRequest struct {
+	Password string `json:"password"`
+}
+
+type ReauthResponse struct {
+	ReauthToken string `json:"reauthToken"`
+	ExpiresAt   string `json:"expiresAt"`
+}
+
 type ProjectSummary struct {
 	Name                string  `json:"name"`
 	Status              string  `json:"status"`

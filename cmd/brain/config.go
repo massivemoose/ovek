@@ -16,8 +16,10 @@ const defaultRuntimeRegistryHost = "localhost:5001"
 const defaultRegistryAPIBaseURL = "http://registry:5000"
 const defaultRailpackFrontendImage = "ghcr.io/railwayapp/railpack-frontend"
 const defaultRegistryInsecure = true
+const defaultAuthMode = authModeDev
 
 type config struct {
+	AuthMode                 string
 	BrainAPIKey              string
 	DataDir                  string
 	BuildKitHost             string
@@ -31,9 +33,17 @@ type config struct {
 }
 
 func loadConfig() (config, error) {
+	authMode := strings.TrimSpace(os.Getenv("ALCES_AUTH_MODE"))
+	if authMode == "" {
+		authMode = defaultAuthMode
+	}
+	if authMode != authModeDev && authMode != authModeProd {
+		return config{}, errors.New("ALCES_AUTH_MODE must be dev or prod")
+	}
+
 	apiKey := strings.TrimSpace(os.Getenv("BRAIN_API_KEY"))
-	if apiKey == "" {
-		return config{}, errors.New("BRAIN_API_KEY is required")
+	if authMode == authModeDev && apiKey == "" {
+		return config{}, errors.New("BRAIN_API_KEY is required in dev auth mode")
 	}
 
 	buildKitHost := strings.TrimSpace(os.Getenv("BUILDKIT_HOST"))
@@ -81,6 +91,7 @@ func loadConfig() (config, error) {
 	}
 
 	return config{
+		AuthMode:                 authMode,
 		BrainAPIKey:              apiKey,
 		DataDir:                  defaultDataDir,
 		BuildKitHost:             buildKitHost,
