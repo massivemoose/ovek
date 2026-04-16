@@ -40,7 +40,7 @@ func newRootRouter(stdout io.Writer, stderr io.Writer, store *config.Store) *com
 		"Alces CLI for working with the Brain control plane.",
 		newAuthCommand(stdout, stderr, store),
 		newStubCommand("deploy", "Create and follow deployments", stderr),
-		newStubCommand("logs", "Read build and runtime logs", stderr),
+		newLogsCommand(stdout, store),
 		newStatusCommand(stdout, store),
 	)
 }
