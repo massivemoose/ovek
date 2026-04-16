@@ -1,0 +1,343 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	cerrdefs "github.com/containerd/errdefs"
+	dockercontainer "github.com/docker/docker/api/types/container"
+	dockermount "github.com/docker/docker/api/types/mount"
+	dockernetwork "github.com/docker/docker/api/types/network"
+)
+
+func TestPocketBaseDataDir(t *testing.T) {
+	got := pocketBaseDataDir("/srv/alces/projects", "demo-app")
+	want := filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName)
+	if got != want {
+		t.Fatalf("expected PocketBase data dir %q, got %q", want, got)
+	}
+}
+
+func TestNewPocketBaseContainerSpec(t *testing.T) {
+	spec := newPocketBaseContainerSpec(pocketBaseSpec{
+		ProjectName:         "demo-app",
+		Image:               defaultPocketBaseImage,
+		ProjectsHostDataDir: "/srv/alces/projects",
+		Network: projectNetwork{
+			ID:   "network-123",
+			Name: "demo-app-net",
+		},
+	})
+
+	if spec.Name != "alces-demo-app-pb" {
+		t.Fatalf("expected container name %q, got %q", "alces-demo-app-pb", spec.Name)
+	}
+	if spec.HostDataDir != filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName) {
+		t.Fatalf("expected host data dir %q, got %q", filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName), spec.HostDataDir)
+	}
+	if spec.Config.Image != defaultPocketBaseImage {
+		t.Fatalf("expected image %q, got %q", defaultPocketBaseImage, spec.Config.Image)
+	}
+
+	wantLabels := map[string]string{
+		managedLabelKey: managedLabelValue,
+		projectLabelKey: "demo-app",
+		roleLabelKey:    resourceRolePocketBase,
+	}
+	if !reflect.DeepEqual(spec.Config.Labels, wantLabels) {
+		t.Fatalf("expected labels %#v, got %#v", wantLabels, spec.Config.Labels)
+	}
+
+	if spec.HostConfig.NetworkMode != dockercontainer.NetworkMode("demo-app-net") {
+		t.Fatalf("expected network mode %q, got %q", dockercontainer.NetworkMode("demo-app-net"), spec.HostConfig.NetworkMode)
+	}
+	if !spec.HostConfig.RestartPolicy.IsUnlessStopped() {
+		t.Fatalf("expected restart policy unless-stopped, got %#v", spec.HostConfig.RestartPolicy)
+	}
+	wantMounts := []dockermount.Mount{
+		{
+			Type:   dockermount.TypeBind,
+			Source: filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName),
+			Target: pocketBaseDataMountPath,
+		},
+	}
+	if !reflect.DeepEqual(spec.HostConfig.Mounts, wantMounts) {
+		t.Fatalf("expected mounts %#v, got %#v", wantMounts, spec.HostConfig.Mounts)
+	}
+
+	endpoint := spec.NetworkingConfig.EndpointsConfig["demo-app-net"]
+	if endpoint == nil {
+		t.Fatal("expected network endpoint config for demo-app-net")
+	}
+	if !reflect.DeepEqual(endpoint.Aliases, []string{pocketBaseNetworkAlias}) {
+		t.Fatalf("expected aliases %#v, got %#v", []string{pocketBaseNetworkAlias}, endpoint.Aliases)
+	}
+}
+
+func TestDockerRuntimeEnsureProjectPocketBaseCreatesAndStartsManagedContainer(t *testing.T) {
+	projectsHostDataDir := t.TempDir()
+	client := &fakeDockerClient{
+		networkInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		networkCreateResponse: dockernetwork.CreateResponse{
+			ID: "network-123",
+		},
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		containerCreateResponse: dockercontainer.CreateResponse{
+			ID: "container-123",
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	containerID, err := runtime.EnsureProjectPocketBase(context.Background(), "demo-app", defaultPocketBaseImage, projectsHostDataDir)
+	if err != nil {
+		t.Fatalf("expected PocketBase provisioning to succeed, got error: %v", err)
+	}
+
+	if containerID != "container-123" {
+		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
+	}
+	if client.networkCreateName != "demo-app-net" {
+		t.Fatalf("expected project network name %q, got %q", "demo-app-net", client.networkCreateName)
+	}
+	if client.containerInspectName != "alces-demo-app-pb" {
+		t.Fatalf("expected PocketBase inspect name %q, got %q", "alces-demo-app-pb", client.containerInspectName)
+	}
+	if client.containerCreateName != "alces-demo-app-pb" {
+		t.Fatalf("expected PocketBase create name %q, got %q", "alces-demo-app-pb", client.containerCreateName)
+	}
+	if client.containerCreateConfig == nil || client.containerCreateConfig.Image != defaultPocketBaseImage {
+		t.Fatalf("expected create image %q, got %#v", defaultPocketBaseImage, client.containerCreateConfig)
+	}
+	if client.containerCreateHostConfig == nil || client.containerCreateHostConfig.NetworkMode != dockercontainer.NetworkMode("demo-app-net") {
+		t.Fatalf("expected create network mode %q, got %#v", dockercontainer.NetworkMode("demo-app-net"), client.containerCreateHostConfig)
+	}
+	if client.containerStartID != "container-123" {
+		t.Fatalf("expected started container ID %q, got %q", "container-123", client.containerStartID)
+	}
+}
+
+func TestDockerRuntimeEnsureProjectPocketBaseReusesRunningManagedContainer(t *testing.T) {
+	projectsHostDataDir := t.TempDir()
+	client := &fakeDockerClient{
+		networkInspectResponse: dockernetwork.Inspect{
+			ID:   "network-123",
+			Name: "demo-app-net",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRoleProjectNetwork,
+			},
+		},
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+				State: &dockercontainer.State{
+					Running: true,
+				},
+			},
+			Config: &dockercontainer.Config{
+				Image: defaultPocketBaseImage,
+				Labels: map[string]string{
+					managedLabelKey: managedLabelValue,
+					projectLabelKey: "demo-app",
+					roleLabelKey:    resourceRolePocketBase,
+				},
+			},
+			Mounts: []dockercontainer.MountPoint{
+				{
+					Source:      filepath.Join(projectsHostDataDir, "demo-app", pocketBaseDataDirName),
+					Destination: pocketBaseDataMountPath,
+				},
+			},
+			NetworkSettings: &dockercontainer.NetworkSettings{
+				Networks: map[string]*dockernetwork.EndpointSettings{
+					"demo-app-net": {
+						Aliases: []string{"demo-app-pb", pocketBaseNetworkAlias},
+					},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	containerID, err := runtime.EnsureProjectPocketBase(context.Background(), "demo-app", defaultPocketBaseImage, projectsHostDataDir)
+	if err != nil {
+		t.Fatalf("expected existing PocketBase container to be reused, got error: %v", err)
+	}
+
+	if containerID != "container-123" {
+		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
+	}
+	if client.containerCreateName != "" {
+		t.Fatalf("expected create not to be called, got %q", client.containerCreateName)
+	}
+	if client.containerStartID != "" {
+		t.Fatalf("expected running container not to be started again, got %q", client.containerStartID)
+	}
+}
+
+func TestDockerRuntimeEnsureProjectPocketBaseStartsStoppedManagedContainer(t *testing.T) {
+	projectsHostDataDir := t.TempDir()
+	client := &fakeDockerClient{
+		networkInspectResponse: dockernetwork.Inspect{
+			ID:   "network-123",
+			Name: "demo-app-net",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRoleProjectNetwork,
+			},
+		},
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+				State: &dockercontainer.State{
+					Running: false,
+				},
+			},
+			Config: &dockercontainer.Config{
+				Image: defaultPocketBaseImage,
+				Labels: map[string]string{
+					managedLabelKey: managedLabelValue,
+					projectLabelKey: "demo-app",
+					roleLabelKey:    resourceRolePocketBase,
+				},
+			},
+			Mounts: []dockercontainer.MountPoint{
+				{
+					Source:      filepath.Join(projectsHostDataDir, "demo-app", pocketBaseDataDirName),
+					Destination: pocketBaseDataMountPath,
+				},
+			},
+			NetworkSettings: &dockercontainer.NetworkSettings{
+				Networks: map[string]*dockernetwork.EndpointSettings{
+					"demo-app-net": {
+						Aliases: []string{pocketBaseNetworkAlias},
+					},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	containerID, err := runtime.EnsureProjectPocketBase(context.Background(), "demo-app", defaultPocketBaseImage, projectsHostDataDir)
+	if err != nil {
+		t.Fatalf("expected stopped PocketBase container to be started, got error: %v", err)
+	}
+
+	if containerID != "container-123" {
+		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
+	}
+	if client.containerStartID != "container-123" {
+		t.Fatalf("expected container start ID %q, got %q", "container-123", client.containerStartID)
+	}
+}
+
+func TestDockerRuntimeEnsureProjectPocketBaseRejectsUnmanagedContainer(t *testing.T) {
+	projectsHostDataDir := t.TempDir()
+	client := &fakeDockerClient{
+		networkInspectResponse: dockernetwork.Inspect{
+			ID:   "network-123",
+			Name: "demo-app-net",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRoleProjectNetwork,
+			},
+		},
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+				State: &dockercontainer.State{
+					Running: true,
+				},
+			},
+			Config: &dockercontainer.Config{
+				Image:  defaultPocketBaseImage,
+				Labels: map[string]string{},
+			},
+			Mounts: []dockercontainer.MountPoint{
+				{
+					Source:      filepath.Join(projectsHostDataDir, "demo-app", pocketBaseDataDirName),
+					Destination: pocketBaseDataMountPath,
+				},
+			},
+			NetworkSettings: &dockercontainer.NetworkSettings{
+				Networks: map[string]*dockernetwork.EndpointSettings{
+					"demo-app-net": {
+						Aliases: []string{pocketBaseNetworkAlias},
+					},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	_, err := runtime.EnsureProjectPocketBase(context.Background(), "demo-app", defaultPocketBaseImage, projectsHostDataDir)
+	if err == nil {
+		t.Fatal("expected unmanaged PocketBase container to be rejected")
+	}
+	if !strings.Contains(err.Error(), "already exists but is not managed by alces") {
+		t.Fatalf("expected unmanaged container error, got %v", err)
+	}
+	if client.containerStartID != "" {
+		t.Fatalf("expected unmanaged container not to be started, got %q", client.containerStartID)
+	}
+}
+
+func TestDockerRuntimeRemoveProjectPocketBaseStopsAndRemovesRunningManagedContainer(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				ID: "container-123",
+				State: &dockercontainer.State{
+					Running: true,
+				},
+			},
+			Config: &dockercontainer.Config{
+				Labels: map[string]string{
+					managedLabelKey: managedLabelValue,
+					projectLabelKey: "demo-app",
+					roleLabelKey:    resourceRolePocketBase,
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.RemoveProjectPocketBase(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected PocketBase removal to succeed, got error: %v", err)
+	}
+	if client.containerInspectName != "alces-demo-app-pb" {
+		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-pb", client.containerInspectName)
+	}
+	if client.containerStopID != "container-123" {
+		t.Fatalf("expected stop ID %q, got %q", "container-123", client.containerStopID)
+	}
+	if client.containerRemoveID != "container-123" {
+		t.Fatalf("expected remove ID %q, got %q", "container-123", client.containerRemoveID)
+	}
+}
+
+func TestDockerRuntimeRemoveProjectPocketBaseIgnoresMissingContainer(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.RemoveProjectPocketBase(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected missing PocketBase removal to be ignored, got error: %v", err)
+	}
+	if client.containerStopID != "" {
+		t.Fatalf("expected stop not to be called, got %q", client.containerStopID)
+	}
+	if client.containerRemoveID != "" {
+		t.Fatalf("expected remove not to be called, got %q", client.containerRemoveID)
+	}
+}

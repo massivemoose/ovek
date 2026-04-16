@@ -2,58 +2,109 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"log"
-	"time"
-
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
+	"net/http"
 )
 
+const listenAddr = ":8081"
+
 func main() {
-	ctx := context.Background()
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("Failed to create docker client: %v", err)
+		log.Fatalf("failed to load config: %v", err)
 	}
 
-	// 1. Setup unique identification for this deployment
-	currentTime := time.Now()
-	timeString := currentTime.Format("150405")
-	appName := "user-app-" + timeString
-
-	// 2. Define the "New Idea" container
-	config := &container.Config{
-		Image: "nginxdemos/hello",
-		Labels: map[string]string{
-			"traefik.enable": "true",
-			"traefik.http.routers." + appName + ".entrypoints":               "web",
-			"traefik.http.routers." + appName + ".service":                   appName,
-			"traefik.http.routers." + appName + ".rule":                      "Host(`" + appName + ".localhost`)",
-			"traefik.http.services." + appName + ".loadbalancer.server.port": "80",
-			"traefik.docker.network":                                         "alces-net",
-			"com.docker.compose.project":                                     "alces",
-		},
-	}
-
-	// 3. Define the Networking
-	networkingConfig := &network.NetworkingConfig{
-		EndpointsConfig: map[string]*network.EndpointSettings{
-			"alces-net": {},
-		},
-	}
-
-	// 4. Create the container
-	resp, err := cli.ContainerCreate(ctx, config, nil, networkingConfig, nil, appName)
+	db, err := openBrainDB(cfg.DataDir)
 	if err != nil {
-		log.Fatalf("Failed to create container: %v", err)
+		log.Fatalf("failed to open brain database: %v", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("failed to close brain database: %v", err)
+		}
+	}()
+
+	runtime, err := newDockerRuntimeFromEnv()
+	if err != nil {
+		log.Fatalf("failed to create docker runtime: %v", err)
+	}
+	if err := newStartupDeploymentReconciler(db, runtime).Reconcile(context.Background()); err != nil {
+		log.Fatalf("failed to reconcile startup deployment state: %v", err)
+	}
+	if err := reconcileAllProjectStatuses(db); err != nil {
+		log.Fatalf("failed to reconcile startup project status state: %v", err)
 	}
 
-	// 5. Start the container
-	err = cli.ContainerStart(ctx, resp.ID, container.StartOptions{})
-	if err != nil {
-		log.Fatalf("Failed to start container: %v", err)
+	processor := newManagedDeploymentProcessor(
+		db,
+		newBuildProcessor(
+			cfg.DataDir,
+			cfg.BuildKitHost,
+			cfg.BuildRegistryPublishHost,
+			cfg.RuntimeRegistryHost,
+			cfg.RailpackFrontendImage,
+			cfg.RegistryInsecure,
+			systemCommandRunner{},
+		),
+		runtime,
+		cfg.ProjectsHostDataDir,
+		cfg.PocketBaseImage,
+	)
+	artifactCleaner := newRegistryArtifactCleaner(
+		cfg.RuntimeRegistryHost,
+		cfg.RegistryAPIBaseURL,
+		&http.Client{},
+	)
+	cleaner := newManagedProjectCleaner(db, runtime, cfg.DataDir, artifactCleaner)
+	projectRuntimeService := newManagedProjectRuntimeService(db, runtime)
+	jobManager := newJobManager(db, processor, artifactCleaner)
+	workerContext, cancelWorker := context.WithCancel(context.Background())
+	defer cancelWorker()
+
+	if err := jobManager.Start(workerContext); err != nil {
+		log.Fatalf("failed to start job manager: %v", err)
 	}
-	log.Printf("Container started with url http://%s.localhost", appName)
-	log.Printf("Container started with ID: %s", resp.ID)
+
+	server := &http.Server{
+		Addr:    listenAddr,
+		Handler: newHandler(cfg, db, jobManager, cleaner, projectRuntimeService),
+	}
+
+	log.Printf("brain listening on %s", listenAddr)
+
+	err = server.ListenAndServe()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("brain server failed: %v", err)
+	}
+}
+
+func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("pong"))
+	})
+	apiMux.HandleFunc("GET /v1/projects", handleListProjects(db))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}", handleGetProject(db))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/deployments", handleListProjectDeployments(db))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/deployments/{deploymentID}", handleGetProjectDeployment(db))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/jobs", handleListProjectJobs(db))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs", handleGetProjectRuntimeLogs(projectRuntimeService))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs/stream", handleGetProjectRuntimeLogsStream(projectRuntimeService))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/deployments", handleCreateDeployment(db, enqueuer))
+	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))
+	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs", handleGetJobLogs(db, cfg.DataDir))
+	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs/stream", handleGetJobLogsStream(db, cfg.DataDir))
+	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/runtime", handleDeleteProjectRuntime(cleaner))
+
+	mux.Handle("/v1/", apiKeyMiddleware(cfg.BrainAPIKey, apiMux))
+
+	return mux
 }
