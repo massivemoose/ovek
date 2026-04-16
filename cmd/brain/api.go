@@ -14,6 +14,7 @@ const (
 	errorCodeCreateJobFailed           = "create_deployment_job_failed"
 	errorCodeListProjectsFailed        = "list_projects_failed"
 	errorCodeListDeploymentsFailed     = "list_deployments_failed"
+	errorCodeListJobsFailed            = "list_jobs_failed"
 	errorCodeDeploymentNotFound        = "deployment_not_found"
 	errorCodeFetchDeploymentFailed     = "fetch_deployment_failed"
 	errorCodeFetchProjectFailed        = "fetch_project_failed"
