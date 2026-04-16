@@ -41,7 +41,7 @@ func newRootRouter(stdout io.Writer, stderr io.Writer, store *config.Store) *com
 		newAuthCommand(stdout, stderr, store),
 		newStubCommand("deploy", "Create and follow deployments", stderr),
 		newStubCommand("logs", "Read build and runtime logs", stderr),
-		newStubCommand("status", "Inspect projects and runtime state", stderr),
+		newStatusCommand(stdout, store),
 	)
 }
 
