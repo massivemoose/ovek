@@ -13,29 +13,6 @@ import (
 	dockernetwork "github.com/docker/docker/api/types/network"
 )
 
-type projectRuntimeApp struct {
-	ContainerName string `json:"containerName"`
-	ImageRef      string `json:"imageRef"`
-	Running       bool   `json:"running"`
-}
-
-type projectRuntimeContainer struct {
-	ContainerName string `json:"containerName"`
-	Running       bool   `json:"running"`
-}
-
-type projectRuntimeNetwork struct {
-	Name string `json:"name"`
-}
-
-type projectRuntimeView struct {
-	ProjectName         string                   `json:"projectName"`
-	CurrentDeploymentID *string                  `json:"currentDeploymentId"`
-	App                 *projectRuntimeApp       `json:"app"`
-	PocketBase          *projectRuntimeContainer `json:"pocketBase"`
-	Network             *projectRuntimeNetwork   `json:"network"`
-}
-
 type projectRuntimeService interface {
 	GetRuntime(ctx context.Context, projectName string) (projectRuntimeView, error)
 	ReadRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error)

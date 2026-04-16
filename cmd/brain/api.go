@@ -29,11 +29,6 @@ const (
 	errorCodeProjectCleanupFailed      = "project_cleanup_failed"
 )
 
-type apiError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
 func writeJSON(w http.ResponseWriter, statusCode int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)

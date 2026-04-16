@@ -30,17 +30,6 @@ type deploymentResult struct {
 	SupersededDeploymentID  string
 }
 
-type deploymentRecord struct {
-	ID                      string `json:"id"`
-	ProjectName             string `json:"projectName"`
-	ImageRef                string `json:"imageRef"`
-	AppContainerName        string `json:"appContainerName"`
-	NetworkName             string `json:"networkName"`
-	PocketBaseContainerName string `json:"pocketBaseContainerName"`
-	Status                  string `json:"status"`
-	CreatedAt               string `json:"createdAt"`
-}
-
 type deploymentProcessor interface {
 	Process(ctx context.Context, job job) (deploymentResult, error)
 }
