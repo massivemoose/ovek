@@ -48,6 +48,40 @@ type deploymentEnqueuer interface {
 	Enqueue(jobID string)
 }
 
+func handleListProjectJobs(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		limit, err := parseListLimit(r, defaultListLimit)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidLimit, "limit must be a positive integer")
+			return
+		}
+
+		exists, err := projectExists(db, projectName)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeListJobsFailed, "failed to list jobs")
+			return
+		}
+		if !exists {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+			return
+		}
+
+		jobs, err := listProjectJobs(db, projectName, limit)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeListJobsFailed, "failed to list jobs")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, jobs)
+	}
+}
+
 func handleCreateDeployment(db *sql.DB, enqueuer deploymentEnqueuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -164,7 +198,58 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 	}), nil
 }
 
+func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
+	rows, err := db.Query(
+		`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at
+		 FROM jobs
+		 WHERE project_name = ?
+		 ORDER BY created_at DESC
+		 LIMIT ?`,
+		projectName,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	jobs := make([]job, 0)
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, decorateJob(job))
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return jobs, nil
+}
+
 func getJob(db *sql.DB, jobID string) (job, error) {
+	job, err := scanJob(
+		db.QueryRow(
+			`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at
+			 FROM jobs
+			 WHERE id = ?`,
+			jobID,
+		),
+	)
+	if err != nil {
+		return job, err
+	}
+
+	return decorateJob(job), nil
+}
+
+type jobScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanJob(scanner jobScanner) (job, error) {
 	var job job
 	var logPath sql.NullString
 	var imageRef sql.NullString
@@ -172,12 +257,7 @@ func getJob(db *sql.DB, jobID string) (job, error) {
 	var startedAt sql.NullString
 	var finishedAt sql.NullString
 
-	err := db.QueryRow(
-		`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at
-		 FROM jobs
-		 WHERE id = ?`,
-		jobID,
-	).Scan(
+	err := scanner.Scan(
 		&job.ID,
 		&job.ProjectName,
 		&job.RepoURL,
@@ -209,7 +289,7 @@ func getJob(db *sql.DB, jobID string) (job, error) {
 		job.FinishedAt = finishedAt.String
 	}
 
-	return decorateJob(job), nil
+	return job, nil
 }
 
 func isValidProjectName(name string) bool {

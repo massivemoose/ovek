@@ -69,6 +69,183 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	}
 }
 
+func TestListProjectJobsReturnsNewestFirst(t *testing.T) {
+	handler, db := newTestHandler(t, noopEnqueuer{})
+
+	oldJob, err := createQueuedJob(db, "alpha-app", "https://example.com/old.git")
+	if err != nil {
+		t.Fatalf("expected old job creation to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE jobs
+		 SET created_at = ?, status = ?, finished_at = ?, error_message = ?
+		 WHERE id = ?`,
+		"2026-04-09T00:00:00Z",
+		jobStatusFailed,
+		"2026-04-09T00:01:00Z",
+		"build failed",
+		oldJob.ID,
+	); err != nil {
+		t.Fatalf("expected old job update to succeed, got error: %v", err)
+	}
+
+	currentJob, err := createQueuedJob(db, "alpha-app", "https://example.com/current.git")
+	if err != nil {
+		t.Fatalf("expected current job creation to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE jobs
+		 SET created_at = ?, status = ?, started_at = ?, finished_at = ?, log_path = ?, image_ref = ?
+		 WHERE id = ?`,
+		"2026-04-10T00:00:00Z",
+		jobStatusSucceeded,
+		"2026-04-10T00:00:05Z",
+		"2026-04-10T00:01:00Z",
+		"/tmp/current.log",
+		"localhost:5001/alces-alpha-app:dep-current",
+		currentJob.ID,
+	); err != nil {
+		t.Fatalf("expected current job update to succeed, got error: %v", err)
+	}
+
+	otherJob, err := createQueuedJob(db, "beta-app", "https://example.com/other.git")
+	if err != nil {
+		t.Fatalf("expected other job creation to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET created_at = ? WHERE id = ?", "2026-04-11T00:00:00Z", otherJob.ID); err != nil {
+		t.Fatalf("expected other job update to succeed, got error: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/jobs", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	var jobs []job
+	if err := json.NewDecoder(recorder.Body).Decode(&jobs); err != nil {
+		t.Fatalf("expected response body to decode, got error: %v", err)
+	}
+
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	}
+	if jobs[0].ID != currentJob.ID {
+		t.Fatalf("expected newest job %q, got %q", currentJob.ID, jobs[0].ID)
+	}
+	if jobs[0].Status != jobStatusSucceeded {
+		t.Fatalf("expected current job status %q, got %q", jobStatusSucceeded, jobs[0].Status)
+	}
+	assertJobLinks(t, jobs[0])
+	if jobs[1].ID != oldJob.ID {
+		t.Fatalf("expected older job %q, got %q", oldJob.ID, jobs[1].ID)
+	}
+	if jobs[1].Status != jobStatusFailed {
+		t.Fatalf("expected older job status %q, got %q", jobStatusFailed, jobs[1].Status)
+	}
+	assertJobLinks(t, jobs[1])
+}
+
+func TestListProjectJobsReturnsEmptyArrayForKnownProjectWithoutJobs(t *testing.T) {
+	handler, db := newTestHandler(t, noopEnqueuer{})
+	seedProjectRecord(t, db, "alpha-app")
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/jobs", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if recorder.Body.String() != "[]\n" {
+		t.Fatalf("expected empty JSON array body, got %q", recorder.Body.String())
+	}
+}
+
+func TestListProjectJobsHonorsLimit(t *testing.T) {
+	handler, db := newTestHandler(t, noopEnqueuer{})
+
+	oldJob, err := createQueuedJob(db, "alpha-app", "https://example.com/old.git")
+	if err != nil {
+		t.Fatalf("expected old job creation to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET created_at = ? WHERE id = ?", "2026-04-09T00:00:00Z", oldJob.ID); err != nil {
+		t.Fatalf("expected old job update to succeed, got error: %v", err)
+	}
+
+	currentJob, err := createQueuedJob(db, "alpha-app", "https://example.com/current.git")
+	if err != nil {
+		t.Fatalf("expected current job creation to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET created_at = ? WHERE id = ?", "2026-04-10T00:00:00Z", currentJob.ID); err != nil {
+		t.Fatalf("expected current job update to succeed, got error: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/jobs?limit=1", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	var jobs []job
+	if err := json.NewDecoder(recorder.Body).Decode(&jobs); err != nil {
+		t.Fatalf("expected response body to decode, got error: %v", err)
+	}
+
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if jobs[0].ID != currentJob.ID {
+		t.Fatalf("expected limited job %q, got %q", currentJob.ID, jobs[0].ID)
+	}
+}
+
+func TestListProjectJobsRejectsInvalidProjectName(t *testing.T) {
+	handler := handleListProjectJobs(nil)
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/demo-app/jobs", nil)
+	request.SetPathValue("projectName", "Demo App")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+}
+
+func TestListProjectJobsRejectsInvalidLimit(t *testing.T) {
+	handler, _ := newTestHandler(t, noopEnqueuer{})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/jobs?limit=0", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeInvalidLimit, "limit must be a positive integer")
+}
+
+func TestListProjectJobsReturnsNotFoundForUnknownProject(t *testing.T) {
+	handler, _ := newTestHandler(t, noopEnqueuer{})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/projects/missing-app/jobs", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+}
+
 func TestCreateDeploymentRejectsInvalidProjectName(t *testing.T) {
 	handler := handleCreateDeployment(nil, noopEnqueuer{})
 
@@ -201,6 +378,10 @@ func (noopProjectRuntimeService) GetRuntime(context.Context, string) (projectRun
 }
 
 func (noopProjectRuntimeService) ReadRuntimeLogs(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (noopProjectRuntimeService) StreamRuntimeLogs(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
 

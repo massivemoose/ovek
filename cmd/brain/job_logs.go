@@ -207,6 +207,55 @@ func writeSSELogEvents(w io.Writer, logs []byte) error {
 	return nil
 }
 
+func streamSSELogReader(ctx context.Context, w io.Writer, flusher http.Flusher, logs io.ReadCloser) error {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = logs.Close()
+		case <-done:
+		}
+	}()
+	defer close(done)
+
+	buffer := make([]byte, 4096)
+	pending := make([]byte, 0, len(buffer))
+
+	for {
+		count, err := logs.Read(buffer)
+		if count > 0 {
+			pending = append(pending, buffer[:count]...)
+
+			lastNewline := bytes.LastIndexByte(pending, '\n')
+			if lastNewline >= 0 {
+				if err := writeSSELogEvents(w, pending[:lastNewline+1]); err != nil {
+					return err
+				}
+				flusher.Flush()
+				pending = pending[lastNewline+1:]
+			}
+		}
+
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if err := writeSSELogEvents(w, pending); err != nil {
+				return err
+			}
+			if len(pending) > 0 {
+				flusher.Flush()
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+
+		return err
+	}
+}
+
 func writeSSEEvent(w io.Writer, event string, data string) error {
 	if event != "" {
 		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {

@@ -31,14 +31,14 @@ type deploymentResult struct {
 }
 
 type deploymentRecord struct {
-	ID                      string
-	ProjectName             string
-	ImageRef                string
-	AppContainerName        string
-	NetworkName             string
-	PocketBaseContainerName string
-	Status                  string
-	CreatedAt               string
+	ID                      string `json:"id"`
+	ProjectName             string `json:"projectName"`
+	ImageRef                string `json:"imageRef"`
+	AppContainerName        string `json:"appContainerName"`
+	NetworkName             string `json:"networkName"`
+	PocketBaseContainerName string `json:"pocketBaseContainerName"`
+	Status                  string `json:"status"`
+	CreatedAt               string `json:"createdAt"`
 }
 
 type deploymentProcessor interface {

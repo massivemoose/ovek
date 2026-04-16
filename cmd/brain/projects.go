@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const defaultProjectListLimit = 20
+const defaultListLimit = 20
 
 type projectSummary struct {
 	Name                string  `json:"name"`
@@ -20,7 +20,7 @@ type projectSummary struct {
 
 func handleListProjects(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limit, err := parseProjectListLimit(r)
+		limit, err := parseListLimit(r, defaultListLimit)
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidLimit, "limit must be a positive integer")
 			return
@@ -58,10 +58,10 @@ func handleGetProject(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func parseProjectListLimit(r *http.Request) (int, error) {
+func parseListLimit(r *http.Request, defaultLimit int) (int, error) {
 	limitValue := strings.TrimSpace(r.URL.Query().Get("limit"))
 	if limitValue == "" {
-		return defaultProjectListLimit, nil
+		return defaultLimit, nil
 	}
 
 	limit, err := strconv.Atoi(limitValue)

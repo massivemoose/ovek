@@ -39,6 +39,7 @@ type projectRuntimeView struct {
 type projectRuntimeService interface {
 	GetRuntime(ctx context.Context, projectName string) (projectRuntimeView, error)
 	ReadRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error)
+	StreamRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error)
 }
 
 type projectRuntimeReader interface {
@@ -111,6 +112,47 @@ func handleGetProjectRuntimeLogs(service projectRuntimeService) http.HandlerFunc
 	}
 }
 
+func handleGetProjectRuntimeLogsStream(service projectRuntimeService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		logs, err := service.StreamRuntimeLogs(r.Context(), projectName)
+		if errors.Is(err, errProjectNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+			return
+		}
+		if errors.Is(err, errProjectRuntimeNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectRuntimeNotFound, "project runtime not found")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeFetchRuntimeLogsFailed, "failed to fetch runtime logs")
+			return
+		}
+		defer logs.Close()
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeFetchRuntimeLogsFailed, "failed to fetch runtime logs")
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		if err := streamSSELogReader(r.Context(), w, flusher, logs); err != nil {
+			_ = writeSSEEvent(w, "error", "failed to fetch runtime logs")
+			flusher.Flush()
+		}
+	}
+}
+
 func (service managedProjectRuntimeService) GetRuntime(ctx context.Context, projectName string) (projectRuntimeView, error) {
 	project, err := getProject(service.db, projectName)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -172,6 +214,14 @@ func (service managedProjectRuntimeService) GetRuntime(ctx context.Context, proj
 var errProjectRuntimeNotFound = errors.New("project runtime not found")
 
 func (service managedProjectRuntimeService) ReadRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error) {
+	return service.openRuntimeLogs(ctx, projectName, projectAppLogsOptions{})
+}
+
+func (service managedProjectRuntimeService) StreamRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error) {
+	return service.openRuntimeLogs(ctx, projectName, projectAppLogsOptions{Follow: true})
+}
+
+func (service managedProjectRuntimeService) openRuntimeLogs(ctx context.Context, projectName string, options projectAppLogsOptions) (io.ReadCloser, error) {
 	project, err := getProject(service.db, projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errProjectNotFound
@@ -192,7 +242,7 @@ func (service managedProjectRuntimeService) ReadRuntimeLogs(ctx context.Context,
 		return nil, errProjectRuntimeNotFound
 	}
 
-	logs, err := service.runtime.ReadProjectAppLogs(ctx, currentDeployment, projectAppLogsOptions{})
+	logs, err := service.runtime.ReadProjectAppLogs(ctx, currentDeployment, options)
 	if err != nil {
 		return nil, fmt.Errorf("read runtime logs for project %q: %w", projectName, err)
 	}
