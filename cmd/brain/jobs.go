@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/massivemoose/alces/internal/brainapi"
 )
 
 const (
@@ -18,31 +20,6 @@ const (
 )
 
 var projectNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
-
-type jobLinks struct {
-	Self       string `json:"self"`
-	Logs       string `json:"logs"`
-	LogsStream string `json:"logsStream"`
-}
-
-type job struct {
-	ID           string   `json:"id"`
-	Type         string   `json:"type"`
-	ProjectName  string   `json:"projectName"`
-	RepoURL      string   `json:"repoUrl"`
-	Status       string   `json:"status"`
-	LogPath      string   `json:"logPath,omitempty"`
-	ImageRef     string   `json:"imageRef,omitempty"`
-	ErrorMessage string   `json:"errorMessage,omitempty"`
-	CreatedAt    string   `json:"createdAt"`
-	StartedAt    string   `json:"startedAt,omitempty"`
-	FinishedAt   string   `json:"finishedAt,omitempty"`
-	Links        jobLinks `json:"links"`
-}
-
-type createDeploymentRequest struct {
-	RepoURL string `json:"repoUrl"`
-}
 
 type deploymentEnqueuer interface {
 	Enqueue(jobID string)
@@ -306,24 +283,24 @@ func newID() (string, error) {
 }
 
 func decorateJob(job job) job {
-	job.Type = jobTypeDeployment
+	job.Type = brainapi.JobTypeDeployment
 	job.Links = jobLinks{
-		Self:       jobPath(job.ID),
-		Logs:       jobLogsPath(job.ID),
-		LogsStream: jobLogsStreamPath(job.ID),
+		Self:       brainapi.JobPath(job.ID),
+		Logs:       brainapi.JobLogsPath(job.ID),
+		LogsStream: brainapi.JobLogsStreamPath(job.ID),
 	}
 
 	return job
 }
 
 func jobPath(jobID string) string {
-	return "/v1/jobs/" + jobID
+	return brainapi.JobPath(jobID)
 }
 
 func jobLogsPath(jobID string) string {
-	return jobPath(jobID) + "/logs"
+	return brainapi.JobLogsPath(jobID)
 }
 
 func jobLogsStreamPath(jobID string) string {
-	return jobLogsPath(jobID) + "/stream"
+	return brainapi.JobLogsStreamPath(jobID)
 }

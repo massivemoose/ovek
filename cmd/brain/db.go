@@ -56,6 +56,57 @@ CREATE TABLE jobs (
 );
 `,
 	},
+	{
+		version: 2,
+		name:    "create control plane auth tables",
+		upSQL: `
+CREATE TABLE admin_users (
+	id TEXT PRIMARY KEY,
+	username TEXT NOT NULL UNIQUE,
+	password_hash TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	disabled_at TEXT,
+	last_reauth_at TEXT
+);
+
+CREATE TABLE api_keys (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	label TEXT NOT NULL,
+	key_hash TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	last_used_at TEXT,
+	revoked_at TEXT,
+	FOREIGN KEY (user_id) REFERENCES admin_users(id)
+);
+
+CREATE TABLE reauth_tokens (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	api_key_id TEXT NOT NULL,
+	token_hash TEXT NOT NULL,
+	scope TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	expires_at TEXT NOT NULL,
+	used_at TEXT,
+	revoked_at TEXT,
+	FOREIGN KEY (user_id) REFERENCES admin_users(id),
+	FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
+);
+
+CREATE TABLE audit_logs (
+	id TEXT PRIMARY KEY,
+	user_id TEXT,
+	api_key_id TEXT,
+	event_type TEXT NOT NULL,
+	project_name TEXT,
+	details_json TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (user_id) REFERENCES admin_users(id),
+	FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
+);
+`,
+	},
 }
 
 func openBrainDB(dataDir string) (*sql.DB, error) {
