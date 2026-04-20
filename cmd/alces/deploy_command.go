@@ -90,6 +90,12 @@ func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 	}
 
 	if finalJob.Status != "succeeded" {
+		_, _ = fmt.Fprintln(cmd.stdout)
+		output.WriteSection(cmd.stdout, "Next Step")
+		output.WriteKeyValues(cmd.stdout, [][2]string{
+			{"Inspect Logs", fmt.Sprintf("alces logs --job %s --no-follow", finalJob.ID)},
+		})
+
 		if finalJob.ErrorMessage != "" {
 			return fmt.Errorf("deployment failed: %s", finalJob.ErrorMessage)
 		}

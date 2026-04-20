@@ -206,3 +206,68 @@ func TestDeployRetriesAfterReauthRequired(t *testing.T) {
 		t.Fatalf("expected deploy output to contain build logs, got %q", stdout.String())
 	}
 }
+
+func TestDeployFailurePrintsSummaryAndLogHint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects/demo-app/deployments":
+			_ = json.NewEncoder(w).Encode(brainapi.Job{
+				ID:          "job_fail",
+				Status:      "queued",
+				ProjectName: "demo-app",
+				RepoURL:     "https://example.com/broken.git",
+			})
+		case "/v1/jobs/job_fail/logs/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "data: clone failed\n\n")
+		case "/v1/jobs/job_fail":
+			_ = json.NewEncoder(w).Encode(brainapi.Job{
+				ID:           "job_fail",
+				Status:       "failed",
+				FinishedAt:   "2026-04-19T00:20:00Z",
+				ProjectName:  "demo-app",
+				RepoURL:      "https://example.com/broken.git",
+				ErrorMessage: "source fetch failed: repository not found",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	store := config.NewStore(t.TempDir())
+	if err := store.SaveProfile("default", config.Profile{Host: server.URL, APIKey: "test-key"}, true); err != nil {
+		t.Fatalf("expected config save to succeed, got error: %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode := runWithStore(
+		context.Background(),
+		[]string{"deploy", "demo-app", "https://example.com/broken.git"},
+		&stdout,
+		&stderr,
+		store,
+	)
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %q", exitCode, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, fragment := range []string{
+		"Deployment",
+		"Build Logs",
+		"Result",
+		"Next Step",
+		"job_fail",
+		"source fetch failed: repository not found",
+		"alces logs --job job_fail --no-follow",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("expected output to contain %q, got %q", fragment, output)
+		}
+	}
+	if !strings.Contains(stderr.String(), "deployment failed: source fetch failed: repository not found") {
+		t.Fatalf("expected stderr to contain the deploy failure, got %q", stderr.String())
+	}
+}
