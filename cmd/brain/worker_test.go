@@ -60,6 +60,89 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	}
 }
 
+func TestNormalizeJobFailureMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		errorMessage string
+		want         string
+	}{
+		{
+			name:         "source fetch",
+			errorMessage: "git clone: repository not found",
+			want:         "source fetch failed: repository not found",
+		},
+		{
+			name:         "build planning",
+			errorMessage: "railpack prepare: no provider detected",
+			want:         "build planning failed: no provider detected",
+		},
+		{
+			name:         "image build",
+			errorMessage: "buildctl build: build exited 1",
+			want:         "image build failed: build exited 1",
+		},
+		{
+			name:         "pocketbase provisioning",
+			errorMessage: "ensure PocketBase: container start failed",
+			want:         "PocketBase provisioning failed: container start failed",
+		},
+		{
+			name:         "app provisioning",
+			errorMessage: "ensure app container: image pull failed",
+			want:         "app container provisioning failed: image pull failed",
+		},
+		{
+			name:         "app readiness",
+			errorMessage: "wait for app readiness: timed out waiting for port",
+			want:         "app readiness failed: timed out waiting for port",
+		},
+		{
+			name:         "promotion state",
+			errorMessage: "load current deployment: database is locked",
+			want:         "promotion state load failed: database is locked",
+		},
+		{
+			name:         "promotion cleanup",
+			errorMessage: `remove superseded app container "alces-demo-app-app-dep-old": stop failed`,
+			want:         `promotion cleanup failed: remove superseded app container "alces-demo-app-app-dep-old": stop failed`,
+		},
+		{
+			name:         "job state load",
+			errorMessage: "failed to load claimed job",
+			want:         "job state load failed",
+		},
+		{
+			name:         "interrupted restart",
+			errorMessage: interruptedJobErrorMessage,
+			want:         interruptedJobErrorMessage,
+		},
+		{
+			name:         "already normalized",
+			errorMessage: "source fetch failed: repository not found",
+			want:         "source fetch failed: repository not found",
+		},
+		{
+			name:         "unknown message",
+			errorMessage: "something unexpected happened",
+			want:         "something unexpected happened",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := normalizeJobFailureMessage(test.errorMessage)
+			if got != test.want {
+				t.Fatalf("expected normalized error %q, got %q", test.want, got)
+			}
+		})
+	}
+}
+
 func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 	db := newTestDB(t)
 	firstJob, err := createQueuedJob(db, "demo-app", "https://example.com/first.git")

@@ -209,6 +209,8 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 		return fmt.Errorf("begin failed job transaction: %w", err)
 	}
 
+	errorMessage = normalizeJobFailureMessage(errorMessage)
+
 	projectName, err := getJobProjectName(tx, jobID)
 	if err != nil {
 		_ = tx.Rollback()
@@ -244,6 +246,52 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 	}
 
 	return nil
+}
+
+func normalizeJobFailureMessage(errorMessage string) string {
+	errorMessage = strings.TrimSpace(errorMessage)
+	if errorMessage == "" {
+		return ""
+	}
+
+	switch {
+	case errorMessage == interruptedJobErrorMessage:
+		return errorMessage
+	case strings.HasPrefix(errorMessage, "source fetch failed:"),
+		strings.HasPrefix(errorMessage, "build planning failed:"),
+		strings.HasPrefix(errorMessage, "image build failed:"),
+		strings.HasPrefix(errorMessage, "PocketBase provisioning failed:"),
+		strings.HasPrefix(errorMessage, "app container provisioning failed:"),
+		strings.HasPrefix(errorMessage, "app readiness failed:"),
+		strings.HasPrefix(errorMessage, "promotion state load failed:"),
+		strings.HasPrefix(errorMessage, "promotion cleanup failed:"),
+		strings.HasPrefix(errorMessage, "job state load failed:"):
+		return errorMessage
+	case strings.HasPrefix(errorMessage, "git clone:"):
+		return "source fetch failed: " + trimFailurePrefix(errorMessage, "git clone:")
+	case strings.HasPrefix(errorMessage, "railpack prepare:"):
+		return "build planning failed: " + trimFailurePrefix(errorMessage, "railpack prepare:")
+	case strings.HasPrefix(errorMessage, "buildctl build:"):
+		return "image build failed: " + trimFailurePrefix(errorMessage, "buildctl build:")
+	case strings.HasPrefix(errorMessage, "ensure PocketBase:"):
+		return "PocketBase provisioning failed: " + trimFailurePrefix(errorMessage, "ensure PocketBase:")
+	case strings.HasPrefix(errorMessage, "ensure app container:"):
+		return "app container provisioning failed: " + trimFailurePrefix(errorMessage, "ensure app container:")
+	case strings.HasPrefix(errorMessage, "wait for app readiness:"):
+		return "app readiness failed: " + trimFailurePrefix(errorMessage, "wait for app readiness:")
+	case strings.HasPrefix(errorMessage, "load current deployment:"):
+		return "promotion state load failed: " + trimFailurePrefix(errorMessage, "load current deployment:")
+	case strings.HasPrefix(errorMessage, "remove superseded app container"):
+		return "promotion cleanup failed: " + errorMessage
+	case errorMessage == "failed to load claimed job":
+		return "job state load failed"
+	default:
+		return errorMessage
+	}
+}
+
+func trimFailurePrefix(errorMessage string, prefix string) string {
+	return strings.TrimSpace(strings.TrimPrefix(errorMessage, prefix))
 }
 
 func markJobSucceeded(db *sql.DB, currentJob job, finishedAt string, result deploymentResult) error {
