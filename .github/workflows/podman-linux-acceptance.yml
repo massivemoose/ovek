@@ -1,0 +1,56 @@
+name: podman-linux-acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/podman-linux-acceptance.yml"
+      - "Makefile"
+      - "Dockerfile.brain"
+      - "README.md"
+      - "cmd/**"
+      - "internal/**"
+      - "podman-compose.yml"
+      - "scripts/**"
+      - ".llms/test-plan.md"
+      - "go.mod"
+      - "go.sum"
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  podman-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Podman prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl make podman podman-compose
+
+      - name: Start rootful Podman socket
+        run: |
+          sudo systemctl start podman.socket
+          sudo podman info
+          sudo podman compose version
+
+      - name: Start canonical Podman stack
+        run: make podman-linux-up
+
+      - name: Run Podman smoke suite
+        run: make podman-linux-smoke
+
+      - name: Print Podman stack logs on failure
+        if: failure()
+        run: sudo podman compose -f podman-compose.yml logs --no-color
+
+      - name: Tear down canonical Podman stack
+        if: always()
+        run: make podman-linux-down
