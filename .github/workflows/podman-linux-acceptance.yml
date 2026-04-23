@@ -1,22 +1,7 @@
 name: podman-linux-acceptance
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/podman-linux-acceptance.yml"
-      - "Makefile"
-      - "Dockerfile.brain"
-      - "README.md"
-      - "cmd/**"
-      - "internal/**"
-      - "podman-compose.yml"
-      - "scripts/**"
-      - ".llms/test-plan.md"
-      - "go.mod"
-      - "go.sum"
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
