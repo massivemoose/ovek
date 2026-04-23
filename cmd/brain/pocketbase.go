@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -37,7 +38,15 @@ type pocketBaseContainerSpec struct {
 }
 
 func (runtime *dockerRuntime) EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error) {
-	network, err := runtime.EnsureProjectNetwork(ctx, projectName)
+	return ensureProjectPocketBase(ctx, runtime, runtime, projectName, image, projectsHostDataDir)
+}
+
+func (runtime *podmanRuntime) EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error) {
+	return ensureProjectPocketBase(ctx, runtime, runtime.dockerRuntime, projectName, image, projectsHostDataDir)
+}
+
+func ensureProjectPocketBase(ctx context.Context, imageRuntime Runtime, containerRuntime *dockerRuntime, projectName string, image string, projectsHostDataDir string) (string, error) {
+	network, err := containerRuntime.EnsureProjectNetwork(ctx, projectName)
 	if err != nil {
 		return "", fmt.Errorf("ensure project network: %w", err)
 	}
@@ -53,13 +62,13 @@ func (runtime *dockerRuntime) EnsureProjectPocketBase(ctx context.Context, proje
 		return "", fmt.Errorf("create PocketBase data directory %q: %w", spec.HostDataDir, err)
 	}
 
-	container, err := runtime.client.ContainerInspect(ctx, spec.Name)
+	container, err := containerRuntime.client.ContainerInspect(ctx, spec.Name)
 	if err == nil {
 		if err := validateExistingPocketBaseContainer(container, spec); err != nil {
 			return "", err
 		}
 		if container.State != nil && !container.State.Running {
-			if err := runtime.client.ContainerStart(ctx, container.ID, dockercontainer.StartOptions{}); err != nil {
+			if err := containerRuntime.client.ContainerStart(ctx, container.ID, dockercontainer.StartOptions{}); err != nil {
 				return "", fmt.Errorf("start PocketBase container %q: %w", spec.Name, err)
 			}
 		}
@@ -70,7 +79,11 @@ func (runtime *dockerRuntime) EnsureProjectPocketBase(ctx context.Context, proje
 		return "", fmt.Errorf("inspect PocketBase container %q: %w", spec.Name, err)
 	}
 
-	createResponse, err := runtime.client.ContainerCreate(
+	if err := imageRuntime.PullImage(ctx, spec.Config.Image); err != nil {
+		return "", err
+	}
+
+	createResponse, err := containerRuntime.client.ContainerCreate(
 		ctx,
 		spec.Config,
 		spec.HostConfig,
@@ -82,7 +95,7 @@ func (runtime *dockerRuntime) EnsureProjectPocketBase(ctx context.Context, proje
 		return "", fmt.Errorf("create PocketBase container %q: %w", spec.Name, err)
 	}
 
-	if err := runtime.client.ContainerStart(ctx, createResponse.ID, dockercontainer.StartOptions{}); err != nil {
+	if err := containerRuntime.client.ContainerStart(ctx, createResponse.ID, dockercontainer.StartOptions{}); err != nil {
 		return "", fmt.Errorf("start PocketBase container %q: %w", spec.Name, err)
 	}
 
@@ -136,7 +149,7 @@ func validateExistingPocketBaseContainer(container dockercontainer.InspectRespon
 	if err := requireManagedResourceOwnership(spec.Name, container.Config.Labels, spec.Metadata); err != nil {
 		return err
 	}
-	if container.Config.Image != spec.Config.Image {
+	if !equivalentContainerImageRef(container.Config.Image, spec.Config.Image) {
 		return fmt.Errorf("PocketBase container %q already exists with image %q, not %q", spec.Name, container.Config.Image, spec.Config.Image)
 	}
 	if !hasMount(container.Mounts, spec.HostDataDir, pocketBaseDataMountPath) {
@@ -193,4 +206,55 @@ func hasMount(mounts []dockercontainer.MountPoint, source string, target string)
 	}
 
 	return false
+}
+
+func equivalentContainerImageRef(actual string, expected string) bool {
+	return canonicalContainerImageRef(actual) == canonicalContainerImageRef(expected)
+}
+
+func canonicalContainerImageRef(imageRef string) string {
+	imageRef = strings.TrimSpace(imageRef)
+	if imageRef == "" {
+		return ""
+	}
+
+	digest := ""
+	if at := strings.Index(imageRef, "@"); at >= 0 {
+		digest = imageRef[at:]
+		imageRef = imageRef[:at]
+	}
+
+	tag := ""
+	lastSlash := strings.LastIndex(imageRef, "/")
+	lastColon := strings.LastIndex(imageRef, ":")
+	if lastColon > lastSlash {
+		tag = imageRef[lastColon+1:]
+		imageRef = imageRef[:lastColon]
+	}
+
+	parts := strings.Split(imageRef, "/")
+	host := "docker.io"
+	pathParts := parts
+	explicitHost := false
+	if len(parts) > 1 {
+		firstPart := parts[0]
+		if strings.Contains(firstPart, ".") || strings.Contains(firstPart, ":") || firstPart == "localhost" {
+			host = firstPart
+			pathParts = parts[1:]
+			explicitHost = true
+		}
+	}
+	if !explicitHost && len(pathParts) == 1 {
+		pathParts = append([]string{"library"}, pathParts[0])
+	}
+
+	canonical := host + "/" + strings.Join(pathParts, "/")
+	if digest != "" {
+		return canonical + digest
+	}
+	if tag == "" {
+		tag = "latest"
+	}
+
+	return canonical + ":" + tag
 }

@@ -44,17 +44,11 @@ func TestNewAppContainerSpec(t *testing.T) {
 	}
 
 	wantLabels := map[string]string{
-		managedLabelKey:       managedLabelValue,
-		projectLabelKey:       "demo-app",
-		roleLabelKey:          resourceRoleApp,
-		deploymentLabelKey:    "dep-123",
-		jobLabelKey:           "job-123",
-		traefikEnableLabelKey: "true",
-		"traefik.http.routers.app-demo-app-dep-123.entrypoints":               traefikWebEntrypoint,
-		"traefik.http.routers.app-demo-app-dep-123.rule":                      "Host(`demo-app.localhost`)",
-		"traefik.http.routers.app-demo-app-dep-123.service":                   "app-demo-app-dep-123",
-		"traefik.http.services.app-demo-app-dep-123.loadbalancer.server.port": appRuntimePort,
-		"traefik.docker.network":                                              alcesEdgeNetworkName,
+		managedLabelKey:    managedLabelValue,
+		projectLabelKey:    "demo-app",
+		roleLabelKey:       resourceRoleApp,
+		deploymentLabelKey: "dep-123",
+		jobLabelKey:        "job-123",
 	}
 	if !reflect.DeepEqual(spec.Config.Labels, wantLabels) {
 		t.Fatalf("expected labels %#v, got %#v", wantLabels, spec.Config.Labels)
@@ -122,6 +116,51 @@ func TestDockerRuntimeEnsureProjectAppCreatesConnectsAndStartsManagedContainer(t
 	}
 }
 
+func TestPodmanRuntimeEnsureProjectAppUsesPodmanPuller(t *testing.T) {
+	client := &fakeDockerClient{
+		networkInspectResponse: dockernetwork.Inspect{
+			ID:   "network-123",
+			Name: "demo-app-net",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRoleProjectNetwork,
+			},
+		},
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		containerCreateResponse: dockercontainer.CreateResponse{
+			ID: "container-123",
+		},
+	}
+	puller := &fakePodmanImagePuller{}
+	runtime := &podmanRuntime{
+		dockerRuntime:    newDockerRuntime(client),
+		puller:           puller,
+		registryInsecure: true,
+	}
+
+	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
+		ID:          "dep-123",
+		ProjectName: "demo-app",
+	}, "localhost:5001/alces-demo-app:dep-123")
+	if err != nil {
+		t.Fatalf("expected podman app provisioning to succeed, got error: %v", err)
+	}
+
+	if containerID != "container-123" {
+		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
+	}
+	if client.imagePullRef != "" {
+		t.Fatalf("expected docker image pull not to be used, got %q", client.imagePullRef)
+	}
+	if puller.imageRef != "localhost:5001/alces-demo-app:dep-123" {
+		t.Fatalf("expected podman puller image ref %q, got %q", "localhost:5001/alces-demo-app:dep-123", puller.imageRef)
+	}
+	if !puller.registryInsecure {
+		t.Fatal("expected podman puller to receive registryInsecure=true")
+	}
+}
+
 func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T) {
 	client := &fakeDockerClient{
 		networkInspectResponse: dockernetwork.Inspect{
@@ -144,17 +183,11 @@ func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T
 				Image: "alces-demo-app:dep-123",
 				Env:   []string{appPortEnv, appPocketBaseURLEnv},
 				Labels: map[string]string{
-					managedLabelKey:       managedLabelValue,
-					projectLabelKey:       "demo-app",
-					roleLabelKey:          resourceRoleApp,
-					deploymentLabelKey:    "dep-123",
-					jobLabelKey:           "dep-123",
-					traefikEnableLabelKey: "true",
-					"traefik.http.routers.app-demo-app-dep-123.entrypoints":               traefikWebEntrypoint,
-					"traefik.http.routers.app-demo-app-dep-123.rule":                      "Host(`demo-app.localhost`)",
-					"traefik.http.routers.app-demo-app-dep-123.service":                   "app-demo-app-dep-123",
-					"traefik.http.services.app-demo-app-dep-123.loadbalancer.server.port": appRuntimePort,
-					"traefik.docker.network":                                              alcesEdgeNetworkName,
+					managedLabelKey:    managedLabelValue,
+					projectLabelKey:    "demo-app",
+					roleLabelKey:       resourceRoleApp,
+					deploymentLabelKey: "dep-123",
+					jobLabelKey:        "dep-123",
 				},
 			},
 			NetworkSettings: &dockercontainer.NetworkSettings{
@@ -214,17 +247,11 @@ func TestDockerRuntimeEnsureProjectAppConnectsStoppedContainerToEdgeNetworkAndSt
 				Image: "alces-demo-app:dep-123",
 				Env:   []string{appPortEnv, appPocketBaseURLEnv},
 				Labels: map[string]string{
-					managedLabelKey:       managedLabelValue,
-					projectLabelKey:       "demo-app",
-					roleLabelKey:          resourceRoleApp,
-					deploymentLabelKey:    "dep-123",
-					jobLabelKey:           "dep-123",
-					traefikEnableLabelKey: "true",
-					"traefik.http.routers.app-demo-app-dep-123.entrypoints":               traefikWebEntrypoint,
-					"traefik.http.routers.app-demo-app-dep-123.rule":                      "Host(`demo-app.localhost`)",
-					"traefik.http.routers.app-demo-app-dep-123.service":                   "app-demo-app-dep-123",
-					"traefik.http.services.app-demo-app-dep-123.loadbalancer.server.port": appRuntimePort,
-					"traefik.docker.network":                                              alcesEdgeNetworkName,
+					managedLabelKey:    managedLabelValue,
+					projectLabelKey:    "demo-app",
+					roleLabelKey:       resourceRoleApp,
+					deploymentLabelKey: "dep-123",
+					jobLabelKey:        "dep-123",
 				},
 			},
 			NetworkSettings: &dockercontainer.NetworkSettings{
@@ -530,7 +557,7 @@ func TestDockerRuntimeReadProjectAppLogsReturnsCombinedManagedContainerLogs(t *t
 		ID:               "dep-current",
 		ProjectName:      "demo-app",
 		AppContainerName: "alces-demo-app-app-dep-current",
-	}, projectAppLogsOptions{})
+	}, runtimeLogOptions{})
 	if err != nil {
 		t.Fatalf("expected app log read to succeed, got error: %v", err)
 	}
@@ -584,7 +611,7 @@ func TestDockerRuntimeReadProjectAppLogsSupportsFollow(t *testing.T) {
 		ID:               "dep-current",
 		ProjectName:      "demo-app",
 		AppContainerName: "alces-demo-app-app-dep-current",
-	}, projectAppLogsOptions{Follow: true})
+	}, runtimeLogOptions{Follow: true})
 	if err != nil {
 		t.Fatalf("expected app log read to succeed, got error: %v", err)
 	}
@@ -612,7 +639,7 @@ func TestDockerRuntimeReadProjectAppLogsRejectsUnmanagedContainer(t *testing.T) 
 		ID:               "dep-current",
 		ProjectName:      "demo-app",
 		AppContainerName: "alces-demo-app-app-dep-current",
-	}, projectAppLogsOptions{})
+	}, runtimeLogOptions{})
 	if err == nil {
 		t.Fatal("expected unmanaged app log read to fail")
 	}
@@ -647,7 +674,7 @@ func TestDockerRuntimeReadProjectAppLogsReturnsContainerLogFailure(t *testing.T)
 		ID:               "dep-current",
 		ProjectName:      "demo-app",
 		AppContainerName: "alces-demo-app-app-dep-current",
-	}, projectAppLogsOptions{})
+	}, runtimeLogOptions{})
 	if err == nil {
 		t.Fatal("expected app log read to fail")
 	}

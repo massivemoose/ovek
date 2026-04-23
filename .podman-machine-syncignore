@@ -1,0 +1,10 @@
+.git
+brain_data
+pb_data
+node_modules
+.cache
+.tmp
+tmp
+dist
+coverage
+.DS_Store

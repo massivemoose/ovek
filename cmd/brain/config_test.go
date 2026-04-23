@@ -28,6 +28,12 @@ func TestLoadConfigReadsAPIKey(t *testing.T) {
 	if cfg.DataDir != defaultDataDir {
 		t.Fatalf("expected data dir %q, got %q", defaultDataDir, cfg.DataDir)
 	}
+	if cfg.RuntimeEngine != defaultRuntimeEngine {
+		t.Fatalf("expected runtime engine %q, got %q", defaultRuntimeEngine, cfg.RuntimeEngine)
+	}
+	if cfg.RuntimeHost != "" {
+		t.Fatalf("expected runtime host %q, got %q", "", cfg.RuntimeHost)
+	}
 	if cfg.BuildKitHost != defaultBuildKitHost {
 		t.Fatalf("expected BuildKit host %q, got %q", defaultBuildKitHost, cfg.BuildKitHost)
 	}
@@ -51,6 +57,12 @@ func TestLoadConfigReadsAPIKey(t *testing.T) {
 	}
 	if cfg.PocketBaseImage != defaultPocketBaseImage {
 		t.Fatalf("expected PocketBase image %q, got %q", defaultPocketBaseImage, cfg.PocketBaseImage)
+	}
+	if cfg.TraefikDynamicConfigDir != defaultTraefikDynamicConfigDir {
+		t.Fatalf("expected Traefik config dir %q, got %q", defaultTraefikDynamicConfigDir, cfg.TraefikDynamicConfigDir)
+	}
+	if cfg.TraefikBrainServiceURL != defaultTraefikBrainServiceURL {
+		t.Fatalf("expected Traefik brain service URL %q, got %q", defaultTraefikBrainServiceURL, cfg.TraefikBrainServiceURL)
 	}
 	if cfg.AuthMode != authModeDev {
 		t.Fatalf("expected auth mode %q, got %q", authModeDev, cfg.AuthMode)
@@ -82,6 +94,8 @@ func TestLoadConfigReadsRegistryAndProjectRuntimeOverrides(t *testing.T) {
 	t.Setenv("REGISTRY_INSECURE", "false")
 	t.Setenv("PROJECTS_HOST_DATA_DIR", "/srv/alces/projects")
 	t.Setenv("POCKETBASE_IMAGE", "custom/pocketbase:1.0")
+	t.Setenv("TRAEFIK_DYNAMIC_CONFIG_DIR", "/srv/alces/traefik")
+	t.Setenv("TRAEFIK_BRAIN_SERVICE_URL", "http://brain.internal:8081")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -109,6 +123,12 @@ func TestLoadConfigReadsRegistryAndProjectRuntimeOverrides(t *testing.T) {
 	if cfg.PocketBaseImage != "custom/pocketbase:1.0" {
 		t.Fatalf("expected PocketBase image %q, got %q", "custom/pocketbase:1.0", cfg.PocketBaseImage)
 	}
+	if cfg.TraefikDynamicConfigDir != "/srv/alces/traefik" {
+		t.Fatalf("expected Traefik config dir %q, got %q", "/srv/alces/traefik", cfg.TraefikDynamicConfigDir)
+	}
+	if cfg.TraefikBrainServiceURL != "http://brain.internal:8081" {
+		t.Fatalf("expected Traefik brain service URL %q, got %q", "http://brain.internal:8081", cfg.TraefikBrainServiceURL)
+	}
 }
 
 func TestLoadConfigRejectsInvalidRegistryInsecureValue(t *testing.T) {
@@ -135,5 +155,33 @@ func TestLoadConfigAllowsProdModeWithoutStaticAPIKey(t *testing.T) {
 	}
 	if cfg.BrainAPIKey != "" {
 		t.Fatalf("expected static api key to be empty in prod mode, got %q", cfg.BrainAPIKey)
+	}
+}
+
+func TestLoadConfigReadsPodmanRuntimeDefaults(t *testing.T) {
+	t.Setenv("ALCES_AUTH_MODE", authModeDev)
+	t.Setenv("BRAIN_API_KEY", "test-key")
+	t.Setenv("RUNTIME_ENGINE", runtimeEnginePodman)
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("expected config to load, got error: %v", err)
+	}
+	if cfg.RuntimeEngine != runtimeEnginePodman {
+		t.Fatalf("expected runtime engine %q, got %q", runtimeEnginePodman, cfg.RuntimeEngine)
+	}
+	if cfg.RuntimeHost != defaultPodmanRuntimeHost {
+		t.Fatalf("expected runtime host %q, got %q", defaultPodmanRuntimeHost, cfg.RuntimeHost)
+	}
+}
+
+func TestLoadConfigRejectsInvalidRuntimeEngine(t *testing.T) {
+	t.Setenv("ALCES_AUTH_MODE", authModeDev)
+	t.Setenv("BRAIN_API_KEY", "test-key")
+	t.Setenv("RUNTIME_ENGINE", "containerd")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("expected invalid RUNTIME_ENGINE to fail")
 	}
 }

@@ -23,7 +23,7 @@ type projectRuntimeReader interface {
 	ListProjectApps(ctx context.Context, projectName string) ([]projectAppRuntime, error)
 	GetProjectPocketBaseRuntime(ctx context.Context, projectName string) (projectRuntimeContainer, bool, error)
 	GetProjectNetworkRuntime(ctx context.Context, projectName string) (projectRuntimeNetwork, bool, error)
-	ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options projectAppLogsOptions) (io.ReadCloser, error)
+	ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options runtimeLogOptions) (io.ReadCloser, error)
 }
 
 type managedProjectRuntimeService struct {
@@ -191,14 +191,14 @@ func (service managedProjectRuntimeService) GetRuntime(ctx context.Context, proj
 var errProjectRuntimeNotFound = errors.New("project runtime not found")
 
 func (service managedProjectRuntimeService) ReadRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error) {
-	return service.openRuntimeLogs(ctx, projectName, projectAppLogsOptions{})
+	return service.openRuntimeLogs(ctx, projectName, runtimeLogOptions{})
 }
 
 func (service managedProjectRuntimeService) StreamRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error) {
-	return service.openRuntimeLogs(ctx, projectName, projectAppLogsOptions{Follow: true})
+	return service.openRuntimeLogs(ctx, projectName, runtimeLogOptions{Follow: true})
 }
 
-func (service managedProjectRuntimeService) openRuntimeLogs(ctx context.Context, projectName string, options projectAppLogsOptions) (io.ReadCloser, error) {
+func (service managedProjectRuntimeService) openRuntimeLogs(ctx context.Context, projectName string, options runtimeLogOptions) (io.ReadCloser, error) {
 	project, err := getProject(service.db, projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errProjectNotFound

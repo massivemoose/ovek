@@ -26,15 +26,19 @@ func main() {
 		}
 	}()
 
-	runtime, err := newDockerRuntimeFromEnv()
+	runtime, err := newRuntimeFromConfig(cfg)
 	if err != nil {
-		log.Fatalf("failed to create docker runtime: %v", err)
+		log.Fatalf("failed to create runtime: %v", err)
 	}
+	ingress := newTraefikFileIngress(db, runtime, cfg.TraefikDynamicConfigDir, cfg.TraefikBrainServiceURL)
 	if err := newStartupDeploymentReconciler(db, runtime).Reconcile(context.Background()); err != nil {
 		log.Fatalf("failed to reconcile startup deployment state: %v", err)
 	}
 	if err := reconcileAllProjectStatuses(db); err != nil {
 		log.Fatalf("failed to reconcile startup project status state: %v", err)
+	}
+	if err := ingress.SyncAll(context.Background()); err != nil {
+		log.Printf("warning: failed to fully reconcile startup ingress state: %v", err)
 	}
 
 	processor := newManagedDeploymentProcessor(
@@ -58,8 +62,10 @@ func main() {
 		&http.Client{},
 	)
 	cleaner := newManagedProjectCleaner(db, runtime, cfg.DataDir, artifactCleaner)
+	cleaner.ingress = ingress
 	projectRuntimeService := newManagedProjectRuntimeService(db, runtime)
 	jobManager := newJobManager(db, processor, artifactCleaner)
+	jobManager.ingress = ingress
 	workerContext, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
 

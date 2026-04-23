@@ -10,9 +10,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 var errProjectNotFound = errors.New("project not found")
+
+const (
+	cleanupRuntimeTeardownAttempts          = 5
+	cleanupRuntimeTeardownInitialRetryDelay = 150 * time.Millisecond
+	cleanupRuntimeTeardownMaxRetryDelay     = 600 * time.Millisecond
+)
 
 type projectCleanupService interface {
 	Cleanup(ctx context.Context, projectName string) error
@@ -30,6 +39,7 @@ type managedProjectCleaner struct {
 	db              *sql.DB
 	runtime         projectCleanupRuntime
 	artifactCleaner registryArtifactCleaner
+	ingress         projectIngressManager
 }
 
 func newManagedProjectCleaner(db *sql.DB, runtime projectCleanupRuntime, dataDir string, artifactCleaners ...registryArtifactCleaner) managedProjectCleaner {
@@ -73,24 +83,89 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 		return fmt.Errorf("list project apps: %w", err)
 	}
 	for _, app := range apps {
-		if err := cleaner.runtime.RemoveProjectApp(ctx, app.deploymentRecord()); err != nil {
+		if err := retryRuntimeTeardown(ctx, "remove project app "+app.AppContainerName, func(ctx context.Context) error {
+			return cleaner.runtime.RemoveProjectApp(ctx, app.deploymentRecord())
+		}); err != nil {
 			return fmt.Errorf("remove project app %q: %w", app.AppContainerName, err)
 		}
 	}
 
-	if err := cleaner.runtime.RemoveProjectPocketBase(ctx, projectName); err != nil {
+	if err := retryRuntimeTeardown(ctx, "remove PocketBase for project "+projectName, func(ctx context.Context) error {
+		return cleaner.runtime.RemoveProjectPocketBase(ctx, projectName)
+	}); err != nil {
 		return fmt.Errorf("remove PocketBase: %w", err)
 	}
-	if err := cleaner.runtime.RemoveProjectNetwork(ctx, projectName); err != nil {
+	if err := retryRuntimeTeardown(ctx, "remove network for project "+projectName, func(ctx context.Context) error {
+		return cleaner.runtime.RemoveProjectNetwork(ctx, projectName)
+	}); err != nil {
 		return fmt.Errorf("remove project network: %w", err)
 	}
 	if err := clearProjectRuntimeState(cleaner.db, projectName); err != nil {
 		return err
 	}
+	if cleaner.ingress != nil {
+		if err := cleaner.ingress.RemoveProject(projectName); err != nil {
+			log.Printf("warning: failed to remove ingress for project %q during cleanup: %v", projectName, err)
+		}
+	}
 	cleaner.cleanupProjectImages(ctx, projectName, imageRefs)
 	cleaner.cleanupProjectLogFiles(projectName, logPaths)
 
 	return nil
+}
+
+func retryRuntimeTeardown(ctx context.Context, description string, teardown func(context.Context) error) error {
+	var lastErr error
+	for attempt := 1; attempt <= cleanupRuntimeTeardownAttempts; attempt++ {
+		err := teardown(ctx)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		if !isRetryableRuntimeTeardownError(err) || attempt == cleanupRuntimeTeardownAttempts {
+			return err
+		}
+
+		delay := cleanupRuntimeTeardownRetryDelay(attempt)
+		log.Printf("warning: transient runtime cleanup failure while trying to %s; retrying in %s (%d/%d): %v", description, delay, attempt, cleanupRuntimeTeardownAttempts, err)
+		if err := sleepForRuntimeTeardownRetry(ctx, delay); err != nil {
+			return fmt.Errorf("%w after retryable cleanup error: %v", err, lastErr)
+		}
+	}
+
+	return lastErr
+}
+
+func isRetryableRuntimeTeardownError(err error) bool {
+	return cerrdefs.IsConflict(err) ||
+		cerrdefs.IsInternal(err) ||
+		cerrdefs.IsUnknown(err) ||
+		cerrdefs.IsUnavailable(err)
+}
+
+func cleanupRuntimeTeardownRetryDelay(attempt int) time.Duration {
+	delay := cleanupRuntimeTeardownInitialRetryDelay
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if delay >= cleanupRuntimeTeardownMaxRetryDelay {
+			return cleanupRuntimeTeardownMaxRetryDelay
+		}
+	}
+
+	return delay
+}
+
+var sleepForRuntimeTeardownRetry = func(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (cleaner managedProjectCleaner) cleanupProjectImages(ctx context.Context, projectName string, imageRefs []string) {
