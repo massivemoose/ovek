@@ -53,6 +53,7 @@ podman-vm-shell: podman-machine-sync
 
 .PHONY: podman-linux-up
 podman-linux-up:
+	mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs
 	sudo podman compose -f podman-compose.yml up -d --build --force-recreate
 
 .PHONY: podman-linux-smoke
