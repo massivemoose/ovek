@@ -24,8 +24,6 @@ const (
 	appPocketBaseURL      = "http://db:8090"
 	appPocketBaseURLEnv   = "POCKETBASE_URL=" + appPocketBaseURL
 	alcesEdgeNetworkName  = "alces-net"
-	traefikWebEntrypoint  = "web"
-	traefikEnableLabelKey = "traefik.enable"
 	appReadinessTimeout   = 20 * time.Second
 	appReadinessInterval  = 250 * time.Millisecond
 	appReadinessDialTime  = 1 * time.Second
@@ -64,12 +62,16 @@ type projectAppRuntime struct {
 	Running                 bool
 }
 
-type projectAppLogsOptions struct {
-	Follow bool
+func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error) {
+	return ensureProjectApp(ctx, runtime, runtime, job, imageRef)
 }
 
-func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error) {
-	network, err := runtime.EnsureProjectNetwork(ctx, job.ProjectName)
+func (runtime *podmanRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error) {
+	return ensureProjectApp(ctx, runtime, runtime.dockerRuntime, job, imageRef)
+}
+
+func ensureProjectApp(ctx context.Context, imageRuntime Runtime, containerRuntime *dockerRuntime, job job, imageRef string) (string, error) {
+	network, err := containerRuntime.EnsureProjectNetwork(ctx, job.ProjectName)
 	if err != nil {
 		return "", fmt.Errorf("ensure project network: %w", err)
 	}
@@ -82,16 +84,16 @@ func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, ima
 		Network:      network,
 	})
 
-	container, err := runtime.client.ContainerInspect(ctx, spec.Name)
+	container, err := containerRuntime.client.ContainerInspect(ctx, spec.Name)
 	if err == nil {
 		if err := validateExistingAppContainer(container, spec); err != nil {
 			return "", err
 		}
-		if err := runtime.ensureAppEdgeNetworkAttachment(ctx, container.ID, container.NetworkSettings, spec); err != nil {
+		if err := containerRuntime.ensureAppEdgeNetworkAttachment(ctx, container.ID, container.NetworkSettings, spec); err != nil {
 			return "", err
 		}
 		if container.State != nil && !container.State.Running {
-			if err := runtime.client.ContainerStart(ctx, container.ID, dockercontainer.StartOptions{}); err != nil {
+			if err := containerRuntime.client.ContainerStart(ctx, container.ID, dockercontainer.StartOptions{}); err != nil {
 				return "", fmt.Errorf("start app container %q: %w", spec.Name, err)
 			}
 		}
@@ -102,11 +104,11 @@ func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, ima
 		return "", fmt.Errorf("inspect app container %q: %w", spec.Name, err)
 	}
 
-	if err := runtime.PullImage(ctx, spec.Config.Image); err != nil {
+	if err := imageRuntime.PullImage(ctx, spec.Config.Image); err != nil {
 		return "", err
 	}
 
-	createResponse, err := runtime.client.ContainerCreate(
+	createResponse, err := containerRuntime.client.ContainerCreate(
 		ctx,
 		spec.Config,
 		spec.HostConfig,
@@ -118,10 +120,10 @@ func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, ima
 		return "", fmt.Errorf("create app container %q: %w", spec.Name, err)
 	}
 
-	if err := runtime.client.NetworkConnect(ctx, alcesEdgeNetworkName, createResponse.ID, spec.EdgeEndpointConfig); err != nil {
+	if err := containerRuntime.client.NetworkConnect(ctx, alcesEdgeNetworkName, createResponse.ID, spec.EdgeEndpointConfig); err != nil {
 		return "", fmt.Errorf("connect app container %q to network %q: %w", spec.Name, alcesEdgeNetworkName, err)
 	}
-	if err := runtime.client.ContainerStart(ctx, createResponse.ID, dockercontainer.StartOptions{}); err != nil {
+	if err := containerRuntime.client.ContainerStart(ctx, createResponse.ID, dockercontainer.StartOptions{}); err != nil {
 		return "", fmt.Errorf("start app container %q: %w", spec.Name, err)
 	}
 
@@ -132,11 +134,14 @@ func (runtime *dockerRuntime) WaitForProjectAppReady(ctx context.Context, job jo
 	readyContext, cancel := context.WithTimeout(ctx, appReadinessTimeout)
 	defer cancel()
 
-	containerName := appContainerName(job.ProjectName, job.ID)
 	address := ""
 	var lastErr error
 	for {
-		address, lastErr = runtime.projectAppReadinessAddress(readyContext, containerName)
+		target, err := runtime.ResolveProjectAppReadinessTarget(readyContext, job.ProjectName, job.ID)
+		if err == nil {
+			address = target.Address
+		}
+		lastErr = err
 		if lastErr == nil {
 			conn, err := runtime.dialContext(readyContext, "tcp", address)
 			if err == nil {
@@ -167,16 +172,26 @@ func (runtime *dockerRuntime) WaitForProjectAppReady(ctx context.Context, job jo
 		lastErr = readyContext.Err()
 	}
 
+	containerName := appContainerName(job.ProjectName, job.ID)
 	return fmt.Errorf("timed out waiting for app container %q to accept TCP connections on %s: %w", containerName, address, lastErr)
 }
 
-func (runtime *dockerRuntime) projectAppReadinessAddress(ctx context.Context, containerName string) (string, error) {
+func (runtime *dockerRuntime) ResolveProjectAppReadinessTarget(ctx context.Context, projectName string, deploymentID string) (appReadinessTarget, error) {
+	containerName := appContainerName(projectName, deploymentID)
 	container, err := runtime.client.ContainerInspect(ctx, containerName)
 	if err != nil {
-		return "", fmt.Errorf("inspect app container %q: %w", containerName, err)
+		return appReadinessTarget{}, fmt.Errorf("inspect app container %q: %w", containerName, err)
 	}
 
-	return readinessAddressForAppContainer(container, containerName)
+	address, err := readinessAddressForAppContainer(container, containerName)
+	if err != nil {
+		return appReadinessTarget{}, err
+	}
+
+	return appReadinessTarget{
+		Address: address,
+		URL:     "http://" + address,
+	}, nil
 }
 
 func readinessAddressForAppContainer(container dockercontainer.InspectResponse, containerName string) (string, error) {
@@ -216,7 +231,7 @@ func (runtime *dockerRuntime) RemoveProjectApp(ctx context.Context, deployment d
 	return runtime.removeManagedContainer(ctx, deployment.AppContainerName, container, "app container")
 }
 
-func (runtime *dockerRuntime) ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options projectAppLogsOptions) (io.ReadCloser, error) {
+func (runtime *dockerRuntime) ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options runtimeLogOptions) (io.ReadCloser, error) {
 	container, err := runtime.client.ContainerInspect(ctx, deployment.AppContainerName)
 	if err != nil {
 		return nil, fmt.Errorf("inspect app container %q: %w", deployment.AppContainerName, err)
@@ -302,15 +317,7 @@ func newAppContainerSpec(spec appSpec) appContainerSpec {
 		JobID:        spec.JobID,
 	}
 
-	routerName := appRouterName(spec.ProjectName, spec.DeploymentID)
-	serviceName := appServiceName(spec.ProjectName, spec.DeploymentID)
 	labels := managedLabels(metadata)
-	labels[traefikEnableLabelKey] = "true"
-	labels["traefik.http.routers."+routerName+".entrypoints"] = traefikWebEntrypoint
-	labels["traefik.http.routers."+routerName+".rule"] = fmt.Sprintf("Host(`%s.localhost`)", spec.ProjectName)
-	labels["traefik.http.routers."+routerName+".service"] = serviceName
-	labels["traefik.http.services."+serviceName+".loadbalancer.server.port"] = appRuntimePort
-	labels["traefik.docker.network"] = alcesEdgeNetworkName
 
 	return appContainerSpec{
 		Name:     appContainerName(spec.ProjectName, spec.DeploymentID),
@@ -387,14 +394,6 @@ func (runtime *dockerRuntime) ensureAppEdgeNetworkAttachment(ctx context.Context
 	}
 
 	return nil
-}
-
-func appRouterName(projectName string, deploymentID string) string {
-	return "app-" + projectName + "-" + deploymentID
-}
-
-func appServiceName(projectName string, deploymentID string) string {
-	return "app-" + projectName + "-" + deploymentID
 }
 
 func sleepWithContext(ctx context.Context, delay time.Duration) error {

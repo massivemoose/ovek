@@ -559,6 +559,39 @@ func TestJobManagerDoesNotCleanUpArtifactsForFailedJobs(t *testing.T) {
 	}
 }
 
+func TestJobManagerSyncsIngressAfterSuccessfulJob(t *testing.T) {
+	db := newTestDB(t)
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	ingress := &recordingProjectIngressManager{}
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:                 "/tmp/build.log",
+			ImageRef:                "localhost:5001/alces-demo-app:" + currentJob.ID,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
+		}, nil
+	}))
+	manager.ingress = ingress
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+	waitForJobStatus(t, db, createdJob.ID, jobStatusSucceeded)
+
+	if !reflect.DeepEqual(ingress.syncedProjects, []string{"demo-app"}) {
+		t.Fatalf("expected synced projects %#v, got %#v", []string{"demo-app"}, ingress.syncedProjects)
+	}
+}
+
 type processorFunc func(ctx context.Context, job job) (deploymentResult, error)
 
 func (process processorFunc) Process(ctx context.Context, job job) (deploymentResult, error) {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -141,6 +143,106 @@ func TestDockerRuntimeEnsureProjectNetworkRejectsUnmanagedExistingNetwork(t *tes
 	}
 }
 
+func TestPodmanRuntimePullImageUsesNativePuller(t *testing.T) {
+	puller := &fakePodmanImagePuller{}
+	runtime := &podmanRuntime{
+		dockerRuntime:    newDockerRuntime(&fakeDockerClient{}),
+		puller:           puller,
+		registryInsecure: true,
+	}
+
+	err := runtime.PullImage(context.Background(), "localhost:5001/alces-demo-app:job-123")
+	if err != nil {
+		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
+	}
+
+	if puller.imageRef != "localhost:5001/alces-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-123", puller.imageRef)
+	}
+	if !puller.registryInsecure {
+		t.Fatal("expected podman runtime to pass through registryInsecure=true")
+	}
+}
+
+func TestPodmanServiceImagePullerSetsTLSVerifyFalseForInsecureRegistries(t *testing.T) {
+	requests := make(chan *http.Request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	err = puller.PullImage(context.Background(), "localhost:5001/alces-demo-app:job-123", true)
+	if err != nil {
+		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
+	}
+
+	request := <-requests
+	if request.Method != http.MethodPost {
+		t.Fatalf("expected request method %q, got %q", http.MethodPost, request.Method)
+	}
+	if request.URL.Path != "/v1.0.0/libpod/images/pull" {
+		t.Fatalf("expected request path %q, got %q", "/v1.0.0/libpod/images/pull", request.URL.Path)
+	}
+	if request.URL.Query().Get("reference") != "localhost:5001/alces-demo-app:job-123" {
+		t.Fatalf("expected image reference query %q, got %q", "localhost:5001/alces-demo-app:job-123", request.URL.Query().Get("reference"))
+	}
+	if request.URL.Query().Get("tlsVerify") != "false" {
+		t.Fatalf("expected tlsVerify query %q, got %q", "false", request.URL.Query().Get("tlsVerify"))
+	}
+}
+
+func TestPodmanServiceImagePullerOmitsTLSVerifyForSecureRegistries(t *testing.T) {
+	requests := make(chan *http.Request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	err = puller.PullImage(context.Background(), "quay.io/podman/hello:latest", false)
+	if err != nil {
+		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
+	}
+
+	request := <-requests
+	if request.URL.Query().Get("tlsVerify") != "" {
+		t.Fatalf("expected tlsVerify query to be omitted, got %q", request.URL.Query().Get("tlsVerify"))
+	}
+}
+
+func TestPodmanServiceImagePullerReturnsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "http: server gave HTTP response to HTTPS client", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	err = puller.PullImage(context.Background(), "localhost:5001/alces-demo-app:job-123", true)
+	if err == nil {
+		t.Fatal("expected podman image pull to fail")
+	}
+	if !strings.Contains(err.Error(), "http: server gave HTTP response to HTTPS client") {
+		t.Fatalf("expected podman pull error to include API response body, got %v", err)
+	}
+}
+
 type fakeDockerClient struct {
 	networkInspectName     string
 	networkInspectResponse dockernetwork.Inspect
@@ -188,6 +290,12 @@ type fakeDockerClient struct {
 	containerRemoveID               string
 	containerRemoveOptions          dockercontainer.RemoveOptions
 	containerRemoveErr              error
+}
+
+type fakePodmanImagePuller struct {
+	imageRef         string
+	registryInsecure bool
+	err              error
 }
 
 func (client *fakeDockerClient) NetworkInspect(_ context.Context, networkID string, _ dockernetwork.InspectOptions) (dockernetwork.Inspect, error) {
@@ -276,4 +384,10 @@ func (client *fakeDockerClient) ContainerRemove(_ context.Context, containerID s
 	client.containerRemoveID = containerID
 	client.containerRemoveOptions = options
 	return client.containerRemoveErr
+}
+
+func (puller *fakePodmanImagePuller) PullImage(_ context.Context, imageRef string, registryInsecure bool) error {
+	puller.imageRef = imageRef
+	puller.registryInsecure = registryInsecure
+	return puller.err
 }

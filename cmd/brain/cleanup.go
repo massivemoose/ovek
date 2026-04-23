@@ -30,6 +30,7 @@ type managedProjectCleaner struct {
 	db              *sql.DB
 	runtime         projectCleanupRuntime
 	artifactCleaner registryArtifactCleaner
+	ingress         projectIngressManager
 }
 
 func newManagedProjectCleaner(db *sql.DB, runtime projectCleanupRuntime, dataDir string, artifactCleaners ...registryArtifactCleaner) managedProjectCleaner {
@@ -86,6 +87,11 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 	}
 	if err := clearProjectRuntimeState(cleaner.db, projectName); err != nil {
 		return err
+	}
+	if cleaner.ingress != nil {
+		if err := cleaner.ingress.RemoveProject(projectName); err != nil {
+			log.Printf("warning: failed to remove ingress for project %q during cleanup: %v", projectName, err)
+		}
 	}
 	cleaner.cleanupProjectImages(ctx, projectName, imageRefs)
 	cleaner.cleanupProjectLogFiles(projectName, logPaths)

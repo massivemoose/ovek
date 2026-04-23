@@ -17,11 +17,17 @@ const defaultRegistryAPIBaseURL = "http://registry:5000"
 const defaultRailpackFrontendImage = "ghcr.io/railwayapp/railpack-frontend"
 const defaultRegistryInsecure = true
 const defaultAuthMode = authModeDev
+const defaultRuntimeEngine = runtimeEngineDocker
+const defaultTraefikDynamicConfigDir = "/var/lib/alces/traefik/dynamic"
+const defaultTraefikBrainServiceURL = "http://brain:8081"
+const defaultPodmanRuntimeHost = "unix:///run/podman/podman.sock"
 
 type config struct {
 	AuthMode                 string
 	BrainAPIKey              string
 	DataDir                  string
+	RuntimeEngine            string
+	RuntimeHost              string
 	BuildKitHost             string
 	BuildRegistryPublishHost string
 	RuntimeRegistryHost      string
@@ -30,6 +36,8 @@ type config struct {
 	RegistryInsecure         bool
 	ProjectsHostDataDir      string
 	PocketBaseImage          string
+	TraefikDynamicConfigDir  string
+	TraefikBrainServiceURL   string
 }
 
 func loadConfig() (config, error) {
@@ -44,6 +52,19 @@ func loadConfig() (config, error) {
 	apiKey := strings.TrimSpace(os.Getenv("BRAIN_API_KEY"))
 	if authMode == authModeDev && apiKey == "" {
 		return config{}, errors.New("BRAIN_API_KEY is required in dev auth mode")
+	}
+
+	runtimeEngine := strings.TrimSpace(os.Getenv("RUNTIME_ENGINE"))
+	if runtimeEngine == "" {
+		runtimeEngine = defaultRuntimeEngine
+	}
+	if runtimeEngine != runtimeEngineDocker && runtimeEngine != runtimeEnginePodman {
+		return config{}, errors.New("RUNTIME_ENGINE must be docker or podman")
+	}
+
+	runtimeHost := strings.TrimSpace(os.Getenv("RUNTIME_HOST"))
+	if runtimeHost == "" && runtimeEngine == runtimeEnginePodman {
+		runtimeHost = defaultPodmanRuntimeHost
 	}
 
 	buildKitHost := strings.TrimSpace(os.Getenv("BUILDKIT_HOST"))
@@ -90,10 +111,22 @@ func loadConfig() (config, error) {
 		pocketBaseImage = defaultPocketBaseImage
 	}
 
+	traefikDynamicConfigDir := strings.TrimSpace(os.Getenv("TRAEFIK_DYNAMIC_CONFIG_DIR"))
+	if traefikDynamicConfigDir == "" {
+		traefikDynamicConfigDir = defaultTraefikDynamicConfigDir
+	}
+
+	traefikBrainServiceURL := strings.TrimSpace(os.Getenv("TRAEFIK_BRAIN_SERVICE_URL"))
+	if traefikBrainServiceURL == "" {
+		traefikBrainServiceURL = defaultTraefikBrainServiceURL
+	}
+
 	return config{
 		AuthMode:                 authMode,
 		BrainAPIKey:              apiKey,
 		DataDir:                  defaultDataDir,
+		RuntimeEngine:            runtimeEngine,
+		RuntimeHost:              runtimeHost,
 		BuildKitHost:             buildKitHost,
 		BuildRegistryPublishHost: buildRegistryPublishHost,
 		RuntimeRegistryHost:      runtimeRegistryHost,
@@ -102,5 +135,7 @@ func loadConfig() (config, error) {
 		RegistryInsecure:         registryInsecure,
 		ProjectsHostDataDir:      projectsHostDataDir,
 		PocketBaseImage:          pocketBaseImage,
+		TraefikDynamicConfigDir:  traefikDynamicConfigDir,
+		TraefikBrainServiceURL:   traefikBrainServiceURL,
 	}, nil
 }

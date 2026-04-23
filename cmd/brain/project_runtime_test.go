@@ -132,7 +132,7 @@ func TestManagedProjectRuntimeServiceStreamsCurrentRuntimeLogsWithFollow(t *test
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
 
-	var lastOptions projectAppLogsOptions
+	var lastOptions runtimeLogOptions
 	service := newManagedProjectRuntimeService(db, fakeProjectRuntimeReader{
 		logsByDeploymentID: map[string]string{
 			"dep-alpha": "hello from app\n",
@@ -497,7 +497,7 @@ type fakeProjectRuntimeReader struct {
 	pocketBaseByProject map[string]projectRuntimeContainer
 	networkByProject    map[string]projectRuntimeNetwork
 	logsByDeploymentID  map[string]string
-	lastLogsOptions     *projectAppLogsOptions
+	lastLogsOptions     *runtimeLogOptions
 	listErr             error
 	pocketBaseErr       error
 	networkErr          error
@@ -530,7 +530,7 @@ func (runtime fakeProjectRuntimeReader) GetProjectNetworkRuntime(_ context.Conte
 	return network, ok, nil
 }
 
-func (runtime fakeProjectRuntimeReader) ReadProjectAppLogs(_ context.Context, deployment deploymentRecord, options projectAppLogsOptions) (io.ReadCloser, error) {
+func (runtime fakeProjectRuntimeReader) ReadProjectAppLogs(_ context.Context, deployment deploymentRecord, options runtimeLogOptions) (io.ReadCloser, error) {
 	if runtime.logsErr != nil {
 		return nil, runtime.logsErr
 	}

@@ -136,6 +136,32 @@ func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t 
 	}
 }
 
+func TestManagedProjectCleanerRemovesProjectIngressAfterClearingRuntimeState(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+
+	ingress := &recordingProjectIngressManager{}
+	cleaner := newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, defaultDataDir)
+	cleaner.ingress = ingress
+
+	if err := cleaner.Cleanup(context.Background(), "demo-app"); err != nil {
+		t.Fatalf("expected cleanup to succeed, got error: %v", err)
+	}
+
+	if !reflect.DeepEqual(ingress.removedProjects, []string{"demo-app"}) {
+		t.Fatalf("expected removed ingress projects %#v, got %#v", []string{"demo-app"}, ingress.removedProjects)
+	}
+}
+
 func TestManagedProjectCleanerIsIdempotentWhenRuntimeResourcesAreAlreadyGone(t *testing.T) {
 	db := newTestDB(t)
 	seedCurrentDeployment(t, db, deploymentRecord{

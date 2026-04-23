@@ -38,6 +38,7 @@ type jobManager struct {
 	db              *sql.DB
 	processor       deploymentProcessor
 	artifactCleaner registryArtifactCleaner
+	ingress         projectIngressManager
 	queue           chan string
 }
 
@@ -122,6 +123,11 @@ func (manager *jobManager) processJob(ctx context.Context, jobID string) {
 	if err := markJobSucceeded(manager.db, job, finishedAt, result); err != nil {
 		log.Printf("failed to mark job %s as succeeded: %v", jobID, err)
 		return
+	}
+	if manager.ingress != nil {
+		if err := manager.ingress.SyncProject(ctx, job.ProjectName); err != nil {
+			log.Printf("warning: failed to sync ingress for project %q after job %s: %v", job.ProjectName, jobID, err)
+		}
 	}
 
 	manager.cleanupSupersededDeploymentImage(ctx, job.ProjectName, result.SupersededDeploymentID)
