@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 func TestManagedProjectCleanerRemovesManagedResourcesInOrderAndClearsRuntimeState(t *testing.T) {
@@ -133,6 +137,94 @@ func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t 
 	}
 	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusRunning {
 		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
+	}
+}
+
+func TestManagedProjectCleanerRetriesTransientRuntimeTeardownFailures(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "alces-demo-app:dep-current",
+		AppContainerName:        "alces-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "alces-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+
+	originalSleep := sleepForRuntimeTeardownRetry
+	var retryDelays []time.Duration
+	sleepForRuntimeTeardownRetry = func(_ context.Context, delay time.Duration) error {
+		retryDelays = append(retryDelays, delay)
+		return nil
+	}
+	t.Cleanup(func() {
+		sleepForRuntimeTeardownRetry = originalSleep
+	})
+
+	runtime := &fakeProjectCleanupRuntime{
+		appsByProject: map[string][]projectAppRuntime{
+			"demo-app": {
+				{
+					DeploymentID:            "dep-current",
+					ProjectName:             "demo-app",
+					AppContainerName:        "alces-demo-app-app-dep-current",
+					ImageRef:                "alces-demo-app:dep-current",
+					NetworkName:             "demo-app-net",
+					PocketBaseContainerName: "alces-demo-app-pb",
+				},
+			},
+		},
+		removeAppErrs: []error{fmt.Errorf("podman app remove 500: %w", cerrdefs.ErrInternal), nil},
+		removePBErrs:  []error{fmt.Errorf("podman PocketBase remove unavailable: %w", cerrdefs.ErrUnavailable), nil},
+		removeNetErrs: []error{fmt.Errorf("podman network still has endpoint: %w", cerrdefs.ErrConflict), nil},
+	}
+
+	if err := newManagedProjectCleaner(db, runtime, defaultDataDir).Cleanup(context.Background(), "demo-app"); err != nil {
+		t.Fatalf("expected cleanup to retry transient runtime failures and succeed, got error: %v", err)
+	}
+
+	wantSequence := []string{
+		"app:alces-demo-app-app-dep-current",
+		"app:alces-demo-app-app-dep-current",
+		"pocketbase:demo-app",
+		"pocketbase:demo-app",
+		"network:demo-app",
+		"network:demo-app",
+	}
+	if !reflect.DeepEqual(runtime.sequence, wantSequence) {
+		t.Fatalf("expected cleanup sequence %#v, got %#v", wantSequence, runtime.sequence)
+	}
+	wantRetryDelays := []time.Duration{
+		150 * time.Millisecond,
+		150 * time.Millisecond,
+		150 * time.Millisecond,
+	}
+	if !reflect.DeepEqual(retryDelays, wantRetryDelays) {
+		t.Fatalf("expected retry delays %#v, got %#v", wantRetryDelays, retryDelays)
+	}
+	assertCurrentDeploymentUnset(t, db, "demo-app")
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusIdle {
+		t.Fatalf("expected project status %q, got %q", projectStatusIdle, got)
+	}
+}
+
+func TestCleanupRuntimeTeardownRetryDelayBacksOffAndCaps(t *testing.T) {
+	got := []time.Duration{
+		cleanupRuntimeTeardownRetryDelay(1),
+		cleanupRuntimeTeardownRetryDelay(2),
+		cleanupRuntimeTeardownRetryDelay(3),
+		cleanupRuntimeTeardownRetryDelay(4),
+	}
+	want := []time.Duration{
+		150 * time.Millisecond,
+		300 * time.Millisecond,
+		600 * time.Millisecond,
+		600 * time.Millisecond,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected retry delay sequence %#v, got %#v", want, got)
 	}
 }
 
@@ -585,8 +677,11 @@ type fakeProjectCleanupRuntime struct {
 	appsByProject map[string][]projectAppRuntime
 	listErr       error
 	removeAppErr  error
+	removeAppErrs []error
 	removePBErr   error
+	removePBErrs  []error
 	removeNetErr  error
+	removeNetErrs []error
 	sequence      []string
 }
 
@@ -606,16 +701,31 @@ func (runtime *fakeProjectCleanupRuntime) ListProjectApps(_ context.Context, pro
 
 func (runtime *fakeProjectCleanupRuntime) RemoveProjectApp(_ context.Context, deployment deploymentRecord) error {
 	runtime.sequence = append(runtime.sequence, "app:"+deployment.AppContainerName)
+	if len(runtime.removeAppErrs) > 0 {
+		err := runtime.removeAppErrs[0]
+		runtime.removeAppErrs = runtime.removeAppErrs[1:]
+		return err
+	}
 	return runtime.removeAppErr
 }
 
 func (runtime *fakeProjectCleanupRuntime) RemoveProjectPocketBase(_ context.Context, projectName string) error {
 	runtime.sequence = append(runtime.sequence, "pocketbase:"+projectName)
+	if len(runtime.removePBErrs) > 0 {
+		err := runtime.removePBErrs[0]
+		runtime.removePBErrs = runtime.removePBErrs[1:]
+		return err
+	}
 	return runtime.removePBErr
 }
 
 func (runtime *fakeProjectCleanupRuntime) RemoveProjectNetwork(_ context.Context, projectName string) error {
 	runtime.sequence = append(runtime.sequence, "network:"+projectName)
+	if len(runtime.removeNetErrs) > 0 {
+		err := runtime.removeNetErrs[0]
+		runtime.removeNetErrs = runtime.removeNetErrs[1:]
+		return err
+	}
 	return runtime.removeNetErr
 }
 
