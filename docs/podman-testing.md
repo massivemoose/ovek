@@ -37,6 +37,25 @@ What these targets do:
 The VM copy is disposable test state. It is intentionally not treated as a bidirectional workspace.
 The helper sync preserves `brain_data` across resyncs so repeated `make podman-vm-up` and `make podman-vm-smoke` runs do not delete live bind-mount sources out from under running containers.
 
+### Manual VM Wrapper
+
+Use `./pm` for Docker-like manual inspection against the Podman machine lane. It prints the underlying command before running it so the VM indirection stays visible.
+
+Common commands:
+
+1. `./pm up`
+2. `./pm smoke`
+3. `./pm compose ps`
+4. `./pm compose logs brain`
+5. `./pm podman ps -a`
+6. `./pm logs <CONTAINER_NAME>`
+7. `./pm api GET /v1/ping`
+8. `./pm api GET /v1/projects/demo-app/runtime`
+9. `./pm app demo-app /`
+10. `./pm down`
+
+The HTTP helpers curl through the forwarded Traefik port on the Mac host and inject the required `Host:` headers. `./pm api` also injects the local dev API key.
+
 ### Sync Excludes
 
 The VM sync path excludes:
