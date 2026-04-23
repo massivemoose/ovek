@@ -149,6 +149,27 @@ http_code() {
 	curl -sS -o /dev/null -w '%{http_code}' "$@"
 }
 
+wait_for_app_http_200() {
+	attempt=1
+	last_status_code=""
+
+	while [ "${attempt}" -le "${max_attempts}" ]; do
+		last_status_code="$(http_code -H "Host: ${project_host}" "${brain_base_url}/")"
+		if [ "${last_status_code}" = "200" ]; then
+			return 0
+		fi
+
+		if [ "${attempt}" -eq 1 ] || [ $((attempt % progress_interval)) -eq 0 ]; then
+			log "Routed app returned HTTP ${last_status_code}; waiting (${attempt}/${max_attempts})"
+		fi
+
+		sleep "${sleep_seconds}"
+		attempt=$((attempt + 1))
+	done
+
+	fail "Expected routed app to return HTTP 200, got ${last_status_code}"
+}
+
 cleanup_project_runtime() {
 	max_cleanup_attempts="${ALCES_CLEANUP_MAX_ATTEMPTS:-5}"
 	cleanup_retry_seconds="${ALCES_CLEANUP_RETRY_SECONDS:-2}"
@@ -207,8 +228,7 @@ log "Checking runtime logs and routed app after first deploy"
 runtime_logs="$(brain_curl "${brain_base_url}/v1/projects/${project_name}/runtime/logs")"
 [ -n "${runtime_logs}" ] || fail "Runtime logs endpoint returned no content"
 
-app_status_code="$(http_code -H "Host: ${project_host}" "${brain_base_url}/")"
-[ "${app_status_code}" = "200" ] || fail "Expected routed app to return HTTP 200, got ${app_status_code}"
+wait_for_app_http_200
 
 log "Creating second deployment"
 second_job_id="$(deploy_project)"
