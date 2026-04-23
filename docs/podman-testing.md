@@ -7,6 +7,8 @@ Alces now keeps two explicit validation lanes for Podman:
 
 The Linux-first `podman-compose.yml` remains the canonical Podman topology. The Mac workflow runs that exact stack inside the machine instead of trying to make the compose file understand macOS path and socket differences.
 
+See [registry-model.md](registry-model.md) for the registry trust model and the reason the Podman topology uses separate BuildKit push, runtime pull, and Brain registry API hosts.
+
 ## Mac Linux-Sandbox Workflow
 
 Prerequisites:
@@ -119,3 +121,4 @@ Current Podman baseline note:
 - The Podman dev scaffold uses a split registry host model:
   - `BUILD_REGISTRY_PUBLISH_HOST=registry:5000` for in-network BuildKit pushes
   - `RUNTIME_REGISTRY_HOST=localhost:5001` for host-side Podman runtime pulls
+  - `REGISTRY_API_BASE_URL=http://registry:5000` for Brain-to-registry cleanup calls

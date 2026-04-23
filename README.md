@@ -87,6 +87,8 @@ If you run Alces in a different environment, update `BUILD_REGISTRY_PUBLISH_HOST
 2. the runtime engine can pull successfully
 3. Brain can reach the registry API for managed cleanup
 
+See [docs/registry-model.md](docs/registry-model.md) for the full registry trust model, Docker/Podman host split, and local insecure-registry assumptions.
+
 ## Local Compose Defaults
 
 The local `docker-compose.yml` keeps the dev registry behavior explicit:
@@ -138,6 +140,7 @@ Developer entrypoints:
 The shared automated smoke path is `scripts/podman-smoke.sh`. It validates first deploy, redeploy, routed app reachability, runtime logs, Brain restart reconciliation, and cleanup.
 
 See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM workflow, optional hostname setup, and the real-Linux acceptance path.
+See [docs/registry-model.md](docs/registry-model.md) for the registry host split that makes the Podman topology work.
 
 ## Managed Registry Artifact Cleanup
 
