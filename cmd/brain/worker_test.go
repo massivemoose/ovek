@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -60,6 +62,49 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	}
 }
 
+func TestJobManagerMarksFailedJobWhenPromotionStateUpdateFails(t *testing.T) {
+	db := newTestDB(t)
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "job.log")
+	if err := os.WriteFile(logPath, []byte("build output\n"), 0o644); err != nil {
+		t.Fatalf("expected log file seed to succeed, got error: %v", err)
+	}
+
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:  logPath,
+			ImageRef: "ovek-demo-app:" + currentJob.ID,
+		}, nil
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+
+	job := waitForJobStatus(t, db, createdJob.ID, jobStatusFailed)
+	if !strings.HasPrefix(job.ErrorMessage, "promotion state update failed: deployment result is missing app container name") {
+		t.Fatalf("expected promotion update error, got %q", job.ErrorMessage)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("expected log file read to succeed, got error: %v", err)
+	}
+	if !strings.Contains(string(logBytes), "error: "+job.ErrorMessage) {
+		t.Fatalf("expected job logs to contain promotion error %q, got %q", job.ErrorMessage, string(logBytes))
+	}
+	assertDeploymentMissing(t, db, createdJob.ID)
+	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusFailed {
+		t.Fatalf("expected project status %q, got %q", projectStatusFailed, got)
+	}
+}
+
 func TestNormalizeJobFailureMessage(t *testing.T) {
 	t.Parallel()
 
@@ -102,6 +147,11 @@ func TestNormalizeJobFailureMessage(t *testing.T) {
 			name:         "promotion state",
 			errorMessage: "load current deployment: database is locked",
 			want:         "promotion state load failed: database is locked",
+		},
+		{
+			name:         "promotion state update",
+			errorMessage: "promotion state update failed: deployment result is missing app container name",
+			want:         "promotion state update failed: deployment result is missing app container name",
 		},
 		{
 			name:         "promotion cleanup",

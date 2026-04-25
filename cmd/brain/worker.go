@@ -122,8 +122,14 @@ func (manager *jobManager) processJob(ctx context.Context, jobID string) {
 	finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := markJobSucceeded(manager.db, job, finishedAt, result); err != nil {
 		log.Printf("failed to mark job %s as succeeded: %v", jobID, err)
+		promotionErr := "promotion state update failed: " + err.Error()
+		appendJobLogError(result.LogPath, promotionErr)
+		if updateErr := markJobFailed(manager.db, jobID, finishedAt, promotionErr, result); updateErr != nil {
+			log.Printf("failed to mark job %s as failed after promotion update error: %v", jobID, updateErr)
+		}
 		return
 	}
+	appendJobLogLine(result.LogPath, "lifecycle: deployment promoted")
 	if manager.ingress != nil {
 		if err := manager.ingress.SyncProject(ctx, job.ProjectName); err != nil {
 			log.Printf("warning: failed to sync ingress for project %q after job %s: %v", job.ProjectName, jobID, err)
@@ -270,6 +276,7 @@ func normalizeJobFailureMessage(errorMessage string) string {
 		strings.HasPrefix(errorMessage, "app container provisioning failed:"),
 		strings.HasPrefix(errorMessage, "app readiness failed:"),
 		strings.HasPrefix(errorMessage, "promotion state load failed:"),
+		strings.HasPrefix(errorMessage, "promotion state update failed:"),
 		strings.HasPrefix(errorMessage, "promotion cleanup failed:"),
 		strings.HasPrefix(errorMessage, "job state load failed:"):
 		return errorMessage
@@ -287,6 +294,8 @@ func normalizeJobFailureMessage(errorMessage string) string {
 		return "app readiness failed: " + trimFailurePrefix(errorMessage, "wait for app readiness:")
 	case strings.HasPrefix(errorMessage, "load current deployment:"):
 		return "promotion state load failed: " + trimFailurePrefix(errorMessage, "load current deployment:")
+	case strings.HasPrefix(errorMessage, "promotion state update failed:"):
+		return errorMessage
 	case strings.HasPrefix(errorMessage, "remove superseded app container"):
 		return "promotion cleanup failed: " + errorMessage
 	case errorMessage == "failed to load claimed job":

@@ -67,12 +67,21 @@ func TestStatusShowsProjectDetail(t *testing.T) {
 				},
 			})
 		case "/v1/projects/demo-app/jobs":
-			_ = json.NewEncoder(w).Encode([]brainapi.Job{{
-				ID:        "job_123",
-				Status:    "succeeded",
-				RepoURL:   "https://example.com/demo.git",
-				CreatedAt: "2026-04-15T00:01:00Z",
-			}})
+			_ = json.NewEncoder(w).Encode([]brainapi.Job{
+				{
+					ID:           "job_124",
+					Status:       "failed",
+					RepoURL:      "https://example.com/demo.git",
+					CreatedAt:    "2026-04-15T00:03:00Z",
+					ErrorMessage: "app readiness failed: timed out waiting for port",
+				},
+				{
+					ID:        "job_123",
+					Status:    "succeeded",
+					RepoURL:   "https://example.com/demo.git",
+					CreatedAt: "2026-04-15T00:01:00Z",
+				},
+			})
 		case "/v1/projects/demo-app/deployments":
 			_ = json.NewEncoder(w).Encode([]brainapi.Deployment{{
 				ID:        "dep_123",
@@ -107,6 +116,9 @@ func TestStatusShowsProjectDetail(t *testing.T) {
 		"demo-app",
 		"dep_123",
 		"job_123",
+		"job_124",
+		"Error",
+		"app readiness failed: timed out waiting for port",
 	} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("expected output to contain %q, got %q", fragment, output)
