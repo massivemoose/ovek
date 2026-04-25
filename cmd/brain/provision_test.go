@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -172,6 +175,51 @@ func TestManagedDeploymentProcessorReturnsReadinessFailure(t *testing.T) {
 	}
 	if result.ImageRef != "ovek-demo-app:job-123" {
 		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:job-123", result.ImageRef)
+	}
+}
+
+func TestManagedDeploymentProcessorAppendsLifecycleAndErrorLines(t *testing.T) {
+	db := newTestDB(t)
+	logPath := filepath.Join(t.TempDir(), "job.log")
+	if err := os.WriteFile(logPath, []byte("build output\n"), 0o644); err != nil {
+		t.Fatalf("expected log file seed to succeed, got error: %v", err)
+	}
+
+	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:  logPath,
+			ImageRef: "ovek-demo-app:" + job.ID,
+		}, nil
+	})
+	provisioner := &fakeProjectProvisioner{
+		readyErr: errors.New("timed out waiting for port"),
+	}
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
+
+	_, err := processor.Process(context.Background(), job{
+		ID:          "job-123",
+		ProjectName: "demo-app",
+	})
+	if err == nil {
+		t.Fatal("expected readiness failure")
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("expected log file read to succeed, got error: %v", err)
+	}
+	logs := string(logBytes)
+	for _, fragment := range []string{
+		"build output\n",
+		"lifecycle: build succeeded",
+		"lifecycle: provisioning PocketBase",
+		"lifecycle: starting app container",
+		"lifecycle: waiting for app readiness",
+		"error: app readiness failed: timed out waiting for port",
+	} {
+		if !strings.Contains(logs, fragment) {
+			t.Fatalf("expected logs to contain %q, got %q", fragment, logs)
+		}
 	}
 }
 
