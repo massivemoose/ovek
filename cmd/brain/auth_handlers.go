@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/massivemoose/alces/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/brainapi"
 )
 
 const headerAPIKey = "X-API-Key"
-const headerReauthToken = "X-Alces-Reauth-Token"
+const headerReauthToken = "X-Ovek-Reauth-Token"
 
 type authContextKey struct{}
 

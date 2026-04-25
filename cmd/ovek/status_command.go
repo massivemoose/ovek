@@ -8,12 +8,12 @@ import (
 	"io"
 	"strings"
 
-	"github.com/massivemoose/alces/internal/brainapi"
-	"github.com/massivemoose/alces/internal/cli/client"
-	"github.com/massivemoose/alces/internal/cli/command"
-	"github.com/massivemoose/alces/internal/cli/config"
-	"github.com/massivemoose/alces/internal/cli/output"
-	"github.com/massivemoose/alces/internal/cli/projectctx"
+	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/client"
+	"github.com/massivemoose/ovek/internal/cli/command"
+	"github.com/massivemoose/ovek/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/cli/output"
+	"github.com/massivemoose/ovek/internal/cli/projectctx"
 )
 
 const statusActivityLimit = 5
@@ -35,7 +35,7 @@ func (cmd *statusCommand) Name() string { return "status" }
 func (cmd *statusCommand) Summary() string { return "Inspect projects and runtime state" }
 
 func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("alces status", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("ovek status", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -53,7 +53,7 @@ func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
 		return cmd.runList(ctx, brainClient)
 	}
 
-	projectName, err := projectctx.ExplicitResolver{CommandPath: "alces status"}.Resolve(flagSet.Args())
+	projectName, err := projectctx.ExplicitResolver{CommandPath: "ovek status"}.Resolve(flagSet.Args())
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
 }
 
 func (cmd *statusCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces status\n  alces status <project>\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek status\n  ovek status <project>\n")
 }
 
 func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Client) error {

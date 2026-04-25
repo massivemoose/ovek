@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/massivemoose/alces/internal/cli/command"
-	"github.com/massivemoose/alces/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/cli/command"
+	"github.com/massivemoose/ovek/internal/cli/config"
 )
 
 func main() {
@@ -37,8 +37,8 @@ func runApp(ctx context.Context, args []string, stdin io.Reader, stdout io.Write
 func newRootRouter(stdin io.Reader, stdout io.Writer, stderr io.Writer, store *config.Store) *command.Router {
 	prompts := newStdioPrompter(stdin, stdout)
 	return command.NewRouter(
-		"alces",
-		"Alces CLI for working with the Brain control plane.",
+		"ovek",
+		"Ovek CLI for working with the Brain control plane.",
 		newAuthCommand(stdout, stderr, store, prompts),
 		newDeployCommand(stdout, store, prompts),
 		newLogsCommand(stdout, store),
@@ -69,5 +69,5 @@ func (command *stubCommand) Run(_ context.Context, _ []string) error {
 }
 
 func (command *stubCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces %s\n", command.name)
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek %s\n", command.name)
 }

@@ -22,7 +22,7 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			ImageRef:                "ovek-demo-app:" + currentJob.ID,
 			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 			NetworkName:             projectNetworkName(currentJob.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
@@ -44,8 +44,8 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	if job.LogPath != "/tmp/build.log" {
 		t.Fatalf("expected log path %q, got %q", "/tmp/build.log", job.LogPath)
 	}
-	if job.ImageRef != "alces-demo-app:"+job.ID {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:"+job.ID, job.ImageRef)
+	if job.ImageRef != "ovek-demo-app:"+job.ID {
+		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:"+job.ID, job.ImageRef)
 	}
 	if job.StartedAt == "" {
 		t.Fatal("expected startedAt to be set")
@@ -105,8 +105,8 @@ func TestNormalizeJobFailureMessage(t *testing.T) {
 		},
 		{
 			name:         "promotion cleanup",
-			errorMessage: `remove superseded app container "alces-demo-app-app-dep-old": stop failed`,
-			want:         `promotion cleanup failed: remove superseded app container "alces-demo-app-app-dep-old": stop failed`,
+			errorMessage: `remove superseded app container "ovek-demo-app-app-dep-old": stop failed`,
+			want:         `promotion cleanup failed: remove superseded app container "ovek-demo-app-app-dep-old": stop failed`,
 		},
 		{
 			name:         "job state load",
@@ -203,12 +203,12 @@ func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 	close(releaseFirstJob)
 
 	firstFinishedJob := waitForJobStatus(t, db, firstJob.ID, jobStatusSucceeded)
-	if firstFinishedJob.ImageRef != "alces-demo-app:"+firstJob.ID {
-		t.Fatalf("expected first image ref %q, got %q", "alces-demo-app:"+firstJob.ID, firstFinishedJob.ImageRef)
+	if firstFinishedJob.ImageRef != "ovek-demo-app:"+firstJob.ID {
+		t.Fatalf("expected first image ref %q, got %q", "ovek-demo-app:"+firstJob.ID, firstFinishedJob.ImageRef)
 	}
 	secondFinishedJob := waitForJobStatus(t, db, secondJob.ID, jobStatusSucceeded)
-	if secondFinishedJob.ImageRef != "alces-demo-app:"+secondJob.ID {
-		t.Fatalf("expected second image ref %q, got %q", "alces-demo-app:"+secondJob.ID, secondFinishedJob.ImageRef)
+	if secondFinishedJob.ImageRef != "ovek-demo-app:"+secondJob.ID {
+		t.Fatalf("expected second image ref %q, got %q", "ovek-demo-app:"+secondJob.ID, secondFinishedJob.ImageRef)
 	}
 
 	firstDeployment := getDeploymentRecord(t, db, firstJob.ID)
@@ -243,7 +243,7 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                 "/tmp/requeued.log",
-			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			ImageRef:                "ovek-demo-app:" + currentJob.ID,
 			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 			NetworkName:             projectNetworkName(currentJob.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
@@ -329,10 +329,10 @@ func TestJobManagerKeepsProjectRunningWhenRecoveringInterruptedJobOverExistingRu
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -379,10 +379,10 @@ func TestJobManagerKeepsProjectRunningWhenNewDeploymentFailsOverExistingRuntime(
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -394,7 +394,7 @@ func TestJobManagerKeepsProjectRunningWhenNewDeploymentFailsOverExistingRuntime(
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			ImageRef:                "ovek-demo-app:" + currentJob.ID,
 			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 			NetworkName:             projectNetworkName(currentJob.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
@@ -436,7 +436,7 @@ func TestJobManagerCleansUpSupersededDeploymentImageAfterSuccessfulPromotion(t *
 	manager := newJobManager(db, processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		result := deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "localhost:5001/alces-demo-app:" + job.ID,
+			ImageRef:                "localhost:5001/ovek-demo-app:" + job.ID,
 			AppContainerName:        appContainerName(job.ProjectName, job.ID),
 			NetworkName:             projectNetworkName(job.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(job.ProjectName),
@@ -461,7 +461,7 @@ func TestJobManagerCleansUpSupersededDeploymentImageAfterSuccessfulPromotion(t *
 	waitForJobStatus(t, db, secondJob.ID, jobStatusSucceeded)
 	waitForArtifactCleanup(t, artifactCleaner, 1)
 
-	wantImageRefs := []string{"localhost:5001/alces-demo-app:" + firstJob.ID}
+	wantImageRefs := []string{"localhost:5001/ovek-demo-app:" + firstJob.ID}
 	if !reflect.DeepEqual(artifactCleaner.cleanedRefs, wantImageRefs) {
 		t.Fatalf("expected cleaned refs %#v, got %#v", wantImageRefs, artifactCleaner.cleanedRefs)
 	}
@@ -482,7 +482,7 @@ func TestJobManagerLogsArtifactCleanupFailuresButKeepsSuccessfulJobState(t *test
 	manager := newJobManager(db, processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		result := deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "localhost:5001/alces-demo-app:" + job.ID,
+			ImageRef:                "localhost:5001/ovek-demo-app:" + job.ID,
 			AppContainerName:        appContainerName(job.ProjectName, job.ID),
 			NetworkName:             projectNetworkName(job.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(job.ProjectName),
@@ -524,10 +524,10 @@ func TestJobManagerDoesNotCleanUpArtifactsForFailedJobs(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -540,7 +540,7 @@ func TestJobManagerDoesNotCleanUpArtifactsForFailedJobs(t *testing.T) {
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                "/tmp/build.log",
-			ImageRef:               "localhost:5001/alces-demo-app:" + currentJob.ID,
+			ImageRef:               "localhost:5001/ovek-demo-app:" + currentJob.ID,
 			SupersededDeploymentID: "dep-current",
 		}, errors.New("build failed")
 	}), artifactCleaner)
@@ -570,7 +570,7 @@ func TestJobManagerSyncsIngressAfterSuccessfulJob(t *testing.T) {
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "localhost:5001/alces-demo-app:" + currentJob.ID,
+			ImageRef:                "localhost:5001/ovek-demo-app:" + currentJob.ID,
 			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 			NetworkName:             projectNetworkName(currentJob.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
@@ -637,7 +637,7 @@ func waitForJobStatus(t *testing.T, db *sql.DB, jobID string, wantStatus string)
 
 func successfulDeploymentResult(currentJob job) deploymentResult {
 	return deploymentResult{
-		ImageRef:                "alces-" + currentJob.ProjectName + ":" + currentJob.ID,
+		ImageRef:                "ovek-" + currentJob.ProjectName + ":" + currentJob.ID,
 		AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 		NetworkName:             projectNetworkName(currentJob.ProjectName),
 		PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),

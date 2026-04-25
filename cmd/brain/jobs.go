@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/massivemoose/alces/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/brainapi"
 )
 
 const (

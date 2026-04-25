@@ -7,10 +7,10 @@ func TestReconcileAllProjectStatusesRepairsLegacyRunningProjectRows(t *testing.T
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})

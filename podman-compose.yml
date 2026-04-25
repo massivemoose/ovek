@@ -5,16 +5,16 @@ services:
     command:
       - "--log.level=INFO"
       - "--api.insecure=true"
-      - "--providers.file.directory=/var/lib/alces/traefik/dynamic"
+      - "--providers.file.directory=/var/lib/ovek/traefik/dynamic"
       - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
     ports:
       - "80:80"
       - "8080:8080"
     volumes:
-      - "./brain_data/traefik:/var/lib/alces/traefik:ro,z"
+      - "./brain_data/traefik:/var/lib/ovek/traefik:ro,z"
     networks:
-      - alces-net
+      - ovek-net
 
   brain:
     build:
@@ -33,18 +33,18 @@ services:
       - REGISTRY_INSECURE=true
       - PROJECTS_HOST_DATA_DIR=${PWD}/brain_data/projects
       - POCKETBASE_IMAGE=elestio/pocketbase:latest
-      - TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/alces/traefik/dynamic
+      - TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/ovek/traefik/dynamic
       - TRAEFIK_BRAIN_SERVICE_URL=http://brain:8081
     depends_on:
       - buildkitd
       - registry
     volumes:
       - "/run/podman/podman.sock:/run/podman/podman.sock"
-      - "./brain_data:/var/lib/alces:z"
+      - "./brain_data:/var/lib/ovek:z"
       - "${PWD}/brain_data/projects:${PWD}/brain_data/projects:z"
-      - "./brain_data/traefik:/var/lib/alces/traefik:z"
+      - "./brain_data/traefik:/var/lib/ovek/traefik:z"
     networks:
-      - alces-net
+      - ovek-net
 
   buildkitd:
     container_name: buildkit
@@ -53,7 +53,7 @@ services:
       - "--addr=tcp://0.0.0.0:1234"
     privileged: true
     networks:
-      - alces-net
+      - ovek-net
 
   registry:
     image: registry:2
@@ -63,9 +63,9 @@ services:
     ports:
       - "5001:5000"
     networks:
-      - alces-net
+      - ovek-net
 
 networks:
-  alces-net:
+  ovek-net:
     external: false
-    name: alces-net
+    name: ovek-net

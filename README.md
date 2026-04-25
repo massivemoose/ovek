@@ -1,6 +1,6 @@
-# alces
+# ovek
 
-Alces is a local-first control plane for building and running app projects through Brain.
+Ovek is a local-first control plane for building and running app projects through Brain.
 
 ## Brain Deploy Flow
 
@@ -64,7 +64,7 @@ Brain currently supports these registry- and builder-related settings:
   - local default: `true`
 - `TRAEFIK_DYNAMIC_CONFIG_DIR`
   - directory where Brain writes Traefik file-provider config
-  - local default: `/var/lib/alces/traefik/dynamic`
+  - local default: `/var/lib/ovek/traefik/dynamic`
 - `TRAEFIK_BRAIN_SERVICE_URL`
   - internal Brain URL Traefik should route `brain.localhost` to
   - local default: `http://brain:8081`
@@ -81,7 +81,7 @@ This hides a Docker Desktop reachability mismatch behind config:
 - the builder path runs inside the Brain container and needs a host name that resolves back to the host-published registry port
 - the runtime image ref stored by Brain should stay usable from the local Docker runtime, where `localhost:5001` is the right pull address
 
-If you run Alces in a different environment, update `BUILD_REGISTRY_PUBLISH_HOST`, `RUNTIME_REGISTRY_HOST`, and `REGISTRY_API_BASE_URL` together so:
+If you run Ovek in a different environment, update `BUILD_REGISTRY_PUBLISH_HOST`, `RUNTIME_REGISTRY_HOST`, and `REGISTRY_API_BASE_URL` together so:
 
 1. BuildKit can push successfully
 2. the runtime engine can pull successfully
@@ -98,7 +98,7 @@ The local `docker-compose.yml` keeps the dev registry behavior explicit:
 - `RUNTIME_REGISTRY_HOST=localhost:5001`
 - `REGISTRY_API_BASE_URL=http://registry:5000`
 - `REGISTRY_INSECURE=true`
-- `TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/alces/traefik/dynamic`
+- `TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/ovek/traefik/dynamic`
 - `TRAEFIK_BRAIN_SERVICE_URL=http://brain:8081`
 
 The registry exposes host port `5001`, while the Brain container reaches its API over the internal Compose service name `registry:5000`.

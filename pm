@@ -3,10 +3,10 @@
 set -euo pipefail
 
 machine="${PODMAN_MACHINE:-podman-machine-default}"
-vm_dir="${ALCES_VM_DIR:-/var/home/core/alces}"
-brain_base_url="${ALCES_BASE_URL:-http://127.0.0.1}"
-brain_host="${ALCES_BRAIN_HOST:-brain.localhost}"
-api_key="${ALCES_API_KEY:-dev-brain-key}"
+vm_dir="${OVEK_VM_DIR:-/var/home/core/ovek}"
+brain_base_url="${OVEK_BASE_URL:-http://127.0.0.1}"
+brain_host="${OVEK_BRAIN_HOST:-brain.localhost}"
+api_key="${OVEK_API_KEY:-dev-brain-key}"
 
 usage() {
 	cat <<'EOF'
@@ -49,10 +49,10 @@ Examples:
 
 Environment:
   PODMAN_MACHINE       default: podman-machine-default
-  ALCES_VM_DIR         default: /var/home/core/alces
-  ALCES_BASE_URL       default: http://127.0.0.1
-  ALCES_BRAIN_HOST     default: brain.localhost
-  ALCES_API_KEY        default: dev-brain-key
+  OVEK_VM_DIR         default: /var/home/core/ovek
+  OVEK_BASE_URL       default: http://127.0.0.1
+  OVEK_BRAIN_HOST     default: brain.localhost
+  OVEK_API_KEY        default: dev-brain-key
   PM_QUIET=1           do not print the underlying command
 EOF
 }

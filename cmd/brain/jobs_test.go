@@ -102,7 +102,7 @@ func TestListProjectJobsReturnsNewestFirst(t *testing.T) {
 		"2026-04-10T00:00:05Z",
 		"2026-04-10T00:01:00Z",
 		"/tmp/current.log",
-		"localhost:5001/alces-alpha-app:dep-current",
+		"localhost:5001/ovek-alpha-app:dep-current",
 		currentJob.ID,
 	); err != nil {
 		t.Fatalf("expected current job update to succeed, got error: %v", err)

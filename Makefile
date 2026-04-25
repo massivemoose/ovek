@@ -1,6 +1,6 @@
 PODMAN_MACHINE ?= podman-machine-default
-ALCES_VM_DIR ?= /var/home/core/alces
-PODMAN_VM_REPO ?= $(ALCES_VM_DIR)
+OVEK_VM_DIR ?= /var/home/core/ovek
+PODMAN_VM_REPO ?= $(OVEK_VM_DIR)
 PODMAN_VM_COMPOSE := cd '$(PODMAN_VM_REPO)' && mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs
 
 .PHONY: podman-machine-init
@@ -25,7 +25,7 @@ podman-machine-rootful: podman-machine-init
 
 .PHONY: podman-machine-sync
 podman-machine-sync: podman-machine-rootful
-	PODMAN_MACHINE_NAME='$(PODMAN_MACHINE)' ALCES_VM_DIR='$(ALCES_VM_DIR)' ./scripts/podman-machine-sync.sh
+	PODMAN_MACHINE_NAME='$(PODMAN_MACHINE)' OVEK_VM_DIR='$(OVEK_VM_DIR)' ./scripts/podman-machine-sync.sh
 
 .PHONY: podman-vm-bootstrap-compose
 podman-vm-bootstrap-compose: podman-machine-sync

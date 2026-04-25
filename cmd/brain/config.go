@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-const defaultDataDir = "/var/lib/alces"
+const defaultDataDir = "/var/lib/ovek"
 const defaultBuildKitHost = "docker-container://buildkit"
-const defaultProjectsHostDataDir = "/var/lib/alces/projects"
+const defaultProjectsHostDataDir = "/var/lib/ovek/projects"
 const defaultPocketBaseImage = "elestio/pocketbase:latest"
 const defaultBuildRegistryPublishHost = "host.docker.internal:5001"
 const defaultRuntimeRegistryHost = "localhost:5001"
@@ -18,7 +18,7 @@ const defaultRailpackFrontendImage = "ghcr.io/railwayapp/railpack-frontend"
 const defaultRegistryInsecure = true
 const defaultAuthMode = authModeDev
 const defaultRuntimeEngine = runtimeEngineDocker
-const defaultTraefikDynamicConfigDir = "/var/lib/alces/traefik/dynamic"
+const defaultTraefikDynamicConfigDir = "/var/lib/ovek/traefik/dynamic"
 const defaultTraefikBrainServiceURL = "http://brain:8081"
 const defaultPodmanRuntimeHost = "unix:///run/podman/podman.sock"
 
@@ -41,12 +41,12 @@ type config struct {
 }
 
 func loadConfig() (config, error) {
-	authMode := strings.TrimSpace(os.Getenv("ALCES_AUTH_MODE"))
+	authMode := strings.TrimSpace(os.Getenv("OVEK_AUTH_MODE"))
 	if authMode == "" {
 		authMode = defaultAuthMode
 	}
 	if authMode != authModeDev && authMode != authModeProd {
-		return config{}, errors.New("ALCES_AUTH_MODE must be dev or prod")
+		return config{}, errors.New("OVEK_AUTH_MODE must be dev or prod")
 	}
 
 	apiKey := strings.TrimSpace(os.Getenv("BRAIN_API_KEY"))

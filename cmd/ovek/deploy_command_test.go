@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/massivemoose/alces/internal/brainapi"
-	"github.com/massivemoose/alces/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/config"
 )
 
 func TestDeployCreatesJobAndPrintsSummary(t *testing.T) {
@@ -34,7 +34,7 @@ func TestDeployCreatesJobAndPrintsSummary(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(brainapi.Job{
 				ID:           "job_123",
 				Status:       "succeeded",
-				ImageRef:     "localhost:5001/alces-demo-app:dep_123",
+				ImageRef:     "localhost:5001/ovek-demo-app:dep_123",
 				FinishedAt:   "2026-04-16T00:20:00Z",
 				ProjectName:  "demo-app",
 				RepoURL:      "https://example.com/demo.git",
@@ -52,8 +52,8 @@ func TestDeployCreatesJobAndPrintsSummary(t *testing.T) {
 				ProjectName:         "demo-app",
 				CurrentDeploymentID: &currentDeploymentID,
 				App: &brainapi.ProjectRuntimeApp{
-					ContainerName: "alces-demo-app-app",
-					ImageRef:      "localhost:5001/alces-demo-app:dep_123",
+					ContainerName: "ovek-demo-app-app",
+					ImageRef:      "localhost:5001/ovek-demo-app:dep_123",
 					Running:       true,
 				},
 			})
@@ -111,7 +111,7 @@ func TestDeployRetriesAfterReauthRequired(t *testing.T) {
 				t.Fatalf("expected POST request, got %s", r.Method)
 			}
 			if deployAttempts == 1 {
-				if got := r.Header.Get("X-Alces-Reauth-Token"); got != "" {
+				if got := r.Header.Get("X-Ovek-Reauth-Token"); got != "" {
 					t.Fatalf("expected first deploy attempt without reauth token, got %q", got)
 				}
 				w.WriteHeader(http.StatusUnauthorized)
@@ -121,7 +121,7 @@ func TestDeployRetriesAfterReauthRequired(t *testing.T) {
 				})
 				return
 			}
-			if got := r.Header.Get("X-Alces-Reauth-Token"); got != "rt-test" {
+			if got := r.Header.Get("X-Ovek-Reauth-Token"); got != "rt-test" {
 				t.Fatalf("expected retried deploy request to include reauth token, got %q", got)
 			}
 			_ = json.NewEncoder(w).Encode(brainapi.Job{
@@ -150,7 +150,7 @@ func TestDeployRetriesAfterReauthRequired(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(brainapi.Job{
 				ID:          "job_456",
 				Status:      "succeeded",
-				ImageRef:    "localhost:5001/alces-demo-app:dep_456",
+				ImageRef:    "localhost:5001/ovek-demo-app:dep_456",
 				FinishedAt:  "2026-04-16T00:30:00Z",
 				ProjectName: "demo-app",
 				RepoURL:     "https://example.com/secure.git",
@@ -167,8 +167,8 @@ func TestDeployRetriesAfterReauthRequired(t *testing.T) {
 				ProjectName:         "demo-app",
 				CurrentDeploymentID: &currentDeploymentID,
 				App: &brainapi.ProjectRuntimeApp{
-					ContainerName: "alces-demo-app-app",
-					ImageRef:      "localhost:5001/alces-demo-app:dep_456",
+					ContainerName: "ovek-demo-app-app",
+					ImageRef:      "localhost:5001/ovek-demo-app:dep_456",
 					Running:       true,
 				},
 			})
@@ -261,7 +261,7 @@ func TestDeployFailurePrintsSummaryAndLogHint(t *testing.T) {
 		"Next Step",
 		"job_fail",
 		"source fetch failed: repository not found",
-		"alces logs --job job_fail --no-follow",
+		"ovek logs --job job_fail --no-follow",
 	} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("expected output to contain %q, got %q", fragment, output)

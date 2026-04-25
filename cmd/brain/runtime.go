@@ -18,11 +18,11 @@ import (
 )
 
 const (
-	managedLabelKey            = "alces.managed"
-	projectLabelKey            = "alces.project"
-	roleLabelKey               = "alces.role"
-	deploymentLabelKey         = "alces.deployment"
-	jobLabelKey                = "alces.job"
+	managedLabelKey            = "ovek.managed"
+	projectLabelKey            = "ovek.project"
+	roleLabelKey               = "ovek.role"
+	deploymentLabelKey         = "ovek.deployment"
+	jobLabelKey                = "ovek.job"
 	managedLabelValue          = "true"
 	resourceRoleProjectNetwork = "project-network"
 	resourceRolePocketBase     = "pocketbase"
@@ -353,11 +353,11 @@ func (runtime *dockerRuntime) RemoveProjectNetwork(ctx context.Context, projectN
 }
 
 func pocketBaseContainerName(projectName string) string {
-	return "alces-" + projectName + "-pb"
+	return "ovek-" + projectName + "-pb"
 }
 
 func appContainerName(projectName string, deploymentID string) string {
-	return "alces-" + projectName + "-app-" + deploymentID
+	return "ovek-" + projectName + "-app-" + deploymentID
 }
 
 func managedLabels(metadata managedResourceMetadata) map[string]string {
@@ -379,7 +379,7 @@ func managedLabels(metadata managedResourceMetadata) map[string]string {
 
 func requireManagedResourceOwnership(resourceName string, labels map[string]string, metadata managedResourceMetadata) error {
 	if labels[managedLabelKey] != managedLabelValue {
-		return fmt.Errorf("%s already exists but is not managed by alces", resourceName)
+		return fmt.Errorf("%s already exists but is not managed by ovek", resourceName)
 	}
 	if labels[projectLabelKey] != metadata.ProjectName {
 		return fmt.Errorf("%s already exists for project %q, not %q", resourceName, labels[projectLabelKey], metadata.ProjectName)

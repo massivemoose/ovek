@@ -23,7 +23,7 @@ const (
 	appPortEnv            = "PORT=" + appRuntimePort
 	appPocketBaseURL      = "http://db:8090"
 	appPocketBaseURLEnv   = "POCKETBASE_URL=" + appPocketBaseURL
-	alcesEdgeNetworkName  = "alces-net"
+	ovekEdgeNetworkName  = "ovek-net"
 	appReadinessTimeout   = 20 * time.Second
 	appReadinessInterval  = 250 * time.Millisecond
 	appReadinessDialTime  = 1 * time.Second
@@ -120,8 +120,8 @@ func ensureProjectApp(ctx context.Context, imageRuntime Runtime, containerRuntim
 		return "", fmt.Errorf("create app container %q: %w", spec.Name, err)
 	}
 
-	if err := containerRuntime.client.NetworkConnect(ctx, alcesEdgeNetworkName, createResponse.ID, spec.EdgeEndpointConfig); err != nil {
-		return "", fmt.Errorf("connect app container %q to network %q: %w", spec.Name, alcesEdgeNetworkName, err)
+	if err := containerRuntime.client.NetworkConnect(ctx, ovekEdgeNetworkName, createResponse.ID, spec.EdgeEndpointConfig); err != nil {
+		return "", fmt.Errorf("connect app container %q to network %q: %w", spec.Name, ovekEdgeNetworkName, err)
 	}
 	if err := containerRuntime.client.ContainerStart(ctx, createResponse.ID, dockercontainer.StartOptions{}); err != nil {
 		return "", fmt.Errorf("start app container %q: %w", spec.Name, err)
@@ -199,14 +199,14 @@ func readinessAddressForAppContainer(container dockercontainer.InspectResponse, 
 		return "", fmt.Errorf("app container %q is missing network settings", containerName)
 	}
 
-	endpoint := container.NetworkSettings.Networks[alcesEdgeNetworkName]
+	endpoint := container.NetworkSettings.Networks[ovekEdgeNetworkName]
 	if endpoint == nil {
-		return "", fmt.Errorf("app container %q is not attached to network %q", containerName, alcesEdgeNetworkName)
+		return "", fmt.Errorf("app container %q is not attached to network %q", containerName, ovekEdgeNetworkName)
 	}
 
 	ipAddress := strings.TrimSpace(endpoint.IPAddress)
 	if ipAddress == "" {
-		return "", fmt.Errorf("app container %q has no IP address on network %q", containerName, alcesEdgeNetworkName)
+		return "", fmt.Errorf("app container %q has no IP address on network %q", containerName, ovekEdgeNetworkName)
 	}
 
 	return net.JoinHostPort(ipAddress, appRuntimePort), nil
@@ -385,12 +385,12 @@ func (runtime *dockerRuntime) ensureAppEdgeNetworkAttachment(ctx context.Context
 	if networkSettings == nil {
 		return fmt.Errorf("app container %q is missing network settings", spec.Name)
 	}
-	if networkSettings.Networks[alcesEdgeNetworkName] != nil {
+	if networkSettings.Networks[ovekEdgeNetworkName] != nil {
 		return nil
 	}
 
-	if err := runtime.client.NetworkConnect(ctx, alcesEdgeNetworkName, containerID, spec.EdgeEndpointConfig); err != nil {
-		return fmt.Errorf("connect app container %q to network %q: %w", spec.Name, alcesEdgeNetworkName, err)
+	if err := runtime.client.NetworkConnect(ctx, ovekEdgeNetworkName, containerID, spec.EdgeEndpointConfig); err != nil {
+		return fmt.Errorf("connect app container %q to network %q: %w", spec.Name, ovekEdgeNetworkName, err)
 	}
 
 	return nil

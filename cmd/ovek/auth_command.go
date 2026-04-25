@@ -9,11 +9,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/massivemoose/alces/internal/brainapi"
-	"github.com/massivemoose/alces/internal/cli/client"
-	"github.com/massivemoose/alces/internal/cli/command"
-	"github.com/massivemoose/alces/internal/cli/config"
-	"github.com/massivemoose/alces/internal/cli/output"
+	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/client"
+	"github.com/massivemoose/ovek/internal/cli/command"
+	"github.com/massivemoose/ovek/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/cli/output"
 )
 
 func newAuthCommand(stdout io.Writer, stderr io.Writer, store *config.Store, prompts prompter) command.Command {
@@ -43,7 +43,7 @@ func (cmd *authBootstrapCommand) Summary() string {
 }
 
 func (cmd *authBootstrapCommand) Run(ctx context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("alces auth bootstrap", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("ovek auth bootstrap", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
 
 	host := flagSet.String("host", config.DefaultHost, "Brain base URL")
@@ -55,7 +55,7 @@ func (cmd *authBootstrapCommand) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	if flagSet.NArg() != 0 {
-		return fmt.Errorf("alces auth bootstrap does not accept positional arguments")
+		return fmt.Errorf("ovek auth bootstrap does not accept positional arguments")
 	}
 
 	username, err := cmd.prompts.Prompt("Username: ")
@@ -104,7 +104,7 @@ func (cmd *authBootstrapCommand) Run(ctx context.Context, args []string) error {
 }
 
 func (cmd *authBootstrapCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces auth bootstrap --profile <name> [--host <url>]\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth bootstrap --profile <name> [--host <url>]\n")
 }
 
 type authLoginCommand struct {
@@ -118,7 +118,7 @@ func (cmd *authLoginCommand) Name() string { return "login" }
 func (cmd *authLoginCommand) Summary() string { return "Verify and save local Brain auth" }
 
 func (cmd *authLoginCommand) Run(ctx context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("alces auth login", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("ovek auth login", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
 
 	host := flagSet.String("host", config.DefaultHost, "Brain base URL")
@@ -131,10 +131,10 @@ func (cmd *authLoginCommand) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	if flagSet.NArg() != 0 {
-		return fmt.Errorf("alces auth login does not accept positional arguments")
+		return fmt.Errorf("ovek auth login does not accept positional arguments")
 	}
 	if strings.TrimSpace(*apiKey) == "" {
-		return fmt.Errorf("alces auth login requires --api-key")
+		return fmt.Errorf("ovek auth login requires --api-key")
 	}
 
 	brainClient, err := client.New(*host, *apiKey)
@@ -158,7 +158,7 @@ func (cmd *authLoginCommand) Run(ctx context.Context, args []string) error {
 }
 
 func (cmd *authLoginCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces auth login --profile <name> [--host <url>] --api-key <key>\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth login --profile <name> [--host <url>] --api-key <key>\n")
 }
 
 type authStatusCommand struct {
@@ -171,7 +171,7 @@ func (cmd *authStatusCommand) Name() string { return "status" }
 func (cmd *authStatusCommand) Summary() string { return "Show local auth configuration status" }
 
 func (cmd *authStatusCommand) Run(_ context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("alces auth status", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("ovek auth status", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
 	profileName := flagSet.String("profile", "", "Profile name")
 	if err := flagSet.Parse(args); err != nil {
@@ -181,7 +181,7 @@ func (cmd *authStatusCommand) Run(_ context.Context, args []string) error {
 		return err
 	}
 	if flagSet.NArg() != 0 {
-		return fmt.Errorf("alces auth status does not accept positional arguments")
+		return fmt.Errorf("ovek auth status does not accept positional arguments")
 	}
 
 	configPath, err := cmd.config.Path()
@@ -219,7 +219,7 @@ func (cmd *authStatusCommand) Run(_ context.Context, args []string) error {
 }
 
 func (cmd *authStatusCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces auth status [--profile <name>]\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth status [--profile <name>]\n")
 }
 
 type authLogoutCommand struct {
@@ -232,7 +232,7 @@ func (cmd *authLogoutCommand) Name() string { return "logout" }
 func (cmd *authLogoutCommand) Summary() string { return "Clear local Brain auth" }
 
 func (cmd *authLogoutCommand) Run(_ context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("alces auth logout", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("ovek auth logout", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
 	profileName := flagSet.String("profile", "", "Profile name")
 	if err := flagSet.Parse(args); err != nil {
@@ -242,7 +242,7 @@ func (cmd *authLogoutCommand) Run(_ context.Context, args []string) error {
 		return err
 	}
 	if flagSet.NArg() != 0 {
-		return fmt.Errorf("alces auth logout does not accept positional arguments")
+		return fmt.Errorf("ovek auth logout does not accept positional arguments")
 	}
 
 	if err := cmd.config.RemoveProfile(*profileName); err != nil {
@@ -254,7 +254,7 @@ func (cmd *authLogoutCommand) Run(_ context.Context, args []string) error {
 }
 
 func (cmd *authLogoutCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces auth logout [--profile <name>]\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth logout [--profile <name>]\n")
 }
 
 type authProfilesCommand struct {
@@ -267,7 +267,7 @@ func (cmd *authProfilesCommand) Name() string { return "profiles" }
 func (cmd *authProfilesCommand) Summary() string { return "List configured local profiles" }
 
 func (cmd *authProfilesCommand) Run(_ context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("alces auth profiles", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("ovek auth profiles", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -276,7 +276,7 @@ func (cmd *authProfilesCommand) Run(_ context.Context, args []string) error {
 		return err
 	}
 	if flagSet.NArg() != 0 {
-		return fmt.Errorf("alces auth profiles does not accept positional arguments")
+		return fmt.Errorf("ovek auth profiles does not accept positional arguments")
 	}
 
 	cfg, err := cmd.config.Load()
@@ -303,7 +303,7 @@ func (cmd *authProfilesCommand) Run(_ context.Context, args []string) error {
 }
 
 func (cmd *authProfilesCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces auth profiles\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth profiles\n")
 }
 
 type authUseCommand struct {
@@ -316,7 +316,7 @@ func (cmd *authUseCommand) Name() string { return "use" }
 func (cmd *authUseCommand) Summary() string { return "Set the active local profile" }
 
 func (cmd *authUseCommand) Run(_ context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("alces auth use", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("ovek auth use", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -325,7 +325,7 @@ func (cmd *authUseCommand) Run(_ context.Context, args []string) error {
 		return err
 	}
 	if flagSet.NArg() != 1 {
-		return fmt.Errorf("alces auth use requires exactly one <profile> argument")
+		return fmt.Errorf("ovek auth use requires exactly one <profile> argument")
 	}
 
 	profileName := strings.TrimSpace(flagSet.Arg(0))
@@ -338,7 +338,7 @@ func (cmd *authUseCommand) Run(_ context.Context, args []string) error {
 }
 
 func (cmd *authUseCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces auth use <profile>\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth use <profile>\n")
 }
 
 func orderedProfileNames(cfg config.Config) []string {

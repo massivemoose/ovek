@@ -77,7 +77,7 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 	}
 	defer logFile.Close()
 
-	workspace, err := os.MkdirTemp("", "alces-build-"+job.ID+"-")
+	workspace, err := os.MkdirTemp("", "ovek-build-"+job.ID+"-")
 	if err != nil {
 		return result, fmt.Errorf("create build workspace: %w", err)
 	}
@@ -192,7 +192,7 @@ func (processor buildProcessor) buildctlBuildArgs(workspace string, planDir stri
 }
 
 func jobImageName(job job) string {
-	return "alces-" + job.ProjectName + ":" + job.ID
+	return "ovek-" + job.ProjectName + ":" + job.ID
 }
 
 func jobImageRef(job job, registryHost string) string {

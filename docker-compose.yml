@@ -6,18 +6,18 @@ services:
     command:
       - "--log.level=INFO"
       - "--api.insecure=true" # Dashboard at :8080 (Turn off in production!)
-      - "--providers.file.directory=/var/lib/alces/traefik/dynamic"
+      - "--providers.file.directory=/var/lib/ovek/traefik/dynamic"
       - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
     ports:
       - "80:80"
       - "8080:8080" # Traefik Dashboard
     volumes:
-      - "./brain_data/traefik:/var/lib/alces/traefik:ro"
+      - "./brain_data/traefik:/var/lib/ovek/traefik:ro"
     networks:
-      - alces-net
+      - ovek-net
 
-  # --- Alces control plane ---
+  # --- Ovek control plane ---
   brain:
     build:
       context: .
@@ -32,18 +32,18 @@ services:
       - REGISTRY_INSECURE=true
       - PROJECTS_HOST_DATA_DIR=${PWD}/brain_data/projects
       - POCKETBASE_IMAGE=elestio/pocketbase:latest
-      - TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/alces/traefik/dynamic
+      - TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/ovek/traefik/dynamic
       - TRAEFIK_BRAIN_SERVICE_URL=http://brain:8081
     depends_on:
       - buildkitd
       - registry
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
-      - "./brain_data:/var/lib/alces"
+      - "./brain_data:/var/lib/ovek"
       - "${PWD}/brain_data/projects:${PWD}/brain_data/projects"
-      - "./brain_data/traefik:/var/lib/alces/traefik"
+      - "./brain_data/traefik:/var/lib/ovek/traefik"
     networks:
-      - alces-net
+      - ovek-net
 
   # --- Internal image builder for Railpack ---
   buildkitd:
@@ -51,7 +51,7 @@ services:
     image: moby/buildkit:v0.28.1
     privileged: true
     networks:
-      - alces-net
+      - ovek-net
 
   registry:
     image: registry:2
@@ -61,9 +61,9 @@ services:
     ports:
       - "5001:5000"
     networks:
-      - alces-net
+      - ovek-net
 
 networks:
-  alces-net:
+  ovek-net:
     external: false
-    name: alces-net
+    name: ovek-net

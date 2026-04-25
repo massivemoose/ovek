@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/massivemoose/alces/internal/brainapi"
-	"github.com/massivemoose/alces/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/config"
 )
 
 func TestStatusListsProjects(t *testing.T) {
@@ -61,8 +61,8 @@ func TestStatusShowsProjectDetail(t *testing.T) {
 				ProjectName:         "demo-app",
 				CurrentDeploymentID: &currentDeploymentID,
 				App: &brainapi.ProjectRuntimeApp{
-					ContainerName: "alces-demo-app-app",
-					ImageRef:      "localhost:5001/alces-demo-app:dep_123",
+					ContainerName: "ovek-demo-app-app",
+					ImageRef:      "localhost:5001/ovek-demo-app:dep_123",
 					Running:       true,
 				},
 			})
@@ -77,7 +77,7 @@ func TestStatusShowsProjectDetail(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]brainapi.Deployment{{
 				ID:        "dep_123",
 				Status:    "succeeded",
-				ImageRef:  "localhost:5001/alces-demo-app:dep_123",
+				ImageRef:  "localhost:5001/ovek-demo-app:dep_123",
 				CreatedAt: "2026-04-15T00:02:00Z",
 			}})
 		default:

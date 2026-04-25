@@ -17,10 +17,10 @@ func TestManagedProjectRuntimeServiceReturnsCurrentRuntime(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-alpha",
 		ProjectName:             "alpha-app",
-		ImageRef:                "alces-alpha-app:dep-alpha",
-		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
@@ -31,17 +31,17 @@ func TestManagedProjectRuntimeServiceReturnsCurrentRuntime(t *testing.T) {
 				{
 					DeploymentID:            "dep-alpha",
 					ProjectName:             "alpha-app",
-					AppContainerName:        "alces-alpha-app-app-dep-alpha",
-					ImageRef:                "alces-alpha-app:dep-alpha",
+					AppContainerName:        "ovek-alpha-app-app-dep-alpha",
+					ImageRef:                "ovek-alpha-app:dep-alpha",
 					NetworkName:             "alpha-app-net",
-					PocketBaseContainerName: "alces-alpha-app-pb",
+					PocketBaseContainerName: "ovek-alpha-app-pb",
 					Running:                 true,
 				},
 			},
 		},
 		pocketBaseByProject: map[string]projectRuntimeContainer{
 			"alpha-app": {
-				ContainerName: "alces-alpha-app-pb",
+				ContainerName: "ovek-alpha-app-pb",
 				Running:       true,
 			},
 		},
@@ -63,10 +63,10 @@ func TestManagedProjectRuntimeServiceReturnsCurrentRuntime(t *testing.T) {
 	if runtimeView.CurrentDeploymentID == nil || *runtimeView.CurrentDeploymentID != "dep-alpha" {
 		t.Fatalf("expected current deployment %q, got %#v", "dep-alpha", runtimeView.CurrentDeploymentID)
 	}
-	if runtimeView.App == nil || runtimeView.App.ContainerName != "alces-alpha-app-app-dep-alpha" || !runtimeView.App.Running {
+	if runtimeView.App == nil || runtimeView.App.ContainerName != "ovek-alpha-app-app-dep-alpha" || !runtimeView.App.Running {
 		t.Fatalf("expected running app runtime, got %#v", runtimeView.App)
 	}
-	if runtimeView.PocketBase == nil || runtimeView.PocketBase.ContainerName != "alces-alpha-app-pb" || !runtimeView.PocketBase.Running {
+	if runtimeView.PocketBase == nil || runtimeView.PocketBase.ContainerName != "ovek-alpha-app-pb" || !runtimeView.PocketBase.Running {
 		t.Fatalf("expected running PocketBase runtime, got %#v", runtimeView.PocketBase)
 	}
 	if runtimeView.Network == nil || runtimeView.Network.Name != "alpha-app-net" {
@@ -89,10 +89,10 @@ func TestManagedProjectRuntimeServiceReadsCurrentRuntimeLogs(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-alpha",
 		ProjectName:             "alpha-app",
-		ImageRef:                "alces-alpha-app:dep-alpha",
-		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
@@ -124,10 +124,10 @@ func TestManagedProjectRuntimeServiceStreamsCurrentRuntimeLogsWithFollow(t *test
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-alpha",
 		ProjectName:             "alpha-app",
-		ImageRef:                "alces-alpha-app:dep-alpha",
-		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
@@ -175,10 +175,10 @@ func TestGetProjectRuntimeReturnsRuntimeSummary(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-alpha",
 		ProjectName:             "alpha-app",
-		ImageRef:                "alces-alpha-app:dep-alpha",
-		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
@@ -197,17 +197,17 @@ func TestGetProjectRuntimeReturnsRuntimeSummary(t *testing.T) {
 					{
 						DeploymentID:            "dep-alpha",
 						ProjectName:             "alpha-app",
-						AppContainerName:        "alces-alpha-app-app-dep-alpha",
-						ImageRef:                "alces-alpha-app:dep-alpha",
+						AppContainerName:        "ovek-alpha-app-app-dep-alpha",
+						ImageRef:                "ovek-alpha-app:dep-alpha",
 						NetworkName:             "alpha-app-net",
-						PocketBaseContainerName: "alces-alpha-app-pb",
+						PocketBaseContainerName: "ovek-alpha-app-pb",
 						Running:                 true,
 					},
 				},
 			},
 			pocketBaseByProject: map[string]projectRuntimeContainer{
 				"alpha-app": {
-					ContainerName: "alces-alpha-app-pb",
+					ContainerName: "ovek-alpha-app-pb",
 					Running:       true,
 				},
 			},
@@ -230,8 +230,8 @@ func TestGetProjectRuntimeReturnsRuntimeSummary(t *testing.T) {
 	}
 	assertJSONContains(t, recorder.Body.String(), `"projectName":"alpha-app"`)
 	assertJSONContains(t, recorder.Body.String(), `"currentDeploymentId":"dep-alpha"`)
-	assertJSONContains(t, recorder.Body.String(), `"containerName":"alces-alpha-app-app-dep-alpha"`)
-	assertJSONContains(t, recorder.Body.String(), `"pocketBase":{"containerName":"alces-alpha-app-pb","running":true}`)
+	assertJSONContains(t, recorder.Body.String(), `"containerName":"ovek-alpha-app-app-dep-alpha"`)
+	assertJSONContains(t, recorder.Body.String(), `"pocketBase":{"containerName":"ovek-alpha-app-pb","running":true}`)
 	assertJSONContains(t, recorder.Body.String(), `"network":{"name":"alpha-app-net"}`)
 }
 
@@ -248,10 +248,10 @@ func TestGetProjectRuntimeLogsReturnsPlainTextLogs(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-alpha",
 		ProjectName:             "alpha-app",
-		ImageRef:                "alces-alpha-app:dep-alpha",
-		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
@@ -293,10 +293,10 @@ func TestGetProjectRuntimeLogsStreamReturnsSSELogs(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-alpha",
 		ProjectName:             "alpha-app",
-		ImageRef:                "alces-alpha-app:dep-alpha",
-		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})

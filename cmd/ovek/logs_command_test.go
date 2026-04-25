@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/massivemoose/alces/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/cli/config"
 )
 
 func TestLogsReadsRuntimeSnapshot(t *testing.T) {

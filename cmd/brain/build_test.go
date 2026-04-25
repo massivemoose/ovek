@@ -43,8 +43,8 @@ func TestBuildProcessorRunsGitCloneAndBuildctl(t *testing.T) {
 	if result.LogPath != filepath.Join(dataDir, jobLogsDirName, "job-123.log") {
 		t.Fatalf("expected log path %q, got %q", filepath.Join(dataDir, jobLogsDirName, "job-123.log"), result.LogPath)
 	}
-	if result.ImageRef != "localhost:5001/alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-123", result.ImageRef)
+	if result.ImageRef != "localhost:5001/ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:job-123", result.ImageRef)
 	}
 
 	if len(runner.commands) != 3 {
@@ -90,7 +90,7 @@ func TestBuildProcessorRunsGitCloneAndBuildctl(t *testing.T) {
 		"--local dockerfile=" + planDir,
 		"--frontend=gateway.v0",
 		"--opt source=ghcr.io/railwayapp/railpack-frontend",
-		"--output type=image,name=host.docker.internal:5001/alces-demo-app:job-123,push=true,registry.insecure=true",
+		"--output type=image,name=host.docker.internal:5001/ovek-demo-app:job-123,push=true,registry.insecure=true",
 	} {
 		if !strings.Contains(buildArgs, want) {
 			t.Fatalf("expected buildctl args to contain %q, got %q", want, buildArgs)
@@ -197,8 +197,8 @@ func TestBuildProcessorReturnsMetadataOnBuildctlFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "buildctl build: buildctl failed") {
 		t.Fatalf("expected buildctl failure, got %v", err)
 	}
-	if result.ImageRef != "localhost:5001/alces-demo-app:job-789" {
-		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-789", result.ImageRef)
+	if result.ImageRef != "localhost:5001/ovek-demo-app:job-789" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:job-789", result.ImageRef)
 	}
 	if result.LogPath != filepath.Join(dataDir, jobLogsDirName, "job-789.log") {
 		t.Fatalf("expected log path %q, got %q", filepath.Join(dataDir, jobLogsDirName, "job-789.log"), result.LogPath)
@@ -211,11 +211,11 @@ func TestJobImageRefUsesOptionalRegistryHost(t *testing.T) {
 		ProjectName: "demo-app",
 	}
 
-	if got := jobImageRef(currentJob, ""); got != "alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", got)
+	if got := jobImageRef(currentJob, ""); got != "ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:job-123", got)
 	}
-	if got := jobImageRef(currentJob, "localhost:5001"); got != "localhost:5001/alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-123", got)
+	if got := jobImageRef(currentJob, "localhost:5001"); got != "localhost:5001/ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:job-123", got)
 	}
 }
 

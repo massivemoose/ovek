@@ -10,7 +10,7 @@ import (
 )
 
 func TestParseTaggedImageRef(t *testing.T) {
-	ref, err := parseTaggedImageRef("localhost:5001/alces/demo-app:job-123")
+	ref, err := parseTaggedImageRef("localhost:5001/ovek/demo-app:job-123")
 	if err != nil {
 		t.Fatalf("expected image ref to parse, got error: %v", err)
 	}
@@ -18,8 +18,8 @@ func TestParseTaggedImageRef(t *testing.T) {
 	if ref.Host != "localhost:5001" {
 		t.Fatalf("expected host %q, got %q", "localhost:5001", ref.Host)
 	}
-	if ref.Repository != "alces/demo-app" {
-		t.Fatalf("expected repository %q, got %q", "alces/demo-app", ref.Repository)
+	if ref.Repository != "ovek/demo-app" {
+		t.Fatalf("expected repository %q, got %q", "ovek/demo-app", ref.Repository)
 	}
 	if ref.Tag != "job-123" {
 		t.Fatalf("expected tag %q, got %q", "job-123", ref.Tag)
@@ -27,7 +27,7 @@ func TestParseTaggedImageRef(t *testing.T) {
 }
 
 func TestParseTaggedImageRefRequiresTag(t *testing.T) {
-	_, err := parseTaggedImageRef("localhost:5001/alces-demo-app")
+	_, err := parseTaggedImageRef("localhost:5001/ovek-demo-app")
 	if err == nil {
 		t.Fatal("expected missing tag to fail")
 	}
@@ -39,7 +39,7 @@ func TestRegistryArtifactCleanerSkipsUnmanagedImageRefs(t *testing.T) {
 		return nil, nil
 	})
 
-	err := newRegistryArtifactCleaner("localhost:5001", "http://registry:5000", client).CleanupImage(context.Background(), "example.com/alces-demo-app:job-123")
+	err := newRegistryArtifactCleaner("localhost:5001", "http://registry:5000", client).CleanupImage(context.Background(), "example.com/ovek-demo-app:job-123")
 	if !errors.Is(err, errUnmanagedImageRef) {
 		t.Fatalf("expected unmanaged image error, got %v", err)
 	}
@@ -75,14 +75,14 @@ func TestRegistryArtifactCleanerDeletesManifestByDigest(t *testing.T) {
 		}
 	})
 
-	err := newRegistryArtifactCleaner("localhost:5001", "http://registry:5000", client).CleanupImage(context.Background(), "localhost:5001/alces/demo-app:job-123")
+	err := newRegistryArtifactCleaner("localhost:5001", "http://registry:5000", client).CleanupImage(context.Background(), "localhost:5001/ovek/demo-app:job-123")
 	if err != nil {
 		t.Fatalf("expected cleanup to succeed, got error: %v", err)
 	}
 
 	wantRequests := []string{
-		"GET http://registry:5000/v2/alces/demo-app/manifests/job-123",
-		"DELETE http://registry:5000/v2/alces/demo-app/manifests/sha256:abc123",
+		"GET http://registry:5000/v2/ovek/demo-app/manifests/job-123",
+		"DELETE http://registry:5000/v2/ovek/demo-app/manifests/sha256:abc123",
 	}
 	if len(requests) != len(wantRequests) {
 		t.Fatalf("expected %d requests, got %d", len(wantRequests), len(requests))
@@ -102,7 +102,7 @@ func TestRegistryArtifactCleanerReturnsManifestNotFound(t *testing.T) {
 		}, nil
 	})
 
-	err := newRegistryArtifactCleaner("localhost:5001", "http://registry:5000", client).CleanupImage(context.Background(), "localhost:5001/alces-demo-app:job-123")
+	err := newRegistryArtifactCleaner("localhost:5001", "http://registry:5000", client).CleanupImage(context.Background(), "localhost:5001/ovek-demo-app:job-123")
 	if !errors.Is(err, errRegistryManifestNotFound) {
 		t.Fatalf("expected manifest not found error, got %v", err)
 	}

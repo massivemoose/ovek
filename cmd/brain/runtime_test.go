@@ -23,11 +23,11 @@ func TestProjectResourceNames(t *testing.T) {
 	if got := projectNetworkName(projectName); got != "demo-app-net" {
 		t.Fatalf("expected network name %q, got %q", "demo-app-net", got)
 	}
-	if got := pocketBaseContainerName(projectName); got != "alces-demo-app-pb" {
-		t.Fatalf("expected PocketBase container name %q, got %q", "alces-demo-app-pb", got)
+	if got := pocketBaseContainerName(projectName); got != "ovek-demo-app-pb" {
+		t.Fatalf("expected PocketBase container name %q, got %q", "ovek-demo-app-pb", got)
 	}
-	if got := appContainerName(projectName, "dep-123"); got != "alces-demo-app-app-dep-123" {
-		t.Fatalf("expected app container name %q, got %q", "alces-demo-app-app-dep-123", got)
+	if got := appContainerName(projectName, "dep-123"); got != "ovek-demo-app-app-dep-123" {
+		t.Fatalf("expected app container name %q, got %q", "ovek-demo-app-app-dep-123", got)
 	}
 }
 
@@ -135,7 +135,7 @@ func TestDockerRuntimeEnsureProjectNetworkRejectsUnmanagedExistingNetwork(t *tes
 	if err == nil {
 		t.Fatal("expected unmanaged network to be rejected")
 	}
-	if !strings.Contains(err.Error(), "already exists but is not managed by alces") {
+	if !strings.Contains(err.Error(), "already exists but is not managed by ovek") {
 		t.Fatalf("expected unmanaged network error, got %v", err)
 	}
 	if client.networkCreateCalls != 0 {
@@ -151,13 +151,13 @@ func TestPodmanRuntimePullImageUsesNativePuller(t *testing.T) {
 		registryInsecure: true,
 	}
 
-	err := runtime.PullImage(context.Background(), "localhost:5001/alces-demo-app:job-123")
+	err := runtime.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123")
 	if err != nil {
 		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
 	}
 
-	if puller.imageRef != "localhost:5001/alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-123", puller.imageRef)
+	if puller.imageRef != "localhost:5001/ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:job-123", puller.imageRef)
 	}
 	if !puller.registryInsecure {
 		t.Fatal("expected podman runtime to pass through registryInsecure=true")
@@ -178,7 +178,7 @@ func TestPodmanServiceImagePullerSetsTLSVerifyFalseForInsecureRegistries(t *test
 		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
 	}
 
-	err = puller.PullImage(context.Background(), "localhost:5001/alces-demo-app:job-123", true)
+	err = puller.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123", true)
 	if err != nil {
 		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
 	}
@@ -190,8 +190,8 @@ func TestPodmanServiceImagePullerSetsTLSVerifyFalseForInsecureRegistries(t *test
 	if request.URL.Path != "/v1.0.0/libpod/images/pull" {
 		t.Fatalf("expected request path %q, got %q", "/v1.0.0/libpod/images/pull", request.URL.Path)
 	}
-	if request.URL.Query().Get("reference") != "localhost:5001/alces-demo-app:job-123" {
-		t.Fatalf("expected image reference query %q, got %q", "localhost:5001/alces-demo-app:job-123", request.URL.Query().Get("reference"))
+	if request.URL.Query().Get("reference") != "localhost:5001/ovek-demo-app:job-123" {
+		t.Fatalf("expected image reference query %q, got %q", "localhost:5001/ovek-demo-app:job-123", request.URL.Query().Get("reference"))
 	}
 	if request.URL.Query().Get("tlsVerify") != "false" {
 		t.Fatalf("expected tlsVerify query %q, got %q", "false", request.URL.Query().Get("tlsVerify"))
@@ -234,7 +234,7 @@ func TestPodmanServiceImagePullerReturnsAPIError(t *testing.T) {
 		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
 	}
 
-	err = puller.PullImage(context.Background(), "localhost:5001/alces-demo-app:job-123", true)
+	err = puller.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123", true)
 	if err == nil {
 		t.Fatal("expected podman image pull to fail")
 	}
