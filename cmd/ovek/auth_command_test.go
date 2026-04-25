@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/massivemoose/alces/internal/brainapi"
-	"github.com/massivemoose/alces/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/config"
 )
 
 func TestAuthBootstrapSavesReturnedAPIKeyToRequestedProfile(t *testing.T) {

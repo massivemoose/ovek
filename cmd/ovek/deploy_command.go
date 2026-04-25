@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/massivemoose/alces/internal/brainapi"
-	"github.com/massivemoose/alces/internal/cli/client"
-	"github.com/massivemoose/alces/internal/cli/command"
-	"github.com/massivemoose/alces/internal/cli/config"
-	"github.com/massivemoose/alces/internal/cli/output"
+	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/client"
+	"github.com/massivemoose/ovek/internal/cli/command"
+	"github.com/massivemoose/ovek/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/cli/output"
 )
 
 type deployCommand struct {
@@ -33,7 +33,7 @@ func (cmd *deployCommand) Name() string { return "deploy" }
 func (cmd *deployCommand) Summary() string { return "Create and follow deployments" }
 
 func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("alces deploy", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("ovek deploy", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -42,7 +42,7 @@ func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	if flagSet.NArg() != 2 {
-		return fmt.Errorf("alces deploy requires <project> and <repoURL>")
+		return fmt.Errorf("ovek deploy requires <project> and <repoURL>")
 	}
 
 	projectName := flagSet.Arg(0)
@@ -93,7 +93,7 @@ func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 		_, _ = fmt.Fprintln(cmd.stdout)
 		output.WriteSection(cmd.stdout, "Next Step")
 		output.WriteKeyValues(cmd.stdout, [][2]string{
-			{"Inspect Logs", fmt.Sprintf("alces logs --job %s --no-follow", finalJob.ID)},
+			{"Inspect Logs", fmt.Sprintf("ovek logs --job %s --no-follow", finalJob.ID)},
 		})
 
 		if finalJob.ErrorMessage != "" {
@@ -126,7 +126,7 @@ func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 }
 
 func (cmd *deployCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces deploy <project> <repoURL>\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek deploy <project> <repoURL>\n")
 }
 
 func (cmd *deployCommand) createDeployment(ctx context.Context, brainClient *client.Client, projectName string, repoURL string) (brainapi.Job, error) {

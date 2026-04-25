@@ -1,6 +1,6 @@
 # Podman Testing
 
-Alces now keeps two explicit validation lanes for Podman:
+Ovek now keeps two explicit validation lanes for Podman:
 
 - Mac-hosted Linux sandboxing through `podman machine`
 - real Linux acceptance on Ubuntu CI using the same `podman-compose.yml`

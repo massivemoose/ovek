@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/massivemoose/alces/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/brainapi"
 )
 
 var ErrNotConfigured = errors.New("client is not configured")
@@ -414,7 +414,7 @@ func (client *Client) newRequest(ctx context.Context, method string, requestPath
 		request.Header.Set("X-API-Key", client.apiKey)
 	}
 	if client.reauthToken != "" {
-		request.Header.Set("X-Alces-Reauth-Token", client.reauthToken)
+		request.Header.Set("X-Ovek-Reauth-Token", client.reauthToken)
 	}
 
 	return request, nil

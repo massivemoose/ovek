@@ -23,21 +23,21 @@ func TestNewAppContainerSpec(t *testing.T) {
 		ProjectName:  "demo-app",
 		DeploymentID: "dep-123",
 		JobID:        "job-123",
-		ImageRef:     "alces-demo-app:dep-123",
+		ImageRef:     "ovek-demo-app:dep-123",
 		Network: projectNetwork{
 			ID:   "network-123",
 			Name: "demo-app-net",
 		},
 	})
 
-	if spec.Name != "alces-demo-app-app-dep-123" {
-		t.Fatalf("expected container name %q, got %q", "alces-demo-app-app-dep-123", spec.Name)
+	if spec.Name != "ovek-demo-app-app-dep-123" {
+		t.Fatalf("expected container name %q, got %q", "ovek-demo-app-app-dep-123", spec.Name)
 	}
 	if spec.ProjectNetworkName != "demo-app-net" {
 		t.Fatalf("expected project network name %q, got %q", "demo-app-net", spec.ProjectNetworkName)
 	}
-	if spec.Config.Image != "alces-demo-app:dep-123" {
-		t.Fatalf("expected image %q, got %q", "alces-demo-app:dep-123", spec.Config.Image)
+	if spec.Config.Image != "ovek-demo-app:dep-123" {
+		t.Fatalf("expected image %q, got %q", "ovek-demo-app:dep-123", spec.Config.Image)
 	}
 	if !reflect.DeepEqual(spec.Config.Env, []string{appPortEnv, appPocketBaseURLEnv}) {
 		t.Fatalf("expected env %#v, got %#v", []string{appPortEnv, appPocketBaseURLEnv}, spec.Config.Env)
@@ -88,7 +88,7 @@ func TestDockerRuntimeEnsureProjectAppCreatesConnectsAndStartsManagedContainer(t
 	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "alces-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123")
 	if err != nil {
 		t.Fatalf("expected app provisioning to succeed, got error: %v", err)
 	}
@@ -96,17 +96,17 @@ func TestDockerRuntimeEnsureProjectAppCreatesConnectsAndStartsManagedContainer(t
 	if containerID != "container-123" {
 		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
 	}
-	if client.containerInspectName != "alces-demo-app-app-dep-123" {
-		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-app-dep-123", client.containerInspectName)
+	if client.containerInspectName != "ovek-demo-app-app-dep-123" {
+		t.Fatalf("expected inspect name %q, got %q", "ovek-demo-app-app-dep-123", client.containerInspectName)
 	}
-	if client.containerCreateName != "alces-demo-app-app-dep-123" {
-		t.Fatalf("expected create name %q, got %q", "alces-demo-app-app-dep-123", client.containerCreateName)
+	if client.containerCreateName != "ovek-demo-app-app-dep-123" {
+		t.Fatalf("expected create name %q, got %q", "ovek-demo-app-app-dep-123", client.containerCreateName)
 	}
-	if client.imagePullRef != "alces-demo-app:dep-123" {
-		t.Fatalf("expected image pull ref %q, got %q", "alces-demo-app:dep-123", client.imagePullRef)
+	if client.imagePullRef != "ovek-demo-app:dep-123" {
+		t.Fatalf("expected image pull ref %q, got %q", "ovek-demo-app:dep-123", client.imagePullRef)
 	}
-	if client.networkConnectNetwork != alcesEdgeNetworkName {
-		t.Fatalf("expected edge network %q, got %q", alcesEdgeNetworkName, client.networkConnectNetwork)
+	if client.networkConnectNetwork != ovekEdgeNetworkName {
+		t.Fatalf("expected edge network %q, got %q", ovekEdgeNetworkName, client.networkConnectNetwork)
 	}
 	if client.networkConnectID != "container-123" {
 		t.Fatalf("expected connected container ID %q, got %q", "container-123", client.networkConnectID)
@@ -142,7 +142,7 @@ func TestPodmanRuntimeEnsureProjectAppUsesPodmanPuller(t *testing.T) {
 	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "localhost:5001/alces-demo-app:dep-123")
+	}, "localhost:5001/ovek-demo-app:dep-123")
 	if err != nil {
 		t.Fatalf("expected podman app provisioning to succeed, got error: %v", err)
 	}
@@ -153,8 +153,8 @@ func TestPodmanRuntimeEnsureProjectAppUsesPodmanPuller(t *testing.T) {
 	if client.imagePullRef != "" {
 		t.Fatalf("expected docker image pull not to be used, got %q", client.imagePullRef)
 	}
-	if puller.imageRef != "localhost:5001/alces-demo-app:dep-123" {
-		t.Fatalf("expected podman puller image ref %q, got %q", "localhost:5001/alces-demo-app:dep-123", puller.imageRef)
+	if puller.imageRef != "localhost:5001/ovek-demo-app:dep-123" {
+		t.Fatalf("expected podman puller image ref %q, got %q", "localhost:5001/ovek-demo-app:dep-123", puller.imageRef)
 	}
 	if !puller.registryInsecure {
 		t.Fatal("expected podman puller to receive registryInsecure=true")
@@ -180,7 +180,7 @@ func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T
 				},
 			},
 			Config: &dockercontainer.Config{
-				Image: "alces-demo-app:dep-123",
+				Image: "ovek-demo-app:dep-123",
 				Env:   []string{appPortEnv, appPocketBaseURLEnv},
 				Labels: map[string]string{
 					managedLabelKey:    managedLabelValue,
@@ -193,7 +193,7 @@ func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T
 			NetworkSettings: &dockercontainer.NetworkSettings{
 				Networks: map[string]*dockernetwork.EndpointSettings{
 					"demo-app-net":       {},
-					alcesEdgeNetworkName: {},
+					ovekEdgeNetworkName: {},
 				},
 			},
 		},
@@ -203,7 +203,7 @@ func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T
 	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "alces-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123")
 	if err != nil {
 		t.Fatalf("expected existing app container to be reused, got error: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestDockerRuntimeEnsureProjectAppConnectsStoppedContainerToEdgeNetworkAndSt
 				},
 			},
 			Config: &dockercontainer.Config{
-				Image: "alces-demo-app:dep-123",
+				Image: "ovek-demo-app:dep-123",
 				Env:   []string{appPortEnv, appPocketBaseURLEnv},
 				Labels: map[string]string{
 					managedLabelKey:    managedLabelValue,
@@ -266,7 +266,7 @@ func TestDockerRuntimeEnsureProjectAppConnectsStoppedContainerToEdgeNetworkAndSt
 	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "alces-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123")
 	if err != nil {
 		t.Fatalf("expected stopped app container to be started, got error: %v", err)
 	}
@@ -274,8 +274,8 @@ func TestDockerRuntimeEnsureProjectAppConnectsStoppedContainerToEdgeNetworkAndSt
 	if containerID != "container-123" {
 		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
 	}
-	if client.networkConnectNetwork != alcesEdgeNetworkName {
-		t.Fatalf("expected edge network connect %q, got %q", alcesEdgeNetworkName, client.networkConnectNetwork)
+	if client.networkConnectNetwork != ovekEdgeNetworkName {
+		t.Fatalf("expected edge network connect %q, got %q", ovekEdgeNetworkName, client.networkConnectNetwork)
 	}
 	if client.imagePullRef != "" {
 		t.Fatalf("expected image pull not to be called for an existing container, got %q", client.imagePullRef)
@@ -304,11 +304,11 @@ func TestDockerRuntimeEnsureProjectAppReturnsImagePullFailure(t *testing.T) {
 	_, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "alces-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123")
 	if err == nil {
 		t.Fatal("expected image pull failure")
 	}
-	if err.Error() != `pull image "alces-demo-app:dep-123": pull failed` {
+	if err.Error() != `pull image "ovek-demo-app:dep-123": pull failed` {
 		t.Fatalf("expected image pull error, got %q", err.Error())
 	}
 	if client.containerCreateName != "" {
@@ -335,7 +335,7 @@ func TestDockerRuntimeEnsureProjectAppRejectsUnmanagedContainer(t *testing.T) {
 				},
 			},
 			Config: &dockercontainer.Config{
-				Image:  "alces-demo-app:dep-123",
+				Image:  "ovek-demo-app:dep-123",
 				Env:    []string{appPortEnv, appPocketBaseURLEnv},
 				Labels: map[string]string{},
 			},
@@ -351,11 +351,11 @@ func TestDockerRuntimeEnsureProjectAppRejectsUnmanagedContainer(t *testing.T) {
 	_, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "alces-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123")
 	if err == nil {
 		t.Fatal("expected unmanaged app container to be rejected")
 	}
-	if got := err.Error(); got != "alces-demo-app-app-dep-123 already exists but is not managed by alces" {
+	if got := err.Error(); got != "ovek-demo-app-app-dep-123 already exists but is not managed by ovek" {
 		t.Fatalf("expected unmanaged container error, got %q", got)
 	}
 }
@@ -384,13 +384,13 @@ func TestDockerRuntimeRemoveProjectAppStopsAndRemovesRunningManagedContainer(t *
 	err := runtime.RemoveProjectApp(context.Background(), deploymentRecord{
 		ID:               "dep-old",
 		ProjectName:      "demo-app",
-		AppContainerName: "alces-demo-app-app-dep-old",
+		AppContainerName: "ovek-demo-app-app-dep-old",
 	})
 	if err != nil {
 		t.Fatalf("expected app removal to succeed, got error: %v", err)
 	}
-	if client.containerInspectName != "alces-demo-app-app-dep-old" {
-		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-app-dep-old", client.containerInspectName)
+	if client.containerInspectName != "ovek-demo-app-app-dep-old" {
+		t.Fatalf("expected inspect name %q, got %q", "ovek-demo-app-app-dep-old", client.containerInspectName)
 	}
 	if client.containerStopID != "container-123" {
 		t.Fatalf("expected stop ID %q, got %q", "container-123", client.containerStopID)
@@ -412,7 +412,7 @@ func TestDockerRuntimeRemoveProjectAppIgnoresMissingContainer(t *testing.T) {
 	err := runtime.RemoveProjectApp(context.Background(), deploymentRecord{
 		ID:               "dep-old",
 		ProjectName:      "demo-app",
-		AppContainerName: "alces-demo-app-app-dep-old",
+		AppContainerName: "ovek-demo-app-app-dep-old",
 	})
 	if err != nil {
 		t.Fatalf("expected missing app removal to be ignored, got error: %v", err)
@@ -470,8 +470,8 @@ func TestDockerRuntimeListProjectAppsReturnsManagedProjectApps(t *testing.T) {
 	client := &fakeDockerClient{
 		containerListResponse: []dockercontainer.Summary{
 			{
-				Names:   []string{"/alces-demo-app-app-dep-123"},
-				Image:   "alces-demo-app:dep-123",
+				Names:   []string{"/ovek-demo-app-app-dep-123"},
+				Image:   "ovek-demo-app:dep-123",
 				Created: 1_744_070_400,
 				Labels: map[string]string{
 					deploymentLabelKey: "dep-123",
@@ -479,8 +479,8 @@ func TestDockerRuntimeListProjectAppsReturnsManagedProjectApps(t *testing.T) {
 				State: "running",
 			},
 			{
-				Names:   []string{"/alces-demo-app-app-dep-456"},
-				Image:   "alces-demo-app:dep-456",
+				Names:   []string{"/ovek-demo-app-app-dep-456"},
+				Image:   "ovek-demo-app:dep-456",
 				Created: 1_744_070_500,
 				Labels: map[string]string{
 					deploymentLabelKey: "dep-456",
@@ -500,20 +500,20 @@ func TestDockerRuntimeListProjectAppsReturnsManagedProjectApps(t *testing.T) {
 		{
 			DeploymentID:            "dep-123",
 			ProjectName:             "demo-app",
-			AppContainerName:        "alces-demo-app-app-dep-123",
-			ImageRef:                "alces-demo-app:dep-123",
+			AppContainerName:        "ovek-demo-app-app-dep-123",
+			ImageRef:                "ovek-demo-app:dep-123",
 			NetworkName:             "demo-app-net",
-			PocketBaseContainerName: "alces-demo-app-pb",
+			PocketBaseContainerName: "ovek-demo-app-pb",
 			CreatedAt:               "2025-04-08T00:00:00Z",
 			Running:                 true,
 		},
 		{
 			DeploymentID:            "dep-456",
 			ProjectName:             "demo-app",
-			AppContainerName:        "alces-demo-app-app-dep-456",
-			ImageRef:                "alces-demo-app:dep-456",
+			AppContainerName:        "ovek-demo-app-app-dep-456",
+			ImageRef:                "ovek-demo-app:dep-456",
 			NetworkName:             "demo-app-net",
-			PocketBaseContainerName: "alces-demo-app-pb",
+			PocketBaseContainerName: "ovek-demo-app-pb",
 			CreatedAt:               "2025-04-08T00:01:40Z",
 			Running:                 false,
 		},
@@ -556,7 +556,7 @@ func TestDockerRuntimeReadProjectAppLogsReturnsCombinedManagedContainerLogs(t *t
 	logs, err := runtime.ReadProjectAppLogs(context.Background(), deploymentRecord{
 		ID:               "dep-current",
 		ProjectName:      "demo-app",
-		AppContainerName: "alces-demo-app-app-dep-current",
+		AppContainerName: "ovek-demo-app-app-dep-current",
 	}, runtimeLogOptions{})
 	if err != nil {
 		t.Fatalf("expected app log read to succeed, got error: %v", err)
@@ -571,11 +571,11 @@ func TestDockerRuntimeReadProjectAppLogsReturnsCombinedManagedContainerLogs(t *t
 	if string(logBytes) != "app line\nwarn line\n" {
 		t.Fatalf("expected combined log output %q, got %q", "app line\nwarn line\n", string(logBytes))
 	}
-	if client.containerInspectName != "alces-demo-app-app-dep-current" {
-		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-app-dep-current", client.containerInspectName)
+	if client.containerInspectName != "ovek-demo-app-app-dep-current" {
+		t.Fatalf("expected inspect name %q, got %q", "ovek-demo-app-app-dep-current", client.containerInspectName)
 	}
-	if client.containerLogsName != "alces-demo-app-app-dep-current" {
-		t.Fatalf("expected logs name %q, got %q", "alces-demo-app-app-dep-current", client.containerLogsName)
+	if client.containerLogsName != "ovek-demo-app-app-dep-current" {
+		t.Fatalf("expected logs name %q, got %q", "ovek-demo-app-app-dep-current", client.containerLogsName)
 	}
 	if !client.containerLogsOptions.ShowStdout || !client.containerLogsOptions.ShowStderr {
 		t.Fatalf("expected stdout and stderr logs to be enabled, got %#v", client.containerLogsOptions)
@@ -610,7 +610,7 @@ func TestDockerRuntimeReadProjectAppLogsSupportsFollow(t *testing.T) {
 	logs, err := runtime.ReadProjectAppLogs(context.Background(), deploymentRecord{
 		ID:               "dep-current",
 		ProjectName:      "demo-app",
-		AppContainerName: "alces-demo-app-app-dep-current",
+		AppContainerName: "ovek-demo-app-app-dep-current",
 	}, runtimeLogOptions{Follow: true})
 	if err != nil {
 		t.Fatalf("expected app log read to succeed, got error: %v", err)
@@ -638,12 +638,12 @@ func TestDockerRuntimeReadProjectAppLogsRejectsUnmanagedContainer(t *testing.T) 
 	_, err := runtime.ReadProjectAppLogs(context.Background(), deploymentRecord{
 		ID:               "dep-current",
 		ProjectName:      "demo-app",
-		AppContainerName: "alces-demo-app-app-dep-current",
+		AppContainerName: "ovek-demo-app-app-dep-current",
 	}, runtimeLogOptions{})
 	if err == nil {
 		t.Fatal("expected unmanaged app log read to fail")
 	}
-	if got := err.Error(); got != "alces-demo-app-app-dep-current already exists but is not managed by alces" {
+	if got := err.Error(); got != "ovek-demo-app-app-dep-current already exists but is not managed by ovek" {
 		t.Fatalf("expected unmanaged container error, got %q", got)
 	}
 	if client.containerLogsName != "" {
@@ -673,12 +673,12 @@ func TestDockerRuntimeReadProjectAppLogsReturnsContainerLogFailure(t *testing.T)
 	_, err := runtime.ReadProjectAppLogs(context.Background(), deploymentRecord{
 		ID:               "dep-current",
 		ProjectName:      "demo-app",
-		AppContainerName: "alces-demo-app-app-dep-current",
+		AppContainerName: "ovek-demo-app-app-dep-current",
 	}, runtimeLogOptions{})
 	if err == nil {
 		t.Fatal("expected app log read to fail")
 	}
-	if got := err.Error(); got != `read app container "alces-demo-app-app-dep-current" logs: logs failed` {
+	if got := err.Error(); got != `read app container "ovek-demo-app-app-dep-current" logs: logs failed` {
 		t.Fatalf("expected container log error, got %q", got)
 	}
 }
@@ -688,7 +688,7 @@ func TestDockerRuntimeWaitForProjectAppReadySucceedsAfterRetry(t *testing.T) {
 		containerInspectResponse: dockercontainer.InspectResponse{
 			NetworkSettings: &dockercontainer.NetworkSettings{
 				Networks: map[string]*dockernetwork.EndpointSettings{
-					alcesEdgeNetworkName: {
+					ovekEdgeNetworkName: {
 						IPAddress: "172.20.0.10",
 					},
 				},
@@ -734,8 +734,8 @@ func TestDockerRuntimeWaitForProjectAppReadySucceedsAfterRetry(t *testing.T) {
 	if sleeps != 1 {
 		t.Fatalf("expected 1 sleep between probes, got %d", sleeps)
 	}
-	if client.containerInspectName != "alces-demo-app-app-dep-123" {
-		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-app-dep-123", client.containerInspectName)
+	if client.containerInspectName != "ovek-demo-app-app-dep-123" {
+		t.Fatalf("expected inspect name %q, got %q", "ovek-demo-app-app-dep-123", client.containerInspectName)
 	}
 	if client.containerInspectCalls != 2 {
 		t.Fatalf("expected 2 inspect attempts, got %d", client.containerInspectCalls)
@@ -747,7 +747,7 @@ func TestDockerRuntimeWaitForProjectAppReadyTimesOut(t *testing.T) {
 		containerInspectResponse: dockercontainer.InspectResponse{
 			NetworkSettings: &dockercontainer.NetworkSettings{
 				Networks: map[string]*dockernetwork.EndpointSettings{
-					alcesEdgeNetworkName: {
+					ovekEdgeNetworkName: {
 						IPAddress: "172.20.0.10",
 					},
 				},
@@ -779,7 +779,7 @@ func TestDockerRuntimeWaitForProjectAppReadyReturnsSleepFailure(t *testing.T) {
 		containerInspectResponse: dockercontainer.InspectResponse{
 			NetworkSettings: &dockercontainer.NetworkSettings{
 				Networks: map[string]*dockernetwork.EndpointSettings{
-					alcesEdgeNetworkName: {
+					ovekEdgeNetworkName: {
 						IPAddress: "172.20.0.10",
 					},
 				},
@@ -811,7 +811,7 @@ func TestDockerRuntimeWaitForProjectAppReadyTimesOutWhenEdgeIPAddressIsMissing(t
 		containerInspectResponse: dockercontainer.InspectResponse{
 			NetworkSettings: &dockercontainer.NetworkSettings{
 				Networks: map[string]*dockernetwork.EndpointSettings{
-					alcesEdgeNetworkName: {},
+					ovekEdgeNetworkName: {},
 				},
 			},
 		},

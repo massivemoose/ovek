@@ -12,11 +12,11 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:  "/tmp/job.log",
-			ImageRef: "alces-demo-app:" + job.ID,
+			ImageRef: "ovek-demo-app:" + job.ID,
 		}, nil
 	})
 	provisioner := &fakeProjectProvisioner{}
-	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
 
 	result, err := processor.Process(context.Background(), job{
 		ID:          "job-123",
@@ -30,17 +30,17 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	if result.LogPath != "/tmp/job.log" {
 		t.Fatalf("expected log path %q, got %q", "/tmp/job.log", result.LogPath)
 	}
-	if result.ImageRef != "alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", result.ImageRef)
+	if result.ImageRef != "ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:job-123", result.ImageRef)
 	}
-	if result.AppContainerName != "alces-demo-app-app-job-123" {
-		t.Fatalf("expected app container name %q, got %q", "alces-demo-app-app-job-123", result.AppContainerName)
+	if result.AppContainerName != "ovek-demo-app-app-job-123" {
+		t.Fatalf("expected app container name %q, got %q", "ovek-demo-app-app-job-123", result.AppContainerName)
 	}
 	if result.NetworkName != "demo-app-net" {
 		t.Fatalf("expected network name %q, got %q", "demo-app-net", result.NetworkName)
 	}
-	if result.PocketBaseContainerName != "alces-demo-app-pb" {
-		t.Fatalf("expected PocketBase container name %q, got %q", "alces-demo-app-pb", result.PocketBaseContainerName)
+	if result.PocketBaseContainerName != "ovek-demo-app-pb" {
+		t.Fatalf("expected PocketBase container name %q, got %q", "ovek-demo-app-pb", result.PocketBaseContainerName)
 	}
 	if provisioner.projectName != "demo-app" {
 		t.Fatalf("expected provisioned project %q, got %q", "demo-app", provisioner.projectName)
@@ -48,14 +48,14 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	if provisioner.image != defaultPocketBaseImage {
 		t.Fatalf("expected provisioned image %q, got %q", defaultPocketBaseImage, provisioner.image)
 	}
-	if provisioner.projectsHostDataDir != "/srv/alces/projects" {
-		t.Fatalf("expected projects host data dir %q, got %q", "/srv/alces/projects", provisioner.projectsHostDataDir)
+	if provisioner.projectsHostDataDir != "/srv/ovek/projects" {
+		t.Fatalf("expected projects host data dir %q, got %q", "/srv/ovek/projects", provisioner.projectsHostDataDir)
 	}
 	if provisioner.appJob.ID != "job-123" {
 		t.Fatalf("expected app job ID %q, got %q", "job-123", provisioner.appJob.ID)
 	}
-	if provisioner.appImageRef != "alces-demo-app:job-123" {
-		t.Fatalf("expected app image ref %q, got %q", "alces-demo-app:job-123", provisioner.appImageRef)
+	if provisioner.appImageRef != "ovek-demo-app:job-123" {
+		t.Fatalf("expected app image ref %q, got %q", "ovek-demo-app:job-123", provisioner.appImageRef)
 	}
 	if provisioner.readyCalls != 1 {
 		t.Fatalf("expected readiness to be checked once, got %d", provisioner.readyCalls)
@@ -76,11 +76,11 @@ func TestManagedDeploymentProcessorReturnsBuildFailureWithoutProvisioning(t *tes
 	builder := processorFunc(func(_ context.Context, _ job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:  "/tmp/job.log",
-			ImageRef: "alces-demo-app:job-123",
+			ImageRef: "ovek-demo-app:job-123",
 		}, errors.New("build failed")
 	})
 	provisioner := &fakeProjectProvisioner{}
-	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
 
 	_, err := processor.Process(context.Background(), job{ProjectName: "demo-app"})
 	if err == nil {
@@ -96,13 +96,13 @@ func TestManagedDeploymentProcessorReturnsProvisioningFailure(t *testing.T) {
 	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:  "/tmp/job.log",
-			ImageRef: "alces-demo-app:" + job.ID,
+			ImageRef: "ovek-demo-app:" + job.ID,
 		}, nil
 	})
 	provisioner := &fakeProjectProvisioner{
 		err: errors.New("provisioning failed"),
 	}
-	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
 
 	result, err := processor.Process(context.Background(), job{
 		ID:          "job-123",
@@ -114,8 +114,8 @@ func TestManagedDeploymentProcessorReturnsProvisioningFailure(t *testing.T) {
 	if err.Error() != "ensure PocketBase: provisioning failed" {
 		t.Fatalf("expected provisioning error %q, got %q", "ensure PocketBase: provisioning failed", err.Error())
 	}
-	if result.ImageRef != "alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", result.ImageRef)
+	if result.ImageRef != "ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:job-123", result.ImageRef)
 	}
 }
 
@@ -124,13 +124,13 @@ func TestManagedDeploymentProcessorReturnsAppProvisioningFailure(t *testing.T) {
 	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:  "/tmp/job.log",
-			ImageRef: "alces-demo-app:" + job.ID,
+			ImageRef: "ovek-demo-app:" + job.ID,
 		}, nil
 	})
 	provisioner := &fakeProjectProvisioner{
 		appErr: errors.New("app provisioning failed"),
 	}
-	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
 
 	result, err := processor.Process(context.Background(), job{
 		ID:          "job-123",
@@ -142,8 +142,8 @@ func TestManagedDeploymentProcessorReturnsAppProvisioningFailure(t *testing.T) {
 	if err.Error() != "ensure app container: app provisioning failed" {
 		t.Fatalf("expected app provisioning error %q, got %q", "ensure app container: app provisioning failed", err.Error())
 	}
-	if result.ImageRef != "alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", result.ImageRef)
+	if result.ImageRef != "ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:job-123", result.ImageRef)
 	}
 }
 
@@ -152,13 +152,13 @@ func TestManagedDeploymentProcessorReturnsReadinessFailure(t *testing.T) {
 	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:  "/tmp/job.log",
-			ImageRef: "alces-demo-app:" + job.ID,
+			ImageRef: "ovek-demo-app:" + job.ID,
 		}, nil
 	})
 	provisioner := &fakeProjectProvisioner{
 		readyErr: errors.New("timed out waiting for port"),
 	}
-	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
 
 	result, err := processor.Process(context.Background(), job{
 		ID:          "job-123",
@@ -170,8 +170,8 @@ func TestManagedDeploymentProcessorReturnsReadinessFailure(t *testing.T) {
 	if err.Error() != "wait for app readiness: timed out waiting for port" {
 		t.Fatalf("expected readiness error %q, got %q", "wait for app readiness: timed out waiting for port", err.Error())
 	}
-	if result.ImageRef != "alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", result.ImageRef)
+	if result.ImageRef != "ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:job-123", result.ImageRef)
 	}
 }
 
@@ -180,10 +180,10 @@ func TestManagedDeploymentProcessorRemovesSupersededAppAfterReadiness(t *testing
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-old",
-		AppContainerName:        "alces-demo-app-app-dep-old",
+		ImageRef:                "ovek-demo-app:dep-old",
+		AppContainerName:        "ovek-demo-app-app-dep-old",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-08T00:00:00Z",
 	})
@@ -191,11 +191,11 @@ func TestManagedDeploymentProcessorRemovesSupersededAppAfterReadiness(t *testing
 	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:  "/tmp/job.log",
-			ImageRef: "alces-demo-app:" + job.ID,
+			ImageRef: "ovek-demo-app:" + job.ID,
 		}, nil
 	})
 	provisioner := &fakeProjectProvisioner{}
-	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
 
 	result, err := processor.Process(context.Background(), job{
 		ID:          "job-123",
@@ -226,10 +226,10 @@ func TestManagedDeploymentProcessorReturnsSupersededAppRemovalFailure(t *testing
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-old",
-		AppContainerName:        "alces-demo-app-app-dep-old",
+		ImageRef:                "ovek-demo-app:dep-old",
+		AppContainerName:        "ovek-demo-app-app-dep-old",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-08T00:00:00Z",
 	})
@@ -237,13 +237,13 @@ func TestManagedDeploymentProcessorReturnsSupersededAppRemovalFailure(t *testing
 	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:  "/tmp/job.log",
-			ImageRef: "alces-demo-app:" + job.ID,
+			ImageRef: "ovek-demo-app:" + job.ID,
 		}, nil
 	})
 	provisioner := &fakeProjectProvisioner{
 		removeErrs: []error{errors.New("stop failed"), nil},
 	}
-	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/alces/projects", defaultPocketBaseImage)
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
 
 	result, err := processor.Process(context.Background(), job{
 		ID:          "job-123",
@@ -252,7 +252,7 @@ func TestManagedDeploymentProcessorReturnsSupersededAppRemovalFailure(t *testing
 	if err == nil {
 		t.Fatal("expected superseded app removal failure")
 	}
-	if err.Error() != "remove superseded app container \"alces-demo-app-app-dep-old\": stop failed" {
+	if err.Error() != "remove superseded app container \"ovek-demo-app-app-dep-old\": stop failed" {
 		t.Fatalf("expected superseded app removal error, got %q", err.Error())
 	}
 	if result.SupersededDeploymentID != "" {

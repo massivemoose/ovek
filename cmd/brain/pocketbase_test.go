@@ -15,8 +15,8 @@ import (
 )
 
 func TestPocketBaseDataDir(t *testing.T) {
-	got := pocketBaseDataDir("/srv/alces/projects", "demo-app")
-	want := filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName)
+	got := pocketBaseDataDir("/srv/ovek/projects", "demo-app")
+	want := filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName)
 	if got != want {
 		t.Fatalf("expected PocketBase data dir %q, got %q", want, got)
 	}
@@ -26,18 +26,18 @@ func TestNewPocketBaseContainerSpec(t *testing.T) {
 	spec := newPocketBaseContainerSpec(pocketBaseSpec{
 		ProjectName:         "demo-app",
 		Image:               defaultPocketBaseImage,
-		ProjectsHostDataDir: "/srv/alces/projects",
+		ProjectsHostDataDir: "/srv/ovek/projects",
 		Network: projectNetwork{
 			ID:   "network-123",
 			Name: "demo-app-net",
 		},
 	})
 
-	if spec.Name != "alces-demo-app-pb" {
-		t.Fatalf("expected container name %q, got %q", "alces-demo-app-pb", spec.Name)
+	if spec.Name != "ovek-demo-app-pb" {
+		t.Fatalf("expected container name %q, got %q", "ovek-demo-app-pb", spec.Name)
 	}
-	if spec.HostDataDir != filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName) {
-		t.Fatalf("expected host data dir %q, got %q", filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName), spec.HostDataDir)
+	if spec.HostDataDir != filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName) {
+		t.Fatalf("expected host data dir %q, got %q", filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName), spec.HostDataDir)
 	}
 	if spec.Config.Image != defaultPocketBaseImage {
 		t.Fatalf("expected image %q, got %q", defaultPocketBaseImage, spec.Config.Image)
@@ -61,7 +61,7 @@ func TestNewPocketBaseContainerSpec(t *testing.T) {
 	wantMounts := []dockermount.Mount{
 		{
 			Type:   dockermount.TypeBind,
-			Source: filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName),
+			Source: filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName),
 			Target: pocketBaseDataMountPath,
 		},
 	}
@@ -103,11 +103,11 @@ func TestDockerRuntimeEnsureProjectPocketBaseCreatesAndStartsManagedContainer(t 
 	if client.networkCreateName != "demo-app-net" {
 		t.Fatalf("expected project network name %q, got %q", "demo-app-net", client.networkCreateName)
 	}
-	if client.containerInspectName != "alces-demo-app-pb" {
-		t.Fatalf("expected PocketBase inspect name %q, got %q", "alces-demo-app-pb", client.containerInspectName)
+	if client.containerInspectName != "ovek-demo-app-pb" {
+		t.Fatalf("expected PocketBase inspect name %q, got %q", "ovek-demo-app-pb", client.containerInspectName)
 	}
-	if client.containerCreateName != "alces-demo-app-pb" {
-		t.Fatalf("expected PocketBase create name %q, got %q", "alces-demo-app-pb", client.containerCreateName)
+	if client.containerCreateName != "ovek-demo-app-pb" {
+		t.Fatalf("expected PocketBase create name %q, got %q", "ovek-demo-app-pb", client.containerCreateName)
 	}
 	if client.imagePullRef != defaultPocketBaseImage {
 		t.Fatalf("expected PocketBase image pull ref %q, got %q", defaultPocketBaseImage, client.imagePullRef)
@@ -317,7 +317,7 @@ func TestValidateExistingPocketBaseContainerAcceptsCanonicalizedImageRef(t *test
 	spec := newPocketBaseContainerSpec(pocketBaseSpec{
 		ProjectName:         "demo-app",
 		Image:               "elestio/pocketbase:latest",
-		ProjectsHostDataDir: "/srv/alces/projects",
+		ProjectsHostDataDir: "/srv/ovek/projects",
 		Network: projectNetwork{
 			ID:   "network-123",
 			Name: "demo-app-net",
@@ -376,8 +376,8 @@ func TestCanonicalContainerImageRef(t *testing.T) {
 		},
 		{
 			name:    "custom registry keeps host",
-			input:   "registry:5000/alces-demo-app:job-123",
-			wantRef: "registry:5000/alces-demo-app:job-123",
+			input:   "registry:5000/ovek-demo-app:job-123",
+			wantRef: "registry:5000/ovek-demo-app:job-123",
 		},
 	}
 
@@ -435,7 +435,7 @@ func TestDockerRuntimeEnsureProjectPocketBaseRejectsUnmanagedContainer(t *testin
 	if err == nil {
 		t.Fatal("expected unmanaged PocketBase container to be rejected")
 	}
-	if !strings.Contains(err.Error(), "already exists but is not managed by alces") {
+	if !strings.Contains(err.Error(), "already exists but is not managed by ovek") {
 		t.Fatalf("expected unmanaged container error, got %v", err)
 	}
 	if client.containerStartID != "" {
@@ -467,8 +467,8 @@ func TestDockerRuntimeRemoveProjectPocketBaseStopsAndRemovesRunningManagedContai
 	if err != nil {
 		t.Fatalf("expected PocketBase removal to succeed, got error: %v", err)
 	}
-	if client.containerInspectName != "alces-demo-app-pb" {
-		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-pb", client.containerInspectName)
+	if client.containerInspectName != "ovek-demo-app-pb" {
+		t.Fatalf("expected inspect name %q, got %q", "ovek-demo-app-pb", client.containerInspectName)
 	}
 	if client.containerStopID != "container-123" {
 		t.Fatalf("expected stop ID %q, got %q", "container-123", client.containerStopID)

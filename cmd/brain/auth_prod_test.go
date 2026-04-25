@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/massivemoose/alces/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/brainapi"
 )
 
 func TestBootstrapAuthCreatesFirstAdminAndAPIKey(t *testing.T) {

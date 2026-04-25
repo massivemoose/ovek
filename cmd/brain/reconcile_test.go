@@ -11,10 +11,10 @@ func TestStartupDeploymentReconcilerPromotesSingleRunningAppWhenCurrentRuntimeMi
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-old",
-		AppContainerName:        "alces-demo-app-app-dep-old",
+		ImageRef:                "ovek-demo-app:dep-old",
+		AppContainerName:        "ovek-demo-app-app-dep-old",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -25,10 +25,10 @@ func TestStartupDeploymentReconcilerPromotesSingleRunningAppWhenCurrentRuntimeMi
 				{
 					DeploymentID:            "dep-new",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-new",
-					ImageRef:                "alces-demo-app:dep-new",
+					AppContainerName:        "ovek-demo-app-app-dep-new",
+					ImageRef:                "ovek-demo-app:dep-new",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 					CreatedAt:               "2026-04-09T00:10:00Z",
 					Running:                 true,
 				},
@@ -52,8 +52,8 @@ func TestStartupDeploymentReconcilerPromotesSingleRunningAppWhenCurrentRuntimeMi
 	if newDeployment.Status != deploymentStatusSucceeded {
 		t.Fatalf("expected new deployment status %q, got %q", deploymentStatusSucceeded, newDeployment.Status)
 	}
-	if newDeployment.AppContainerName != "alces-demo-app-app-dep-new" {
-		t.Fatalf("expected new app container name %q, got %q", "alces-demo-app-app-dep-new", newDeployment.AppContainerName)
+	if newDeployment.AppContainerName != "ovek-demo-app-app-dep-new" {
+		t.Fatalf("expected new app container name %q, got %q", "ovek-demo-app-app-dep-new", newDeployment.AppContainerName)
 	}
 	if len(runtime.removedDeployments) != 0 {
 		t.Fatalf("expected no app removals, got %#v", runtime.removedDeployments)
@@ -65,20 +65,20 @@ func TestStartupDeploymentReconcilerKeepsCurrentRunningAppAndRemovesExtras(t *te
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-old",
-		AppContainerName:        "alces-demo-app-app-dep-old",
+		ImageRef:                "ovek-demo-app:dep-old",
+		AppContainerName:        "ovek-demo-app-app-dep-old",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-extra",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-extra",
-		AppContainerName:        "alces-demo-app-app-dep-extra",
+		ImageRef:                "ovek-demo-app:dep-extra",
+		AppContainerName:        "ovek-demo-app-app-dep-extra",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:05:00Z",
 	})
@@ -89,20 +89,20 @@ func TestStartupDeploymentReconcilerKeepsCurrentRunningAppAndRemovesExtras(t *te
 				{
 					DeploymentID:            "dep-old",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-old",
-					ImageRef:                "alces-demo-app:dep-old",
+					AppContainerName:        "ovek-demo-app-app-dep-old",
+					ImageRef:                "ovek-demo-app:dep-old",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 					CreatedAt:               "2026-04-09T00:00:00Z",
 					Running:                 true,
 				},
 				{
 					DeploymentID:            "dep-extra",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-extra",
-					ImageRef:                "alces-demo-app:dep-extra",
+					AppContainerName:        "ovek-demo-app-app-dep-extra",
+					ImageRef:                "ovek-demo-app:dep-extra",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 					CreatedAt:               "2026-04-09T00:05:00Z",
 					Running:                 true,
 				},
@@ -140,20 +140,20 @@ func TestStartupDeploymentReconcilerSkipsAmbiguousMultipleRunningAppsWithoutCurr
 				{
 					DeploymentID:            "dep-a",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-a",
-					ImageRef:                "alces-demo-app:dep-a",
+					AppContainerName:        "ovek-demo-app-app-dep-a",
+					ImageRef:                "ovek-demo-app:dep-a",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 					CreatedAt:               "2026-04-09T00:00:00Z",
 					Running:                 true,
 				},
 				{
 					DeploymentID:            "dep-b",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-b",
-					ImageRef:                "alces-demo-app:dep-b",
+					AppContainerName:        "ovek-demo-app-app-dep-b",
+					ImageRef:                "ovek-demo-app:dep-b",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 					CreatedAt:               "2026-04-09T00:01:00Z",
 					Running:                 true,
 				},

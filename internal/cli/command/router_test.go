@@ -10,7 +10,7 @@ import (
 
 func TestRouterDispatchesKnownCommand(t *testing.T) {
 	command := &recordingCommand{name: "status", summary: "Show project status"}
-	router := NewRouter("alces", "Alces CLI", command)
+	router := NewRouter("ovek", "Ovek CLI", command)
 
 	err := router.Run(context.Background(), []string{"status", "demo-app"})
 	if err != nil {
@@ -22,7 +22,7 @@ func TestRouterDispatchesKnownCommand(t *testing.T) {
 }
 
 func TestRouterReturnsUsageForHelp(t *testing.T) {
-	router := NewRouter("alces", "Alces CLI")
+	router := NewRouter("ovek", "Ovek CLI")
 
 	err := router.Run(context.Background(), []string{"help"})
 	if !errors.Is(err, ErrUsage) {
@@ -32,8 +32,8 @@ func TestRouterReturnsUsageForHelp(t *testing.T) {
 
 func TestRouterUsageListsCommands(t *testing.T) {
 	router := NewRouter(
-		"alces",
-		"Alces CLI",
+		"ovek",
+		"Ovek CLI",
 		&recordingCommand{name: "status", summary: "Show project status"},
 		&recordingCommand{name: "auth", summary: "Manage local auth"},
 	)
@@ -43,9 +43,9 @@ func TestRouterUsageListsCommands(t *testing.T) {
 
 	text := usage.String()
 	for _, fragment := range []string{
-		"Alces CLI",
+		"Ovek CLI",
 		"Usage:",
-		"alces <command>",
+		"ovek <command>",
 		"auth",
 		"status",
 	} {

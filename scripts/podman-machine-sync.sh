@@ -3,7 +3,7 @@
 set -euo pipefail
 
 machine_name="${PODMAN_MACHINE_NAME:-podman-machine-default}"
-vm_dir="${ALCES_VM_DIR:-/var/home/core/alces}"
+vm_dir="${OVEK_VM_DIR:-/var/home/core/ovek}"
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 exclude_file="${repo_root}/.podman-machine-syncignore"
 

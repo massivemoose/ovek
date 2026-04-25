@@ -53,7 +53,7 @@ func (store *Store) Path() (string, error) {
 		}
 	}
 
-	return filepath.Join(rootDir, "alces", "config.json"), nil
+	return filepath.Join(rootDir, "ovek", "config.json"), nil
 }
 
 func (store *Store) Load() (Config, error) {

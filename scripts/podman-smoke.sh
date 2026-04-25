@@ -2,16 +2,16 @@
 
 set -euo pipefail
 
-brain_base_url="${ALCES_BASE_URL:-http://127.0.0.1}"
-brain_host="${ALCES_BRAIN_HOST:-brain.localhost}"
-api_key="${ALCES_API_KEY:-dev-brain-key}"
-project_name="${ALCES_PROJECT_NAME:-demo-app}"
-project_host="${ALCES_PROJECT_HOST:-${project_name}.localhost}"
-repo_url="${ALCES_REPO_URL:-https://github.com/heroku/nodejs-getting-started.git}"
+brain_base_url="${OVEK_BASE_URL:-http://127.0.0.1}"
+brain_host="${OVEK_BRAIN_HOST:-brain.localhost}"
+api_key="${OVEK_API_KEY:-dev-brain-key}"
+project_name="${OVEK_PROJECT_NAME:-demo-app}"
+project_host="${OVEK_PROJECT_HOST:-${project_name}.localhost}"
+repo_url="${OVEK_REPO_URL:-https://github.com/heroku/nodejs-getting-started.git}"
 compose_cmd="${COMPOSE_CMD:-sudo podman compose -f podman-compose.yml}"
-max_attempts="${ALCES_MAX_ATTEMPTS:-120}"
-sleep_seconds="${ALCES_POLL_INTERVAL_SECONDS:-2}"
-progress_interval="${ALCES_PROGRESS_INTERVAL_ATTEMPTS:-5}"
+max_attempts="${OVEK_MAX_ATTEMPTS:-120}"
+sleep_seconds="${OVEK_POLL_INTERVAL_SECONDS:-2}"
+progress_interval="${OVEK_PROGRESS_INTERVAL_ATTEMPTS:-5}"
 
 log() {
 	printf '==> %s\n' "$*"
@@ -171,8 +171,8 @@ wait_for_app_http_200() {
 }
 
 cleanup_project_runtime() {
-	max_cleanup_attempts="${ALCES_CLEANUP_MAX_ATTEMPTS:-5}"
-	cleanup_retry_seconds="${ALCES_CLEANUP_RETRY_SECONDS:-2}"
+	max_cleanup_attempts="${OVEK_CLEANUP_MAX_ATTEMPTS:-5}"
+	cleanup_retry_seconds="${OVEK_CLEANUP_RETRY_SECONDS:-2}"
 	attempt=1
 
 	while [ "${attempt}" -le "${max_cleanup_attempts}" ]; do

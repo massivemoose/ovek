@@ -20,7 +20,7 @@ func TestManagedDeploymentLifecycleSucceeds(t *testing.T) {
 			return successfulManagedBuildResult(currentJob), nil
 		}),
 		provisioner,
-		"/srv/alces/projects",
+		"/srv/ovek/projects",
 		defaultPocketBaseImage,
 	))
 
@@ -39,8 +39,8 @@ func TestManagedDeploymentLifecycleSucceeds(t *testing.T) {
 	if finishedJob.LogPath != "/tmp/build.log" {
 		t.Fatalf("expected log path %q, got %q", "/tmp/build.log", finishedJob.LogPath)
 	}
-	if finishedJob.ImageRef != "localhost:5001/alces-demo-app:"+createdJob.ID {
-		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:"+createdJob.ID, finishedJob.ImageRef)
+	if finishedJob.ImageRef != "localhost:5001/ovek-demo-app:"+createdJob.ID {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:"+createdJob.ID, finishedJob.ImageRef)
 	}
 
 	deployment := getDeploymentRecord(t, db, createdJob.ID)
@@ -72,7 +72,7 @@ func TestManagedDeploymentLifecycleFailsDuringBuild(t *testing.T) {
 			return successfulManagedBuildResult(currentJob), errors.New("git clone: repository not found")
 		}),
 		provisioner,
-		"/srv/alces/projects",
+		"/srv/ovek/projects",
 		defaultPocketBaseImage,
 	))
 
@@ -103,10 +103,10 @@ func TestManagedDeploymentLifecycleKeepsCurrentRuntimeWhenReadinessFails(t *test
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-18T00:00:00Z",
 	})
@@ -124,7 +124,7 @@ func TestManagedDeploymentLifecycleKeepsCurrentRuntimeWhenReadinessFails(t *test
 			return successfulManagedBuildResult(currentJob), nil
 		}),
 		provisioner,
-		"/srv/alces/projects",
+		"/srv/ovek/projects",
 		defaultPocketBaseImage,
 	))
 
@@ -157,10 +157,10 @@ func TestManagedDeploymentLifecycleSupersedesExistingRuntime(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-18T00:00:00Z",
 	})
@@ -176,7 +176,7 @@ func TestManagedDeploymentLifecycleSupersedesExistingRuntime(t *testing.T) {
 			return successfulManagedBuildResult(currentJob), nil
 		}),
 		provisioner,
-		"/srv/alces/projects",
+		"/srv/ovek/projects",
 		defaultPocketBaseImage,
 	))
 
@@ -217,7 +217,7 @@ func TestManagedDeploymentLifecycleCleanupReturnsProjectToIdle(t *testing.T) {
 			return successfulManagedBuildResult(currentJob), nil
 		}),
 		provisioner,
-		"/srv/alces/projects",
+		"/srv/ovek/projects",
 		defaultPocketBaseImage,
 	))
 
@@ -262,6 +262,6 @@ func TestManagedDeploymentLifecycleCleanupReturnsProjectToIdle(t *testing.T) {
 func successfulManagedBuildResult(currentJob job) deploymentResult {
 	return deploymentResult{
 		LogPath:  "/tmp/build.log",
-		ImageRef: "localhost:5001/alces-demo-app:" + currentJob.ID,
+		ImageRef: "localhost:5001/ovek-demo-app:" + currentJob.ID,
 	}
 }

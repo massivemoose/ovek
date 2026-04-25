@@ -1,6 +1,6 @@
 # Registry Trust And Host Model
 
-Alces uses a local registry as the handoff point between build and runtime.
+Ovek uses a local registry as the handoff point between build and runtime.
 Brain does not currently import build output directly into the runtime engine.
 Instead, each deployment moves through three registry interactions:
 

@@ -34,10 +34,10 @@ func TestTraefikFileIngressSyncProjectWritesCurrentDeploymentRoute(t *testing.T)
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-19T00:00:00Z",
 	})
@@ -88,10 +88,10 @@ func TestTraefikFileIngressSyncAllRemovesStaleProjectConfigs(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "alpha-app",
-		ImageRef:                "localhost:5001/alces-alpha-app:dep-current",
-		AppContainerName:        "alces-alpha-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-alpha-app:dep-current",
+		AppContainerName:        "ovek-alpha-app-app-dep-current",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-19T00:00:00Z",
 	})

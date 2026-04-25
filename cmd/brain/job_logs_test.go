@@ -59,7 +59,7 @@ func TestGetJobLogsReturnsInProgressLogContentsWithoutPersistedLogPath(t *testin
 		t.Fatalf("expected log directory creation to succeed, got error: %v", err)
 	}
 
-	wantLogs := "$ railpack build --name alces-demo-app:" + createdJob.ID + " /tmp/workspace\n"
+	wantLogs := "$ railpack build --name ovek-demo-app:" + createdJob.ID + " /tmp/workspace\n"
 	if err := os.WriteFile(logPath, []byte(wantLogs), 0o644); err != nil {
 		t.Fatalf("expected log file write to succeed, got error: %v", err)
 	}

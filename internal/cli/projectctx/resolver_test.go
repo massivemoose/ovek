@@ -3,7 +3,7 @@ package projectctx
 import "testing"
 
 func TestExplicitResolverReturnsProjectName(t *testing.T) {
-	resolver := ExplicitResolver{CommandPath: "alces status"}
+	resolver := ExplicitResolver{CommandPath: "ovek status"}
 
 	projectName, err := resolver.Resolve([]string{"demo-app"})
 	if err != nil {
@@ -15,7 +15,7 @@ func TestExplicitResolverReturnsProjectName(t *testing.T) {
 }
 
 func TestExplicitResolverRejectsWrongArgCount(t *testing.T) {
-	resolver := ExplicitResolver{CommandPath: "alces status"}
+	resolver := ExplicitResolver{CommandPath: "ovek status"}
 
 	if _, err := resolver.Resolve(nil); err == nil {
 		t.Fatal("expected resolver to reject missing project argument")

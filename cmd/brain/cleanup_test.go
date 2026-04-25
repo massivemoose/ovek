@@ -23,20 +23,20 @@ func TestManagedProjectCleanerRemovesManagedResourcesInOrderAndClearsRuntimeStat
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-old",
-		AppContainerName:        "alces-demo-app-app-dep-old",
+		ImageRef:                "ovek-demo-app:dep-old",
+		AppContainerName:        "ovek-demo-app-app-dep-old",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-08T23:55:00Z",
 	})
@@ -47,18 +47,18 @@ func TestManagedProjectCleanerRemovesManagedResourcesInOrderAndClearsRuntimeStat
 				{
 					DeploymentID:            "dep-current",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-current",
-					ImageRef:                "alces-demo-app:dep-current",
+					AppContainerName:        "ovek-demo-app-app-dep-current",
+					ImageRef:                "ovek-demo-app:dep-current",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 				},
 				{
 					DeploymentID:            "dep-old",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-old",
-					ImageRef:                "alces-demo-app:dep-old",
+					AppContainerName:        "ovek-demo-app-app-dep-old",
+					ImageRef:                "ovek-demo-app:dep-old",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 				},
 			},
 		},
@@ -70,8 +70,8 @@ func TestManagedProjectCleanerRemovesManagedResourcesInOrderAndClearsRuntimeStat
 	}
 
 	wantSequence := []string{
-		"app:alces-demo-app-app-dep-current",
-		"app:alces-demo-app-app-dep-old",
+		"app:ovek-demo-app-app-dep-current",
+		"app:ovek-demo-app-app-dep-old",
 		"pocketbase:demo-app",
 		"network:demo-app",
 	}
@@ -95,10 +95,10 @@ func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t 
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -109,10 +109,10 @@ func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t 
 				{
 					DeploymentID:            "dep-current",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-current",
-					ImageRef:                "alces-demo-app:dep-current",
+					AppContainerName:        "ovek-demo-app-app-dep-current",
+					ImageRef:                "ovek-demo-app:dep-current",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 				},
 			},
 		},
@@ -123,10 +123,10 @@ func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t 
 	if err == nil {
 		t.Fatal("expected cleanup to fail")
 	}
-	if got := err.Error(); got != `remove project app "alces-demo-app-app-dep-current": stop failed` {
+	if got := err.Error(); got != `remove project app "ovek-demo-app-app-dep-current": stop failed` {
 		t.Fatalf("expected app removal error, got %q", got)
 	}
-	if !reflect.DeepEqual(runtime.sequence, []string{"app:alces-demo-app-app-dep-current"}) {
+	if !reflect.DeepEqual(runtime.sequence, []string{"app:ovek-demo-app-app-dep-current"}) {
 		t.Fatalf("expected cleanup to stop after app failure, got %#v", runtime.sequence)
 	}
 	if got := getProjectCurrentDeploymentID(t, db, "demo-app"); got != "dep-current" {
@@ -145,10 +145,10 @@ func TestManagedProjectCleanerRetriesTransientRuntimeTeardownFailures(t *testing
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -169,10 +169,10 @@ func TestManagedProjectCleanerRetriesTransientRuntimeTeardownFailures(t *testing
 				{
 					DeploymentID:            "dep-current",
 					ProjectName:             "demo-app",
-					AppContainerName:        "alces-demo-app-app-dep-current",
-					ImageRef:                "alces-demo-app:dep-current",
+					AppContainerName:        "ovek-demo-app-app-dep-current",
+					ImageRef:                "ovek-demo-app:dep-current",
 					NetworkName:             "demo-app-net",
-					PocketBaseContainerName: "alces-demo-app-pb",
+					PocketBaseContainerName: "ovek-demo-app-pb",
 				},
 			},
 		},
@@ -186,8 +186,8 @@ func TestManagedProjectCleanerRetriesTransientRuntimeTeardownFailures(t *testing
 	}
 
 	wantSequence := []string{
-		"app:alces-demo-app-app-dep-current",
-		"app:alces-demo-app-app-dep-current",
+		"app:ovek-demo-app-app-dep-current",
+		"app:ovek-demo-app-app-dep-current",
 		"pocketbase:demo-app",
 		"pocketbase:demo-app",
 		"network:demo-app",
@@ -233,10 +233,10 @@ func TestManagedProjectCleanerRemovesProjectIngressAfterClearingRuntimeState(t *
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -259,10 +259,10 @@ func TestManagedProjectCleanerIsIdempotentWhenRuntimeResourcesAreAlreadyGone(t *
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -300,20 +300,20 @@ func TestManagedProjectCleanerCleansUpDeploymentImagesAfterRuntimeTeardown(t *te
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-old",
-		AppContainerName:        "alces-demo-app-app-dep-old",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-old",
+		AppContainerName:        "ovek-demo-app-app-dep-old",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSuperseded,
 		CreatedAt:               "2026-04-08T23:55:00Z",
 	})
@@ -325,8 +325,8 @@ func TestManagedProjectCleanerCleansUpDeploymentImagesAfterRuntimeTeardown(t *te
 	}
 
 	wantImageRefs := []string{
-		"localhost:5001/alces-demo-app:dep-old",
-		"localhost:5001/alces-demo-app:dep-current",
+		"localhost:5001/ovek-demo-app:dep-old",
+		"localhost:5001/ovek-demo-app:dep-current",
 	}
 	if !reflect.DeepEqual(artifactCleaner.cleanedRefs, wantImageRefs) {
 		t.Fatalf("expected cleaned refs %#v, got %#v", wantImageRefs, artifactCleaner.cleanedRefs)
@@ -338,10 +338,10 @@ func TestManagedProjectCleanerLogsArtifactCleanupFailuresButStillSucceeds(t *tes
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -354,7 +354,7 @@ func TestManagedProjectCleanerLogsArtifactCleanupFailuresButStillSucceeds(t *tes
 		}
 	})
 
-	if !strings.Contains(logs, `warning: failed to clean up project "demo-app" image "localhost:5001/alces-demo-app:dep-current": registry delete failed`) {
+	if !strings.Contains(logs, `warning: failed to clean up project "demo-app" image "localhost:5001/ovek-demo-app:dep-current": registry delete failed`) {
 		t.Fatalf("expected cleanup warning log, got %q", logs)
 	}
 }
@@ -399,10 +399,10 @@ func TestManagedProjectCleanerRemovesManagedProjectJobLogFiles(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -445,10 +445,10 @@ func TestManagedProjectCleanerSkipsJobLogFilesOutsideManagedDirectory(t *testing
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -491,10 +491,10 @@ func TestManagedProjectCleanerLogsJobLogCleanupFailuresButStillSucceeds(t *testi
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -540,10 +540,10 @@ func TestDeleteProjectRuntimeEndpointReturnsNoContent(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -642,20 +642,20 @@ func TestClearProjectRuntimeStateSupersedesSucceededDeploymentsAndClearsCurrentP
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-old",
-		AppContainerName:        "alces-demo-app-app-dep-old",
+		ImageRef:                "ovek-demo-app:dep-old",
+		AppContainerName:        "ovek-demo-app-app-dep-old",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-08T23:55:00Z",
 	})

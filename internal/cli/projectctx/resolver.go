@@ -16,7 +16,7 @@ type ExplicitResolver struct {
 func (resolver ExplicitResolver) Resolve(args []string) (string, error) {
 	if len(args) != 1 {
 		if resolver.CommandPath == "" {
-			resolver.CommandPath = "alces"
+			resolver.CommandPath = "ovek"
 		}
 		return "", fmt.Errorf("%s requires exactly one <project> argument", resolver.CommandPath)
 	}

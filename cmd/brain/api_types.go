@@ -1,6 +1,6 @@
 package main
 
-import "github.com/massivemoose/alces/internal/brainapi"
+import "github.com/massivemoose/ovek/internal/brainapi"
 
 type apiError = brainapi.APIError
 type projectSummary = brainapi.ProjectSummary

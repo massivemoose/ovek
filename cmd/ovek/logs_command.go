@@ -6,10 +6,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/massivemoose/alces/internal/cli/client"
-	"github.com/massivemoose/alces/internal/cli/command"
-	"github.com/massivemoose/alces/internal/cli/config"
-	"github.com/massivemoose/alces/internal/cli/projectctx"
+	"github.com/massivemoose/ovek/internal/cli/client"
+	"github.com/massivemoose/ovek/internal/cli/command"
+	"github.com/massivemoose/ovek/internal/cli/config"
+	"github.com/massivemoose/ovek/internal/cli/projectctx"
 )
 
 type logsCommand struct {
@@ -41,12 +41,12 @@ func (cmd *logsCommand) Run(ctx context.Context, args []string) error {
 
 	if jobID != "" {
 		if len(positionals) != 0 {
-			return fmt.Errorf("alces logs --job does not accept a <project> argument")
+			return fmt.Errorf("ovek logs --job does not accept a <project> argument")
 		}
 		return cmd.runJob(ctx, brainClient, jobID, noFollow)
 	}
 
-	projectName, err := projectctx.ExplicitResolver{CommandPath: "alces logs"}.Resolve(positionals)
+	projectName, err := projectctx.ExplicitResolver{CommandPath: "ovek logs"}.Resolve(positionals)
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func (cmd *logsCommand) Run(ctx context.Context, args []string) error {
 }
 
 func (cmd *logsCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  alces logs <project> [--no-follow]\n  alces logs --job <jobID> [--no-follow]\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek logs <project> [--no-follow]\n  ovek logs --job <jobID> [--no-follow]\n")
 }
 
 func (cmd *logsCommand) runRuntime(ctx context.Context, brainClient *client.Client, projectName string, noFollow bool) error {
@@ -124,11 +124,11 @@ func parseLogsArgs(args []string) (string, bool, []string, error) {
 		case "--job":
 			index++
 			if index >= len(args) {
-				return "", false, nil, fmt.Errorf("alces logs --job requires a job ID")
+				return "", false, nil, fmt.Errorf("ovek logs --job requires a job ID")
 			}
 			jobID = strings.TrimSpace(args[index])
 			if jobID == "" {
-				return "", false, nil, fmt.Errorf("alces logs --job requires a non-empty job ID")
+				return "", false, nil, fmt.Errorf("ovek logs --job requires a non-empty job ID")
 			}
 		default:
 			positionals = append(positionals, args[index])
