@@ -205,6 +205,58 @@ func TestBuildProcessorReturnsMetadataOnBuildctlFailure(t *testing.T) {
 	}
 }
 
+func TestBuildProcessorRedactsConfiguredSecretsFromBuildLogs(t *testing.T) {
+	db := newTestDB(t)
+	configStore := newTestProjectConfigStore(t, db)
+	secretMutation, err := configStore.SetEnvironmentEntry(context.Background(), "demo-app", "PB_SUPERUSER_PASSWORD", "secret-pass", true, "dev")
+	if err != nil {
+		t.Fatalf("expected secret set to succeed, got error: %v", err)
+	}
+	dataDir := t.TempDir()
+	runner := &recordingCommandRunner{
+		runFunc: func(command commandSpec) error {
+			_, _ = command.Stdout.Write([]byte("using secret-pa"))
+			_, _ = command.Stdout.Write([]byte("ss during command\n"))
+			if command.Name == "railpack" && len(command.Args) > 0 && command.Args[0] == "prepare" {
+				return os.WriteFile(command.Args[3], []byte("{}"), 0o644)
+			}
+			return nil
+		},
+	}
+	processor := newBuildProcessor(
+		dataDir,
+		defaultBuildKitHost,
+		defaultBuildRegistryPublishHost,
+		defaultRuntimeRegistryHost,
+		defaultRailpackFrontendImage,
+		defaultRegistryInsecure,
+		runner,
+		configStore,
+	)
+
+	result, err := processor.Process(context.Background(), job{
+		ID:               "job-redact",
+		ProjectName:      "demo-app",
+		RepoURL:          "https://example.com/demo.git",
+		ConfigRevisionID: secretMutation.RevisionID,
+	})
+	if err != nil {
+		t.Fatalf("expected build to succeed, got error: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(result.LogPath)
+	if err != nil {
+		t.Fatalf("expected log read to succeed, got error: %v", err)
+	}
+	logs := string(logBytes)
+	if strings.Contains(logs, "secret-pass") {
+		t.Fatal("expected logs to redact secret")
+	}
+	if !strings.Contains(logs, "[redacted]") {
+		t.Fatalf("expected logs to contain redaction marker, got %q", logs)
+	}
+}
+
 func TestJobImageRefUsesOptionalRegistryHost(t *testing.T) {
 	currentJob := job{
 		ID:          "job-123",

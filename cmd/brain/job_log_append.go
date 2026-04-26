@@ -8,11 +8,14 @@ import (
 	"strings"
 )
 
-func appendJobLogLine(logPath string, line string) {
+func appendJobLogLine(logPath string, line string, scrubbers ...secretScrubber) {
 	logPath = strings.TrimSpace(logPath)
 	line = strings.TrimSpace(line)
 	if logPath == "" || line == "" {
 		return
+	}
+	if len(scrubbers) > 0 {
+		line = scrubbers[0].Scrub(line)
 	}
 
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -30,11 +33,11 @@ func appendJobLogLine(logPath string, line string) {
 	}
 }
 
-func appendJobLogError(logPath string, errorMessage string) {
+func appendJobLogError(logPath string, errorMessage string, scrubbers ...secretScrubber) {
 	errorMessage = normalizeJobFailureMessage(errorMessage)
 	if errorMessage == "" {
 		return
 	}
 
-	appendJobLogLine(logPath, "error: "+errorMessage)
+	appendJobLogLine(logPath, "error: "+errorMessage, scrubbers...)
 }

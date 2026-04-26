@@ -28,6 +28,7 @@ type deploymentResult struct {
 	NetworkName             string
 	PocketBaseContainerName string
 	SupersededDeploymentID  string
+	LogScrubber             secretScrubber
 }
 
 type deploymentProcessor interface {
@@ -123,13 +124,13 @@ func (manager *jobManager) processJob(ctx context.Context, jobID string) {
 	if err := markJobSucceeded(manager.db, job, finishedAt, result); err != nil {
 		log.Printf("failed to mark job %s as succeeded: %v", jobID, err)
 		promotionErr := "promotion state update failed: " + err.Error()
-		appendJobLogError(result.LogPath, promotionErr)
+		appendJobLogError(result.LogPath, promotionErr, result.LogScrubber)
 		if updateErr := markJobFailed(manager.db, jobID, finishedAt, promotionErr, result); updateErr != nil {
 			log.Printf("failed to mark job %s as failed after promotion update error: %v", jobID, updateErr)
 		}
 		return
 	}
-	appendJobLogLine(result.LogPath, "lifecycle: deployment promoted")
+	appendJobLogLine(result.LogPath, "lifecycle: deployment promoted", result.LogScrubber)
 	if manager.ingress != nil {
 		if err := manager.ingress.SyncProject(ctx, job.ProjectName); err != nil {
 			log.Printf("warning: failed to sync ingress for project %q after job %s: %v", job.ProjectName, jobID, err)
@@ -368,8 +369,9 @@ func insertSucceededDeployment(tx *sql.Tx, currentJob job, result deploymentResu
 			network_name,
 			pb_container_name,
 			status,
-			created_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at,
+			config_revision_id
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		currentJob.ID,
 		currentJob.ProjectName,
 		result.ImageRef,
@@ -378,6 +380,7 @@ func insertSucceededDeployment(tx *sql.Tx, currentJob job, result deploymentResu
 		result.PocketBaseContainerName,
 		deploymentStatusSucceeded,
 		currentJob.CreatedAt,
+		nullableString(currentJob.ConfigRevisionID),
 	)
 	if err != nil {
 		return fmt.Errorf("insert deployment %q: %w", currentJob.ID, err)
@@ -458,8 +461,9 @@ func requireDeploymentMetadata(result deploymentResult) error {
 
 func getProjectCurrentDeployment(db *sql.DB, projectName string) (deploymentRecord, bool, error) {
 	var deployment deploymentRecord
+	var configRevisionID sql.NullString
 	err := db.QueryRow(
-		`SELECT d.id, d.project_name, d.image_ref, d.app_container_name, d.network_name, d.pb_container_name, d.status, d.created_at
+		`SELECT d.id, d.project_name, d.image_ref, d.app_container_name, d.network_name, d.pb_container_name, d.status, d.created_at, d.config_revision_id
 		 FROM projects p
 		 JOIN deployments d ON d.id = p.current_deployment_id
 		 WHERE p.name = ?`,
@@ -473,12 +477,16 @@ func getProjectCurrentDeployment(db *sql.DB, projectName string) (deploymentReco
 		&deployment.PocketBaseContainerName,
 		&deployment.Status,
 		&deployment.CreatedAt,
+		&configRevisionID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return deploymentRecord{}, false, nil
 	}
 	if err != nil {
 		return deploymentRecord{}, false, fmt.Errorf("get current deployment for project %q: %w", projectName, err)
+	}
+	if configRevisionID.Valid {
+		deployment.ConfigRevisionID = configRevisionID.String
 	}
 
 	return deployment, true, nil

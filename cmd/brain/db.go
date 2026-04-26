@@ -107,6 +107,41 @@ CREATE TABLE audit_logs (
 );
 `,
 	},
+	{
+		version: 3,
+		name:    "create project environment config tables",
+		upSQL: `
+CREATE TABLE project_config_revisions (
+	id TEXT PRIMARY KEY,
+	project_name TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	created_by TEXT,
+	reason TEXT NOT NULL,
+	FOREIGN KEY (project_name) REFERENCES projects(name)
+);
+
+CREATE TABLE project_config_entries (
+	project_name TEXT NOT NULL,
+	revision_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	value TEXT NOT NULL,
+	is_secret INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (revision_id, name),
+	FOREIGN KEY (project_name) REFERENCES projects(name),
+	FOREIGN KEY (revision_id) REFERENCES project_config_revisions(id)
+);
+
+CREATE INDEX idx_project_config_revisions_project_created
+	ON project_config_revisions(project_name, created_at DESC);
+
+CREATE INDEX idx_project_config_entries_project_revision
+	ON project_config_entries(project_name, revision_id);
+
+ALTER TABLE jobs ADD COLUMN config_revision_id TEXT;
+ALTER TABLE deployments ADD COLUMN config_revision_id TEXT;
+`,
+	},
 }
 
 func openBrainDB(dataDir string) (*sql.DB, error) {

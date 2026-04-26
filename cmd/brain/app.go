@@ -23,7 +23,7 @@ const (
 	appPortEnv            = "PORT=" + appRuntimePort
 	appPocketBaseURL      = "http://db:8090"
 	appPocketBaseURLEnv   = "POCKETBASE_URL=" + appPocketBaseURL
-	ovekEdgeNetworkName  = "ovek-net"
+	ovekEdgeNetworkName   = "ovek-net"
 	appReadinessTimeout   = 20 * time.Second
 	appReadinessInterval  = 250 * time.Millisecond
 	appReadinessDialTime  = 1 * time.Second
@@ -39,6 +39,7 @@ type appSpec struct {
 	JobID        string
 	ImageRef     string
 	Network      projectNetwork
+	Env          []string
 }
 
 type appContainerSpec struct {
@@ -62,15 +63,15 @@ type projectAppRuntime struct {
 	Running                 bool
 }
 
-func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error) {
-	return ensureProjectApp(ctx, runtime, runtime, job, imageRef)
+func (runtime *dockerRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string, env []string) (string, error) {
+	return ensureProjectApp(ctx, runtime, runtime, job, imageRef, env)
 }
 
-func (runtime *podmanRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string) (string, error) {
-	return ensureProjectApp(ctx, runtime, runtime.dockerRuntime, job, imageRef)
+func (runtime *podmanRuntime) EnsureProjectApp(ctx context.Context, job job, imageRef string, env []string) (string, error) {
+	return ensureProjectApp(ctx, runtime, runtime.dockerRuntime, job, imageRef, env)
 }
 
-func ensureProjectApp(ctx context.Context, imageRuntime Runtime, containerRuntime *dockerRuntime, job job, imageRef string) (string, error) {
+func ensureProjectApp(ctx context.Context, imageRuntime Runtime, containerRuntime *dockerRuntime, job job, imageRef string, env []string) (string, error) {
 	network, err := containerRuntime.EnsureProjectNetwork(ctx, job.ProjectName)
 	if err != nil {
 		return "", fmt.Errorf("ensure project network: %w", err)
@@ -82,6 +83,7 @@ func ensureProjectApp(ctx context.Context, imageRuntime Runtime, containerRuntim
 		JobID:        job.ID,
 		ImageRef:     imageRef,
 		Network:      network,
+		Env:          env,
 	})
 
 	container, err := containerRuntime.client.ContainerInspect(ctx, spec.Name)
@@ -324,7 +326,7 @@ func newAppContainerSpec(spec appSpec) appContainerSpec {
 		Metadata: metadata,
 		Config: &dockercontainer.Config{
 			Image:  spec.ImageRef,
-			Env:    []string{appPortEnv, appPocketBaseURLEnv},
+			Env:    appEnvironment(spec.Env),
 			Labels: labels,
 		},
 		HostConfig: &dockercontainer.HostConfig{
@@ -341,6 +343,12 @@ func newAppContainerSpec(spec appSpec) appContainerSpec {
 		EdgeEndpointConfig: &dockernetwork.EndpointSettings{},
 		ProjectNetworkName: spec.Network.Name,
 	}
+}
+
+func appEnvironment(projectEnv []string) []string {
+	env := []string{appPortEnv, appPocketBaseURLEnv}
+	env = append(env, projectEnv...)
+	return env
 }
 
 func validateExistingAppContainer(container dockercontainer.InspectResponse, spec appContainerSpec) error {

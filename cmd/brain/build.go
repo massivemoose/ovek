@@ -25,6 +25,7 @@ type buildProcessor struct {
 	railpackFrontendImage    string
 	registryInsecure         bool
 	runner                   commandRunner
+	configStore              projectConfigStore
 }
 
 type commandSpec struct {
@@ -49,9 +50,14 @@ func newBuildProcessor(
 	railpackFrontendImage string,
 	registryInsecure bool,
 	runner commandRunner,
+	stores ...projectConfigStore,
 ) buildProcessor {
 	if runner == nil {
 		runner = systemCommandRunner{}
+	}
+	var configStore projectConfigStore
+	if len(stores) > 0 {
+		configStore = stores[0]
 	}
 
 	return buildProcessor{
@@ -62,6 +68,7 @@ func newBuildProcessor(
 		railpackFrontendImage:    railpackFrontendImage,
 		registryInsecure:         registryInsecure,
 		runner:                   runner,
+		configStore:              configStore,
 	}
 }
 
@@ -76,6 +83,13 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 		return deploymentResult{}, fmt.Errorf("create build log file: %w", err)
 	}
 	defer logFile.Close()
+	scrubber, err := processor.configStore.SecretScrubberForJob(ctx, job)
+	if err != nil {
+		return result, fmt.Errorf("load project config for log redaction: %w", err)
+	}
+	logWriter := scrubber.Writer(logFile)
+	defer logWriter.Flush()
+	result.LogScrubber = scrubber
 
 	workspace, err := os.MkdirTemp("", "ovek-build-"+job.ID+"-")
 	if err != nil {
@@ -89,8 +103,8 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 			Name:   "git",
 			Args:   []string{"clone", "--depth", "1", job.RepoURL, workspace},
 			Env:    nil,
-			Stdout: logFile,
-			Stderr: logFile,
+			Stdout: logWriter,
+			Stderr: logWriter,
 		},
 	); err != nil {
 		return result, fmt.Errorf("git clone: %w", err)
@@ -109,8 +123,8 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 			Name:   "railpack",
 			Args:   []string{"prepare", workspace, "--plan-out", planPath, "--info-out", infoPath, "--hide-pretty-plan"},
 			Env:    processor.commandEnv(),
-			Stdout: logFile,
-			Stderr: logFile,
+			Stdout: logWriter,
+			Stderr: logWriter,
 		},
 	); err != nil {
 		return result, fmt.Errorf("railpack prepare: %w", err)
@@ -122,8 +136,8 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 			Name:   "buildctl",
 			Args:   processor.buildctlBuildArgs(workspace, planDir, job),
 			Env:    nil,
-			Stdout: logFile,
-			Stderr: logFile,
+			Stdout: logWriter,
+			Stderr: logWriter,
 		},
 	); err != nil {
 		return result, fmt.Errorf("buildctl build: %w", err)

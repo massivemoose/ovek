@@ -244,6 +244,84 @@ func (client *Client) GetProjectRuntime(ctx context.Context, projectName string)
 	return runtime, nil
 }
 
+func (client *Client) GetProjectEnvironment(ctx context.Context, projectName string) ([]brainapi.ProjectEnvironmentEntry, error) {
+	responseBody, err := client.getJSON(ctx, "/v1/projects/"+url.PathEscape(strings.TrimSpace(projectName))+"/env")
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []brainapi.ProjectEnvironmentEntry
+	if err := json.Unmarshal(responseBody, &entries); err != nil {
+		return nil, fmt.Errorf("decode environment response: %w", err)
+	}
+
+	return entries, nil
+}
+
+func (client *Client) SetProjectEnvironment(ctx context.Context, projectName string, name string, requestBody brainapi.SetProjectEnvironmentRequest) (brainapi.ProjectEnvironmentMutation, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, fmt.Errorf("marshal environment request: %w", err)
+	}
+
+	request, err := client.newRequest(
+		ctx,
+		http.MethodPut,
+		"/v1/projects/"+url.PathEscape(strings.TrimSpace(projectName))+"/env/"+url.PathEscape(strings.TrimSpace(name)),
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, err
+	}
+
+	var mutation brainapi.ProjectEnvironmentMutation
+	if err := json.NewDecoder(response.Body).Decode(&mutation); err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, fmt.Errorf("decode environment mutation response: %w", err)
+	}
+
+	return mutation, nil
+}
+
+func (client *Client) DeleteProjectEnvironment(ctx context.Context, projectName string, name string) (brainapi.ProjectEnvironmentMutation, error) {
+	request, err := client.newRequest(
+		ctx,
+		http.MethodDelete,
+		"/v1/projects/"+url.PathEscape(strings.TrimSpace(projectName))+"/env/"+url.PathEscape(strings.TrimSpace(name)),
+		nil,
+	)
+	if err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, err
+	}
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, err
+	}
+
+	var mutation brainapi.ProjectEnvironmentMutation
+	if err := json.NewDecoder(response.Body).Decode(&mutation); err != nil {
+		return brainapi.ProjectEnvironmentMutation{}, fmt.Errorf("decode environment mutation response: %w", err)
+	}
+
+	return mutation, nil
+}
+
 func (client *Client) CreateDeployment(ctx context.Context, projectName string, requestBody brainapi.CreateDeploymentRequest) (brainapi.Job, error) {
 	payload, err := json.Marshal(requestBody)
 	if err != nil {
