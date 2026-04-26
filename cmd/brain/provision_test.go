@@ -223,6 +223,51 @@ func TestManagedDeploymentProcessorAppendsLifecycleAndErrorLines(t *testing.T) {
 	}
 }
 
+func TestManagedDeploymentProcessorRedactsSecretsFromLifecycleErrorLines(t *testing.T) {
+	db := newTestDB(t)
+	configStore := newTestProjectConfigStore(t, db)
+	secretMutation, err := configStore.SetEnvironmentEntry(context.Background(), "demo-app", "PB_SUPERUSER_PASSWORD", "secret-pass", true, "dev")
+	if err != nil {
+		t.Fatalf("expected secret set to succeed, got error: %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "job.log")
+	if err := os.WriteFile(logPath, []byte("build output\n"), 0o644); err != nil {
+		t.Fatalf("expected log file seed to succeed, got error: %v", err)
+	}
+
+	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:  logPath,
+			ImageRef: "ovek-demo-app:" + job.ID,
+		}, nil
+	})
+	provisioner := &fakeProjectProvisioner{
+		readyErr: errors.New("secret-pass was rejected"),
+	}
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage, configStore)
+
+	_, err = processor.Process(context.Background(), job{
+		ID:               "job-123",
+		ProjectName:      "demo-app",
+		ConfigRevisionID: secretMutation.RevisionID,
+	})
+	if err == nil {
+		t.Fatal("expected readiness failure")
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("expected log file read to succeed, got error: %v", err)
+	}
+	logs := string(logBytes)
+	if strings.Contains(logs, "secret-pass") {
+		t.Fatal("expected lifecycle logs to redact secret")
+	}
+	if !strings.Contains(logs, "error: app readiness failed: [redacted] was rejected") {
+		t.Fatalf("expected redacted lifecycle error, got %q", logs)
+	}
+}
+
 func TestManagedDeploymentProcessorRemovesSupersededAppAfterReadiness(t *testing.T) {
 	db := newTestDB(t)
 	seedCurrentDeployment(t, db, deploymentRecord{
@@ -329,6 +374,7 @@ type fakeProjectProvisioner struct {
 	appCalls            int
 	appJob              job
 	appImageRef         string
+	appEnv              []string
 	appErr              error
 	sequence            []string
 	readyCalls          int
@@ -354,10 +400,11 @@ func (provisioner *fakeProjectProvisioner) EnsureProjectPocketBase(_ context.Con
 	return "container-123", nil
 }
 
-func (provisioner *fakeProjectProvisioner) EnsureProjectApp(_ context.Context, currentJob job, imageRef string) (string, error) {
+func (provisioner *fakeProjectProvisioner) EnsureProjectApp(_ context.Context, currentJob job, imageRef string, env []string) (string, error) {
 	provisioner.appCalls++
 	provisioner.appJob = currentJob
 	provisioner.appImageRef = imageRef
+	provisioner.appEnv = append([]string(nil), env...)
 	provisioner.sequence = append(provisioner.sequence, "app")
 
 	if provisioner.appErr != nil {
