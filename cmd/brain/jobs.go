@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -146,13 +147,20 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 		return job{}, err
 	}
 
+	configRevisionID, configRevisionFound, err := latestProjectConfigRevisionID(context.Background(), tx, projectName)
+	if err != nil {
+		_ = tx.Rollback()
+		return job{}, err
+	}
+
 	if _, err := tx.Exec(
-		"INSERT INTO jobs(id, project_name, repo_url, status, created_at) VALUES(?, ?, ?, ?, ?)",
+		"INSERT INTO jobs(id, project_name, repo_url, status, created_at, config_revision_id) VALUES(?, ?, ?, ?, ?, ?)",
 		jobID,
 		projectName,
 		repoURL,
 		jobStatusQueued,
 		createdAt,
+		nullableString(configRevisionID),
 	); err != nil {
 		_ = tx.Rollback()
 		return job{}, err
@@ -167,17 +175,18 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 	}
 
 	return decorateJob(job{
-		ID:          jobID,
-		ProjectName: projectName,
-		RepoURL:     repoURL,
-		Status:      jobStatusQueued,
-		CreatedAt:   createdAt,
+		ID:               jobID,
+		ProjectName:      projectName,
+		RepoURL:          repoURL,
+		Status:           jobStatusQueued,
+		CreatedAt:        createdAt,
+		ConfigRevisionID: optionalRevisionID(configRevisionID, configRevisionFound),
 	}), nil
 }
 
 func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 	rows, err := db.Query(
-		`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at
+		`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 		 FROM jobs
 		 WHERE project_name = ?
 		 ORDER BY created_at DESC
@@ -209,7 +218,7 @@ func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 func getJob(db *sql.DB, jobID string) (job, error) {
 	job, err := scanJob(
 		db.QueryRow(
-			`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at
+			`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 			 FROM jobs
 			 WHERE id = ?`,
 			jobID,
@@ -233,6 +242,7 @@ func scanJob(scanner jobScanner) (job, error) {
 	var errorMessage sql.NullString
 	var startedAt sql.NullString
 	var finishedAt sql.NullString
+	var configRevisionID sql.NullString
 
 	err := scanner.Scan(
 		&job.ID,
@@ -245,6 +255,7 @@ func scanJob(scanner jobScanner) (job, error) {
 		&job.CreatedAt,
 		&startedAt,
 		&finishedAt,
+		&configRevisionID,
 	)
 	if err != nil {
 		return job, err
@@ -265,8 +276,18 @@ func scanJob(scanner jobScanner) (job, error) {
 	if finishedAt.Valid {
 		job.FinishedAt = finishedAt.String
 	}
+	if configRevisionID.Valid {
+		job.ConfigRevisionID = configRevisionID.String
+	}
 
 	return job, nil
+}
+
+func optionalRevisionID(revisionID string, found bool) string {
+	if !found {
+		return ""
+	}
+	return revisionID
 }
 
 func isValidProjectName(name string) bool {

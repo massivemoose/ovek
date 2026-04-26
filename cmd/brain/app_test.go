@@ -67,6 +67,30 @@ func TestNewAppContainerSpec(t *testing.T) {
 	}
 }
 
+func TestNewAppContainerSpecIncludesProjectEnvironmentAfterBuiltins(t *testing.T) {
+	spec := newAppContainerSpec(appSpec{
+		ProjectName:  "demo-app",
+		DeploymentID: "dep-123",
+		JobID:        "job-123",
+		ImageRef:     "ovek-demo-app:dep-123",
+		Network: projectNetwork{
+			ID:   "network-123",
+			Name: "demo-app-net",
+		},
+		Env: []string{"PB_SUPERUSER_EMAIL=admin@example.com", "PB_SUPERUSER_PASSWORD=secret-pass"},
+	})
+
+	wantEnv := []string{
+		appPortEnv,
+		appPocketBaseURLEnv,
+		"PB_SUPERUSER_EMAIL=admin@example.com",
+		"PB_SUPERUSER_PASSWORD=secret-pass",
+	}
+	if !reflect.DeepEqual(spec.Config.Env, wantEnv) {
+		t.Fatalf("expected env %#v, got %#v", wantEnv, spec.Config.Env)
+	}
+}
+
 func TestDockerRuntimeEnsureProjectAppCreatesConnectsAndStartsManagedContainer(t *testing.T) {
 	client := &fakeDockerClient{
 		networkInspectResponse: dockernetwork.Inspect{
@@ -88,7 +112,7 @@ func TestDockerRuntimeEnsureProjectAppCreatesConnectsAndStartsManagedContainer(t
 	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "ovek-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123", nil)
 	if err != nil {
 		t.Fatalf("expected app provisioning to succeed, got error: %v", err)
 	}
@@ -142,7 +166,7 @@ func TestPodmanRuntimeEnsureProjectAppUsesPodmanPuller(t *testing.T) {
 	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "localhost:5001/ovek-demo-app:dep-123")
+	}, "localhost:5001/ovek-demo-app:dep-123", nil)
 	if err != nil {
 		t.Fatalf("expected podman app provisioning to succeed, got error: %v", err)
 	}
@@ -192,7 +216,7 @@ func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T
 			},
 			NetworkSettings: &dockercontainer.NetworkSettings{
 				Networks: map[string]*dockernetwork.EndpointSettings{
-					"demo-app-net":       {},
+					"demo-app-net":      {},
 					ovekEdgeNetworkName: {},
 				},
 			},
@@ -203,7 +227,7 @@ func TestDockerRuntimeEnsureProjectAppReusesRunningManagedContainer(t *testing.T
 	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "ovek-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123", nil)
 	if err != nil {
 		t.Fatalf("expected existing app container to be reused, got error: %v", err)
 	}
@@ -266,7 +290,7 @@ func TestDockerRuntimeEnsureProjectAppConnectsStoppedContainerToEdgeNetworkAndSt
 	containerID, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "ovek-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123", nil)
 	if err != nil {
 		t.Fatalf("expected stopped app container to be started, got error: %v", err)
 	}
@@ -304,7 +328,7 @@ func TestDockerRuntimeEnsureProjectAppReturnsImagePullFailure(t *testing.T) {
 	_, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "ovek-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123", nil)
 	if err == nil {
 		t.Fatal("expected image pull failure")
 	}
@@ -351,7 +375,7 @@ func TestDockerRuntimeEnsureProjectAppRejectsUnmanagedContainer(t *testing.T) {
 	_, err := runtime.EnsureProjectApp(context.Background(), job{
 		ID:          "dep-123",
 		ProjectName: "demo-app",
-	}, "ovek-demo-app:dep-123")
+	}, "ovek-demo-app:dep-123", nil)
 	if err == nil {
 		t.Fatal("expected unmanaged app container to be rejected")
 	}

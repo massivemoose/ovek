@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,63 @@ func TestManagedDeploymentLifecycleSucceeds(t *testing.T) {
 	}
 	if provisioner.removeCalls != 0 {
 		t.Fatalf("expected no superseded deployment removal, got %d calls", provisioner.removeCalls)
+	}
+}
+
+func TestManagedDeploymentLifecycleInjectsCapturedProjectConfigRevision(t *testing.T) {
+	db := newTestDB(t)
+	configStore := newTestProjectConfigStore(t, db)
+	if _, err := configStore.SetEnvironmentEntry(context.Background(), "demo-app", "PUBLIC_SITE_URL", "https://example.com", false, "dev"); err != nil {
+		t.Fatalf("expected env set to succeed, got error: %v", err)
+	}
+	secretMutation, err := configStore.SetEnvironmentEntry(context.Background(), "demo-app", "PB_SUPERUSER_PASSWORD", "secret-pass", true, "dev")
+	if err != nil {
+		t.Fatalf("expected secret set to succeed, got error: %v", err)
+	}
+
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+	if createdJob.ConfigRevisionID != secretMutation.RevisionID {
+		t.Fatalf("expected job config revision %q, got %q", secretMutation.RevisionID, createdJob.ConfigRevisionID)
+	}
+
+	provisioner := &fakeProjectProvisioner{}
+	manager := newJobManager(db, newManagedDeploymentProcessor(
+		db,
+		processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+			return successfulManagedBuildResult(currentJob), nil
+		}),
+		provisioner,
+		"/srv/ovek/projects",
+		defaultPocketBaseImage,
+		configStore,
+	))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+	finishedJob := waitForJobStatus(t, db, createdJob.ID, jobStatusSucceeded)
+	if finishedJob.ConfigRevisionID != secretMutation.RevisionID {
+		t.Fatalf("expected finished job config revision %q, got %q", secretMutation.RevisionID, finishedJob.ConfigRevisionID)
+	}
+
+	wantEnv := []string{
+		"PB_SUPERUSER_PASSWORD=secret-pass",
+		"PUBLIC_SITE_URL=https://example.com",
+	}
+	if len(provisioner.appEnv) != len(wantEnv) || strings.Join(provisioner.appEnv, "\n") != strings.Join(wantEnv, "\n") {
+		t.Fatalf("expected provisioner app env %#v, got %#v", wantEnv, provisioner.appEnv)
+	}
+
+	deployment := getDeploymentRecord(t, db, createdJob.ID)
+	if deployment.ConfigRevisionID != secretMutation.RevisionID {
+		t.Fatalf("expected deployment config revision %q, got %q", secretMutation.RevisionID, deployment.ConfigRevisionID)
 	}
 }
 

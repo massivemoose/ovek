@@ -698,8 +698,9 @@ func getDeploymentRecord(t *testing.T, db *sql.DB, deploymentID string) deployme
 	t.Helper()
 
 	var record deploymentRecord
+	var configRevisionID sql.NullString
 	err := db.QueryRow(
-		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at
+		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
 		 FROM deployments
 		 WHERE id = ?`,
 		deploymentID,
@@ -712,9 +713,13 @@ func getDeploymentRecord(t *testing.T, db *sql.DB, deploymentID string) deployme
 		&record.PocketBaseContainerName,
 		&record.Status,
 		&record.CreatedAt,
+		&configRevisionID,
 	)
 	if err != nil {
 		t.Fatalf("expected deployment %q lookup to succeed, got error: %v", deploymentID, err)
+	}
+	if configRevisionID.Valid {
+		record.ConfigRevisionID = configRevisionID.String
 	}
 
 	return record

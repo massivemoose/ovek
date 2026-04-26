@@ -77,7 +77,7 @@ func handleGetProjectDeployment(db *sql.DB) http.HandlerFunc {
 
 func listProjectDeployments(db *sql.DB, projectName string, limit int) ([]deploymentRecord, error) {
 	rows, err := db.Query(
-		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at
+		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
 		 FROM deployments
 		 WHERE project_name = ?
 		 ORDER BY created_at DESC
@@ -109,7 +109,7 @@ func listProjectDeployments(db *sql.DB, projectName string, limit int) ([]deploy
 func getProjectDeployment(db *sql.DB, projectName string, deploymentID string) (deploymentRecord, error) {
 	return scanDeploymentRecord(
 		db.QueryRow(
-			`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at
+			`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
 			 FROM deployments
 			 WHERE project_name = ? AND id = ?`,
 			projectName,
@@ -124,6 +124,7 @@ type deploymentRecordScanner interface {
 
 func scanDeploymentRecord(scanner deploymentRecordScanner) (deploymentRecord, error) {
 	var deployment deploymentRecord
+	var configRevisionID sql.NullString
 	if err := scanner.Scan(
 		&deployment.ID,
 		&deployment.ProjectName,
@@ -133,8 +134,12 @@ func scanDeploymentRecord(scanner deploymentRecordScanner) (deploymentRecord, er
 		&deployment.PocketBaseContainerName,
 		&deployment.Status,
 		&deployment.CreatedAt,
+		&configRevisionID,
 	); err != nil {
 		return deployment, err
+	}
+	if configRevisionID.Valid {
+		deployment.ConfigRevisionID = configRevisionID.String
 	}
 
 	return deployment, nil
