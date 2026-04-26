@@ -40,6 +40,11 @@ func main() {
 	if err := ingress.SyncAll(context.Background()); err != nil {
 		log.Printf("warning: failed to fully reconcile startup ingress state: %v", err)
 	}
+	secretCipher, err := loadSecretCipher(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("failed to load secret key: %v", err)
+	}
+	projectConfigStore := newProjectConfigStore(db, secretCipher)
 
 	processor := newManagedDeploymentProcessor(
 		db,
@@ -51,10 +56,12 @@ func main() {
 			cfg.RailpackFrontendImage,
 			cfg.RegistryInsecure,
 			systemCommandRunner{},
+			projectConfigStore,
 		),
 		runtime,
 		cfg.ProjectsHostDataDir,
 		cfg.PocketBaseImage,
+		projectConfigStore,
 	)
 	artifactCleaner := newRegistryArtifactCleaner(
 		cfg.RuntimeRegistryHost,
@@ -75,7 +82,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    listenAddr,
-		Handler: newHandler(cfg, db, jobManager, cleaner, projectRuntimeService),
+		Handler: newHandler(cfg, db, jobManager, cleaner, projectRuntimeService, projectConfigStore),
 	}
 
 	log.Printf("brain listening on %s", listenAddr)
@@ -86,7 +93,11 @@ func main() {
 	}
 }
 
-func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService) http.Handler {
+func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, configStores ...projectConfigStore) http.Handler {
+	var projectConfigStore projectConfigStore
+	if len(configStores) > 0 {
+		projectConfigStore = configStores[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -105,6 +116,9 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs", handleGetProjectRuntimeLogs(projectRuntimeService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs/stream", handleGetProjectRuntimeLogsStream(projectRuntimeService))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/env", handleListProjectEnvironment(projectConfigStore))
+	apiMux.HandleFunc("PUT /v1/projects/{projectName}/env/{name}", requireCriticalReauth(cfg, db, "project_env.authorized", handleSetProjectEnvironment(projectConfigStore)))
+	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/env/{name}", requireCriticalReauth(cfg, db, "project_env.authorized", handleDeleteProjectEnvironment(projectConfigStore)))
 	apiMux.HandleFunc("POST /v1/projects/{projectName}/deployments", requireCriticalReauth(cfg, db, "deploy.authorized", handleCreateDeployment(db, enqueuer)))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs", handleGetJobLogs(db, cfg.DataDir))

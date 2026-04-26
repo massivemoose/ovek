@@ -31,6 +31,9 @@ const (
 	errorCodeFetchJobLogsFailed        = "fetch_job_logs_failed"
 	errorCodeProjectNotFound           = "project_not_found"
 	errorCodeProjectCleanupFailed      = "project_cleanup_failed"
+	errorCodeInvalidProjectEnv         = "invalid_project_environment"
+	errorCodeProjectEnvNotFound        = "project_environment_not_found"
+	errorCodeProjectEnvFailed          = "project_environment_failed"
 )
 
 func writeJSON(w http.ResponseWriter, statusCode int, value any) {
