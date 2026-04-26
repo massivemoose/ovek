@@ -31,8 +31,13 @@ func TestOpenBrainDBCreatesDatabaseAndSchema(t *testing.T) {
 	assertTableExists(t, db, "api_keys")
 	assertTableExists(t, db, "reauth_tokens")
 	assertTableExists(t, db, "audit_logs")
+	assertTableExists(t, db, "project_config_revisions")
+	assertTableExists(t, db, "project_config_entries")
 	assertMigrationRecorded(t, db, 1)
 	assertMigrationRecorded(t, db, 2)
+	assertMigrationRecorded(t, db, 3)
+	assertColumnExists(t, db, "jobs", "config_revision_id")
+	assertColumnExists(t, db, "deployments", "config_revision_id")
 }
 
 func TestOpenBrainDBIsIdempotent(t *testing.T) {
@@ -56,6 +61,7 @@ func TestOpenBrainDBIsIdempotent(t *testing.T) {
 
 	assertMigrationRecorded(t, db, 1)
 	assertMigrationRecorded(t, db, 2)
+	assertMigrationRecorded(t, db, 3)
 }
 
 func assertTableExists(t *testing.T, db *sql.DB, tableName string) {
@@ -90,4 +96,34 @@ func assertMigrationRecorded(t *testing.T, db *sql.DB, version int) {
 	if count != 1 {
 		t.Fatalf("expected migration %d to be recorded once, got count %d", version, count)
 	}
+}
+
+func assertColumnExists(t *testing.T, db *sql.DB, tableName string, columnName string) {
+	t.Helper()
+
+	rows, err := db.Query("PRAGMA table_info(" + tableName + ")")
+	if err != nil {
+		t.Fatalf("expected table info for %q to succeed, got error: %v", tableName, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("expected column scan to succeed, got error: %v", err)
+		}
+		if name == columnName {
+			return
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("expected column iteration to succeed, got error: %v", err)
+	}
+
+	t.Fatalf("expected table %q to have column %q", tableName, columnName)
 }
