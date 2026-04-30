@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -493,5 +494,130 @@ func TestDockerRuntimeRemoveProjectPocketBaseIgnoresMissingContainer(t *testing.
 	}
 	if client.containerRemoveID != "" {
 		t.Fatalf("expected remove not to be called, got %q", client.containerRemoveID)
+	}
+}
+
+func TestDockerRuntimeUpsertProjectPocketBaseSuperuserExecsPocketBaseCommand(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: managedRunningPocketBaseInspectResponse("demo-app", "container-123"),
+		containerExecInspectResponse: dockercontainer.ExecInspect{
+			ExitCode: 0,
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.UpsertProjectPocketBaseSuperuser(context.Background(), "demo-app", "admin@demo-app.ovek.local", "super-secret-password")
+	if err != nil {
+		t.Fatalf("expected superuser upsert to succeed, got error: %v", err)
+	}
+
+	if client.containerExecCreateContainer != "ovek-demo-app-pb" {
+		t.Fatalf("expected exec container %q, got %q", "ovek-demo-app-pb", client.containerExecCreateContainer)
+	}
+	wantCommand := []string{
+		"pocketbase",
+		"--dir=/pb_data",
+		"superuser",
+		"upsert",
+		"admin@demo-app.ovek.local",
+		"super-secret-password",
+	}
+	if !reflect.DeepEqual(client.containerExecCreateOptions.Cmd, wantCommand) {
+		t.Fatalf("expected exec command %#v, got %#v", wantCommand, client.containerExecCreateOptions.Cmd)
+	}
+	if !client.containerExecCreateOptions.AttachStdout || !client.containerExecCreateOptions.AttachStderr {
+		t.Fatalf("expected stdout/stderr attachment, got %#v", client.containerExecCreateOptions)
+	}
+}
+
+func TestDockerRuntimeUpsertProjectPocketBaseSuperuserRedactsPasswordFromErrors(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: managedRunningPocketBaseInspectResponse("demo-app", "container-123"),
+		containerExecCreateErr:   errors.New("cannot exec with super-secret-password"),
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.UpsertProjectPocketBaseSuperuser(context.Background(), "demo-app", "admin@demo-app.ovek.local", "super-secret-password")
+	if err == nil {
+		t.Fatal("expected superuser upsert to fail")
+	}
+	if strings.Contains(err.Error(), "super-secret-password") {
+		t.Fatalf("expected password to be redacted from error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatalf("expected redacted placeholder in error, got %v", err)
+	}
+}
+
+func TestDockerRuntimeProjectPocketBaseProxyTargetConnectsBrainToProjectNetwork(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponses: map[string]dockercontainer.InspectResponse{
+			"ovek-demo-app-pb": managedRunningPocketBaseInspectResponse("demo-app", "pb-container-123"),
+			"brain-container": {
+				ContainerJSONBase: &dockercontainer.ContainerJSONBase{ID: "brain-container"},
+				Config:            &dockercontainer.Config{},
+				NetworkSettings: &dockercontainer.NetworkSettings{
+					Networks: map[string]*dockernetwork.EndpointSettings{},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+	runtime.hostname = func() (string, error) { return "brain-container", nil }
+
+	target, err := runtime.ProjectPocketBaseProxyTarget(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected proxy target to resolve, got error: %v", err)
+	}
+	if target != "http://ovek-demo-app-pb:8090" {
+		t.Fatalf("expected proxy target %q, got %q", "http://ovek-demo-app-pb:8090", target)
+	}
+	if client.networkConnectNetwork != "demo-app-net" || client.networkConnectID != "brain-container" {
+		t.Fatalf("expected Brain container network connect, got network=%q id=%q", client.networkConnectNetwork, client.networkConnectID)
+	}
+}
+
+func TestDockerRuntimeProjectPocketBaseProxyTargetSkipsExistingNetworkAttachment(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponses: map[string]dockercontainer.InspectResponse{
+			"ovek-demo-app-pb": managedRunningPocketBaseInspectResponse("demo-app", "pb-container-123"),
+			"brain-container": {
+				ContainerJSONBase: &dockercontainer.ContainerJSONBase{ID: "brain-container"},
+				Config:            &dockercontainer.Config{},
+				NetworkSettings: &dockercontainer.NetworkSettings{
+					Networks: map[string]*dockernetwork.EndpointSettings{
+						"demo-app-net": {},
+					},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+	runtime.hostname = func() (string, error) { return "brain-container", nil }
+
+	_, err := runtime.ProjectPocketBaseProxyTarget(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected proxy target to resolve, got error: %v", err)
+	}
+	if client.networkConnectNetwork != "" || client.networkConnectID != "" {
+		t.Fatalf("expected existing network attachment to be reused, got network=%q id=%q", client.networkConnectNetwork, client.networkConnectID)
+	}
+}
+
+func managedRunningPocketBaseInspectResponse(projectName string, id string) dockercontainer.InspectResponse {
+	return dockercontainer.InspectResponse{
+		ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+			ID: id,
+			State: &dockercontainer.State{
+				Running: true,
+			},
+		},
+		Config: &dockercontainer.Config{
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: projectName,
+				roleLabelKey:    resourceRolePocketBase,
+			},
+		},
 	}
 }

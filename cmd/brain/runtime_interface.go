@@ -25,6 +25,8 @@ type Runtime interface {
 	RemoveProjectNetwork(ctx context.Context, projectName string) error
 	EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error)
 	RemoveProjectPocketBase(ctx context.Context, projectName string) error
+	UpsertProjectPocketBaseSuperuser(ctx context.Context, projectName string, email string, password string) error
+	ProjectPocketBaseProxyTarget(ctx context.Context, projectName string) (string, error)
 	EnsureProjectApp(ctx context.Context, job job, imageRef string, env []string) (string, error)
 	WaitForProjectAppReady(ctx context.Context, job job) error
 	ResolveProjectAppReadinessTarget(ctx context.Context, projectName string, deploymentID string) (appReadinessTarget, error)

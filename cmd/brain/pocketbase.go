@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +14,7 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockermount "github.com/docker/docker/api/types/mount"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/pkg/stdcopy"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -192,6 +195,139 @@ func (runtime *dockerRuntime) RemoveProjectPocketBase(ctx context.Context, proje
 	}
 
 	return runtime.removeManagedContainer(ctx, containerName, container, "PocketBase container")
+}
+
+func (runtime *dockerRuntime) UpsertProjectPocketBaseSuperuser(ctx context.Context, projectName string, email string, password string) error {
+	containerName := pocketBaseContainerName(projectName)
+	if err := runtime.requireRunningManagedPocketBase(ctx, projectName); err != nil {
+		return err
+	}
+
+	createResponse, err := runtime.client.ContainerExecCreate(ctx, containerName, dockercontainer.ExecOptions{
+		AttachStdout: true,
+		AttachStderr: true,
+		Cmd: []string{
+			"pocketbase",
+			"--dir=" + pocketBaseDataMountPath,
+			"superuser",
+			"upsert",
+			email,
+			password,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create PocketBase superuser command: %w", sanitizePocketBaseCredentialError(err, password))
+	}
+
+	response, err := runtime.client.ContainerExecAttach(ctx, createResponse.ID, dockercontainer.ExecAttachOptions{})
+	if err != nil {
+		return fmt.Errorf("run PocketBase superuser command: %w", sanitizePocketBaseCredentialError(err, password))
+	}
+	defer response.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdout, &stderr, response.Reader); err != nil && err != io.EOF {
+		return fmt.Errorf("read PocketBase superuser command output: %w", sanitizePocketBaseCredentialError(err, password))
+	}
+
+	inspect, err := runtime.client.ContainerExecInspect(ctx, createResponse.ID)
+	if err != nil {
+		return fmt.Errorf("inspect PocketBase superuser command: %w", sanitizePocketBaseCredentialError(err, password))
+	}
+	if inspect.ExitCode != 0 {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = strings.TrimSpace(stdout.String())
+		}
+		if message == "" {
+			message = fmt.Sprintf("exit code %d", inspect.ExitCode)
+		}
+		return fmt.Errorf("PocketBase superuser command failed: %s", sanitizePocketBaseCredentialText(message, password))
+	}
+
+	return nil
+}
+
+func (runtime *dockerRuntime) ProjectPocketBaseProxyTarget(ctx context.Context, projectName string) (string, error) {
+	if err := runtime.requireRunningManagedPocketBase(ctx, projectName); err != nil {
+		return "", err
+	}
+	if err := runtime.ensureControlPlaneProjectNetworkAttachment(ctx, projectName); err != nil {
+		return "", err
+	}
+
+	return "http://" + pocketBaseContainerName(projectName) + ":8090", nil
+}
+
+func (runtime *dockerRuntime) requireRunningManagedPocketBase(ctx context.Context, projectName string) error {
+	containerName := pocketBaseContainerName(projectName)
+	container, err := runtime.client.ContainerInspect(ctx, containerName)
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return errProjectRuntimeNotFound
+		}
+		return fmt.Errorf("inspect PocketBase container %q: %w", containerName, err)
+	}
+	if container.Config == nil {
+		return fmt.Errorf("PocketBase container %q is missing config", containerName)
+	}
+	if err := requireManagedResourceOwnership(containerName, container.Config.Labels, managedResourceMetadata{
+		ProjectName: projectName,
+		Role:        resourceRolePocketBase,
+	}); err != nil {
+		return err
+	}
+	if container.State == nil || !container.State.Running {
+		return fmt.Errorf("PocketBase container %q is not running", containerName)
+	}
+
+	return nil
+}
+
+func (runtime *dockerRuntime) ensureControlPlaneProjectNetworkAttachment(ctx context.Context, projectName string) error {
+	if runtime.hostname == nil {
+		runtime.hostname = os.Hostname
+	}
+	containerID, err := runtime.hostname()
+	if err != nil {
+		return fmt.Errorf("resolve Brain container identity: %w", err)
+	}
+	containerID = strings.TrimSpace(containerID)
+	if containerID == "" {
+		return fmt.Errorf("resolve Brain container identity: empty hostname")
+	}
+
+	networkName := projectNetworkName(projectName)
+	container, err := runtime.client.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("inspect Brain container %q for PocketBase proxy access: %w", containerID, err)
+	}
+	if container.NetworkSettings != nil && container.NetworkSettings.Networks[networkName] != nil {
+		return nil
+	}
+
+	if err := runtime.client.NetworkConnect(ctx, networkName, containerID, &dockernetwork.EndpointSettings{}); err != nil {
+		return fmt.Errorf("connect Brain container %q to project network %q: %w", containerID, networkName, err)
+	}
+
+	return nil
+}
+
+func sanitizePocketBaseCredentialError(err error, password string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s", sanitizePocketBaseCredentialText(err.Error(), password))
+}
+
+func sanitizePocketBaseCredentialText(value string, password string) string {
+	password = strings.TrimSpace(password)
+	if len(password) < minSecretScrubLength {
+		return value
+	}
+
+	return strings.ReplaceAll(value, password, "[redacted]")
 }
 
 func pocketBaseDataDir(projectsHostDataDir string, projectName string) string {
