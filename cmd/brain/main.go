@@ -45,6 +45,7 @@ func main() {
 		log.Fatalf("failed to load secret key: %v", err)
 	}
 	projectConfigStore := newProjectConfigStore(db, secretCipher)
+	projectPocketBaseStore := newProjectPocketBaseStore(db, secretCipher)
 
 	processor := newManagedDeploymentProcessor(
 		db,
@@ -71,6 +72,7 @@ func main() {
 	cleaner := newManagedProjectCleaner(db, runtime, cfg.DataDir, artifactCleaner)
 	cleaner.ingress = ingress
 	projectRuntimeService := newManagedProjectRuntimeService(db, runtime)
+	projectPocketBaseService := newManagedProjectPocketBaseService(db, runtime, cfg.ProjectsHostDataDir, cfg.PocketBaseImage, projectPocketBaseStore, projectConfigStore)
 	jobManager := newJobManager(db, processor, artifactCleaner)
 	jobManager.ingress = ingress
 	workerContext, cancelWorker := context.WithCancel(context.Background())
@@ -82,7 +84,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    listenAddr,
-		Handler: newHandler(cfg, db, jobManager, cleaner, projectRuntimeService, projectConfigStore),
+		Handler: newHandler(cfg, db, jobManager, cleaner, projectRuntimeService, projectPocketBaseService, projectConfigStore),
 	}
 
 	log.Printf("brain listening on %s", listenAddr)
@@ -93,7 +95,7 @@ func main() {
 	}
 }
 
-func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, configStores ...projectConfigStore) http.Handler {
+func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, configStores ...projectConfigStore) http.Handler {
 	var projectConfigStore projectConfigStore
 	if len(configStores) > 0 {
 		projectConfigStore = configStores[0]
@@ -116,6 +118,9 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs", handleGetProjectRuntimeLogs(projectRuntimeService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs/stream", handleGetProjectRuntimeLogsStream(projectRuntimeService))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/pocketbase", handleGetProjectPocketBase(projectPocketBaseService))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/pocketbase/init", requireCriticalReauth(cfg, db, "project_pocketbase.authorized", handleInitProjectPocketBase(projectPocketBaseService)))
+	apiMux.HandleFunc("/v1/projects/{projectName}/pocketbase/proxy", handleProxyProjectPocketBase(projectPocketBaseService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/env", handleListProjectEnvironment(projectConfigStore))
 	apiMux.HandleFunc("PUT /v1/projects/{projectName}/env/{name}", requireCriticalReauth(cfg, db, "project_env.authorized", handleSetProjectEnvironment(projectConfigStore)))
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/env/{name}", requireCriticalReauth(cfg, db, "project_env.authorized", handleDeleteProjectEnvironment(projectConfigStore)))

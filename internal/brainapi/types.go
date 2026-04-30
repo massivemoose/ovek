@@ -88,6 +88,22 @@ type ProjectEnvironmentMutation struct {
 	Entry      *ProjectEnvironmentEntry `json:"entry,omitempty"`
 }
 
+type ProjectPocketBaseStatus struct {
+	ProjectName          string  `json:"projectName"`
+	ContainerName        string  `json:"containerName"`
+	Running              bool    `json:"running"`
+	Initialized          bool    `json:"initialized"`
+	SuperuserEmail       *string `json:"superuserEmail"`
+	AppSecretsConfigured bool    `json:"appSecretsConfigured"`
+	AppSecretsRevisionID string  `json:"appSecretsRevisionId,omitempty"`
+	UpdatedAt            string  `json:"updatedAt,omitempty"`
+}
+
+type InitProjectPocketBaseRequest struct {
+	Email      string `json:"email,omitempty"`
+	AppSecrets bool   `json:"appSecrets"`
+}
+
 type ProjectRuntimeApp struct {
 	ContainerName string `json:"containerName"`
 	ImageRef      string `json:"imageRef"`

@@ -197,7 +197,7 @@ func newProdTestHandler(t *testing.T) (http.Handler, *sql.DB) {
 	handler := newHandler(config{
 		AuthMode: authModeProd,
 		DataDir:  dataDir,
-	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{})
+	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{})
 
 	return handler, db
 }

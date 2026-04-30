@@ -142,6 +142,20 @@ ALTER TABLE jobs ADD COLUMN config_revision_id TEXT;
 ALTER TABLE deployments ADD COLUMN config_revision_id TEXT;
 `,
 	},
+	{
+		version: 4,
+		name:    "create project pocketbase credential table",
+		upSQL: `
+CREATE TABLE project_pocketbase_credentials (
+	project_name TEXT PRIMARY KEY,
+	superuser_email TEXT NOT NULL,
+	encrypted_password TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY (project_name) REFERENCES projects(name)
+);
+`,
+	},
 }
 
 func openBrainDB(dataDir string) (*sql.DB, error) {

@@ -358,7 +358,7 @@ func newTestHandler(t *testing.T, enqueuer deploymentEnqueuer) (http.Handler, *s
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, enqueuer, noopProjectCleaner{}, noopProjectRuntimeService{})
+	}, db, enqueuer, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{})
 
 	return handler, db
 }

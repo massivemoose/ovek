@@ -550,7 +550,7 @@ func TestDeleteProjectRuntimeEndpointReturnsNoContent(t *testing.T) {
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, noopEnqueuer{}, newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir), noopProjectRuntimeService{})
+	}, db, noopEnqueuer{}, newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir), noopProjectRuntimeService{}, managedProjectPocketBaseService{})
 
 	request := httptest.NewRequest(http.MethodDelete, "/v1/projects/demo-app/runtime", nil)
 	request.Header.Set("X-API-Key", "test-key")
@@ -594,7 +594,7 @@ func TestDeleteProjectRuntimeEndpointReturnsNotFoundForUnknownProject(t *testing
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, noopEnqueuer{}, newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir), noopProjectRuntimeService{})
+	}, db, noopEnqueuer{}, newManagedProjectCleaner(db, &fakeProjectCleanupRuntime{}, dataDir), noopProjectRuntimeService{}, managedProjectPocketBaseService{})
 
 	request := httptest.NewRequest(http.MethodDelete, "/v1/projects/demo-app/runtime", nil)
 	request.Header.Set("X-API-Key", "test-key")
