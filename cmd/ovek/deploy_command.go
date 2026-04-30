@@ -136,6 +136,9 @@ func (cmd *deployCommand) createDeployment(ctx context.Context, brainClient *cli
 	}
 
 	var apiErr *client.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == "active_deployment_exists" {
+		return brainapi.Job{}, fmt.Errorf("%s. Run `ovek status %s` to inspect the active job", apiErr.Message, projectName)
+	}
 	if !errors.As(err, &apiErr) || apiErr.Code != "reauth_required" {
 		return brainapi.Job{}, err
 	}
@@ -154,7 +157,16 @@ func (cmd *deployCommand) createDeployment(ctx context.Context, brainClient *cli
 	}
 	brainClient.SetReauthToken(reauthResponse.ReauthToken)
 
-	return brainClient.CreateDeployment(ctx, projectName, brainapi.CreateDeploymentRequest{RepoURL: repoURL})
+	job, err = brainClient.CreateDeployment(ctx, projectName, brainapi.CreateDeploymentRequest{RepoURL: repoURL})
+	if err != nil {
+		var apiErr *client.APIError
+		if errors.As(err, &apiErr) && apiErr.Code == "active_deployment_exists" {
+			return brainapi.Job{}, fmt.Errorf("%s. Run `ovek status %s` to inspect the active job", apiErr.Message, projectName)
+		}
+		return brainapi.Job{}, err
+	}
+
+	return job, nil
 }
 
 func (cmd *deployCommand) followJobLogs(ctx context.Context, brainClient *client.Client, jobID string) error {

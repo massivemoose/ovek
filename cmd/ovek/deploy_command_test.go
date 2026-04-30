@@ -207,6 +207,52 @@ func TestDeployRetriesAfterReauthRequired(t *testing.T) {
 	}
 }
 
+func TestDeployReportsActiveDeploymentConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects/demo-app/deployments":
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(brainapi.APIError{
+				Code:    "active_deployment_exists",
+				Message: "project \"demo-app\" already has an active deployment job \"job_active\" with status \"running\"",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	store := config.NewStore(t.TempDir())
+	if err := store.SaveProfile("default", config.Profile{Host: server.URL, APIKey: "test-key"}, true); err != nil {
+		t.Fatalf("expected config save to succeed, got error: %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode := runWithStore(
+		context.Background(),
+		[]string{"deploy", "demo-app", "https://example.com/demo.git"},
+		&stdout,
+		&stderr,
+		store,
+	)
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("expected no stdout, got %q", stdout.String())
+	}
+	for _, fragment := range []string{
+		"already has an active deployment job",
+		"job_active",
+		"ovek status demo-app",
+	} {
+		if !strings.Contains(stderr.String(), fragment) {
+			t.Fatalf("expected stderr to contain %q, got %q", fragment, stderr.String())
+		}
+	}
+}
+
 func TestDeployFailurePrintsSummaryAndLogHint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
