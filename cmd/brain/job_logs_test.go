@@ -359,7 +359,7 @@ func newJobLogsTestHandler(t *testing.T) (http.Handler, *sql.DB, string) {
 	handler := newHandler(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{})
+	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{})
 
 	return handler, db, dataDir
 }

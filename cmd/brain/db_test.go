@@ -33,9 +33,11 @@ func TestOpenBrainDBCreatesDatabaseAndSchema(t *testing.T) {
 	assertTableExists(t, db, "audit_logs")
 	assertTableExists(t, db, "project_config_revisions")
 	assertTableExists(t, db, "project_config_entries")
+	assertTableExists(t, db, "project_pocketbase_credentials")
 	assertMigrationRecorded(t, db, 1)
 	assertMigrationRecorded(t, db, 2)
 	assertMigrationRecorded(t, db, 3)
+	assertMigrationRecorded(t, db, 4)
 	assertColumnExists(t, db, "jobs", "config_revision_id")
 	assertColumnExists(t, db, "deployments", "config_revision_id")
 }
@@ -62,6 +64,7 @@ func TestOpenBrainDBIsIdempotent(t *testing.T) {
 	assertMigrationRecorded(t, db, 1)
 	assertMigrationRecorded(t, db, 2)
 	assertMigrationRecorded(t, db, 3)
+	assertMigrationRecorded(t, db, 4)
 }
 
 func assertTableExists(t *testing.T, db *sql.DB, tableName string) {

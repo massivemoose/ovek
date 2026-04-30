@@ -34,6 +34,9 @@ const (
 	errorCodeInvalidProjectEnv         = "invalid_project_environment"
 	errorCodeProjectEnvNotFound        = "project_environment_not_found"
 	errorCodeProjectEnvFailed          = "project_environment_failed"
+	errorCodeInvalidPocketBase         = "invalid_pocketbase"
+	errorCodePocketBaseNotFound        = "pocketbase_not_found"
+	errorCodePocketBaseFailed          = "pocketbase_failed"
 )
 
 func writeJSON(w http.ResponseWriter, statusCode int, value any) {

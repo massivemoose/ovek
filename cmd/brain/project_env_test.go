@@ -14,7 +14,7 @@ import (
 func TestProjectEnvironmentAPISetListAndDelete(t *testing.T) {
 	db := newTestDB(t)
 	store := newTestProjectConfigStore(t, db)
-	handler := newHandler(config{AuthMode: authModeDev, BrainAPIKey: "test-key"}, db, nil, nil, nil, store)
+	handler := newHandler(config{AuthMode: authModeDev, BrainAPIKey: "test-key"}, db, nil, nil, nil, managedProjectPocketBaseService{}, store)
 
 	setRequest := httptest.NewRequest(http.MethodPut, "/v1/projects/demo-app/env/PB_SUPERUSER_PASSWORD", strings.NewReader(`{"value":"secret-pass","secret":true}`))
 	setRequest.Header.Set(headerAPIKey, "test-key")
@@ -66,7 +66,7 @@ func TestProjectEnvironmentAPISetListAndDelete(t *testing.T) {
 func TestProjectEnvironmentAPIRejectsInvalidEnvName(t *testing.T) {
 	db := newTestDB(t)
 	store := newTestProjectConfigStore(t, db)
-	handler := newHandler(config{AuthMode: authModeDev, BrainAPIKey: "test-key"}, db, nil, nil, nil, store)
+	handler := newHandler(config{AuthMode: authModeDev, BrainAPIKey: "test-key"}, db, nil, nil, nil, managedProjectPocketBaseService{}, store)
 
 	request := httptest.NewRequest(http.MethodPut, "/v1/projects/demo-app/env/PORT", strings.NewReader(`{"value":"8081","secret":false}`))
 	request.Header.Set(headerAPIKey, "test-key")
@@ -83,7 +83,7 @@ func TestProjectEnvironmentAPIRequiresReauthInProdMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected bootstrap to succeed, got error: %v", err)
 	}
-	handler := newHandler(config{AuthMode: authModeProd}, db, nil, nil, nil, store)
+	handler := newHandler(config{AuthMode: authModeProd}, db, nil, nil, nil, managedProjectPocketBaseService{}, store)
 
 	request := httptest.NewRequest(http.MethodPut, "/v1/projects/demo-app/env/PUBLIC_SITE_URL", strings.NewReader(`{"value":"https://example.com","secret":false}`))
 	request.Header.Set(headerAPIKey, apiKey)
@@ -108,7 +108,7 @@ func TestProjectEnvironmentAPIAllowsMutationWithProdReauth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected reauth token issue to succeed, got error: %v", err)
 	}
-	handler := newHandler(config{AuthMode: authModeProd}, db, nil, nil, nil, store)
+	handler := newHandler(config{AuthMode: authModeProd}, db, nil, nil, nil, managedProjectPocketBaseService{}, store)
 
 	request := httptest.NewRequest(http.MethodPut, "/v1/projects/demo-app/env/PUBLIC_SITE_URL", strings.NewReader(`{"value":"https://example.com","secret":false}`))
 	request.Header.Set(headerAPIKey, apiKey)

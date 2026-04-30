@@ -217,6 +217,7 @@ func TestGetProjectRuntimeReturnsRuntimeSummary(t *testing.T) {
 				},
 			},
 		}),
+		managedProjectPocketBaseService{},
 	)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime", nil)
@@ -269,6 +270,7 @@ func TestGetProjectRuntimeLogsReturnsPlainTextLogs(t *testing.T) {
 				"dep-alpha": "hello from app\n",
 			},
 		}),
+		managedProjectPocketBaseService{},
 	)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime/logs", nil)
@@ -312,6 +314,7 @@ func TestGetProjectRuntimeLogsStreamReturnsSSELogs(t *testing.T) {
 		fakeProjectRuntimeService{
 			streamLogs: "first line\nsecond line\n",
 		},
+		managedProjectPocketBaseService{},
 	)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/projects/alpha-app/runtime/logs/stream", nil)

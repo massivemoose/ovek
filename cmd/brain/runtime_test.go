@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
+	dockertypes "github.com/docker/docker/api/types"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerimage "github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
@@ -266,10 +269,23 @@ type fakeDockerClient struct {
 	containerInspectCalls           int
 	containerInspectResponse        dockercontainer.InspectResponse
 	containerInspectErr             error
+	containerInspectResponses       map[string]dockercontainer.InspectResponse
+	containerInspectErrs            map[string]error
 	containerLogsName               string
 	containerLogsOptions            dockercontainer.LogsOptions
 	containerLogsResponse           io.ReadCloser
 	containerLogsErr                error
+	containerExecCreateID           string
+	containerExecCreateContainer    string
+	containerExecCreateOptions      dockercontainer.ExecOptions
+	containerExecCreateErr          error
+	containerExecAttachID           string
+	containerExecAttachOptions      dockercontainer.ExecAttachOptions
+	containerExecAttachOutput       string
+	containerExecAttachErr          error
+	containerExecInspectID          string
+	containerExecInspectResponse    dockercontainer.ExecInspect
+	containerExecInspectErr         error
 	imagePullRef                    string
 	imagePullOptions                dockerimage.PullOptions
 	imagePullResponse               io.ReadCloser
@@ -330,6 +346,16 @@ func (client *fakeDockerClient) ContainerList(_ context.Context, options dockerc
 func (client *fakeDockerClient) ContainerInspect(_ context.Context, containerID string) (dockercontainer.InspectResponse, error) {
 	client.containerInspectName = containerID
 	client.containerInspectCalls++
+	if client.containerInspectErrs != nil {
+		if err, ok := client.containerInspectErrs[containerID]; ok {
+			return dockercontainer.InspectResponse{}, err
+		}
+	}
+	if client.containerInspectResponses != nil {
+		if response, ok := client.containerInspectResponses[containerID]; ok {
+			return response, nil
+		}
+	}
 	return client.containerInspectResponse, client.containerInspectErr
 }
 
@@ -344,6 +370,43 @@ func (client *fakeDockerClient) ContainerLogs(_ context.Context, container strin
 	}
 
 	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (client *fakeDockerClient) ContainerExecCreate(_ context.Context, containerID string, options dockercontainer.ExecOptions) (dockercontainer.ExecCreateResponse, error) {
+	client.containerExecCreateContainer = containerID
+	client.containerExecCreateOptions = options
+	if client.containerExecCreateErr != nil {
+		return dockercontainer.ExecCreateResponse{}, client.containerExecCreateErr
+	}
+	execID := client.containerExecCreateID
+	if execID == "" {
+		execID = "exec-123"
+	}
+	return dockercontainer.ExecCreateResponse{ID: execID}, nil
+}
+
+func (client *fakeDockerClient) ContainerExecAttach(_ context.Context, execID string, options dockercontainer.ExecAttachOptions) (dockertypes.HijackedResponse, error) {
+	client.containerExecAttachID = execID
+	client.containerExecAttachOptions = options
+	if client.containerExecAttachErr != nil {
+		return dockertypes.HijackedResponse{}, client.containerExecAttachErr
+	}
+
+	writer, reader := net.Pipe()
+	go func() {
+		_, _ = io.WriteString(writer, client.containerExecAttachOutput)
+		_ = writer.Close()
+	}()
+
+	return dockertypes.HijackedResponse{
+		Conn:   reader,
+		Reader: bufio.NewReader(reader),
+	}, nil
+}
+
+func (client *fakeDockerClient) ContainerExecInspect(_ context.Context, execID string) (dockercontainer.ExecInspect, error) {
+	client.containerExecInspectID = execID
+	return client.containerExecInspectResponse, client.containerExecInspectErr
 }
 
 func (client *fakeDockerClient) ImagePull(_ context.Context, refStr string, options dockerimage.PullOptions) (io.ReadCloser, error) {

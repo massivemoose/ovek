@@ -7,9 +7,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
+	dockertypes "github.com/docker/docker/api/types"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerimage "github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
@@ -50,6 +52,9 @@ type dockerClient interface {
 	ContainerList(ctx context.Context, options dockercontainer.ListOptions) ([]dockercontainer.Summary, error)
 	ContainerInspect(ctx context.Context, containerID string) (dockercontainer.InspectResponse, error)
 	ContainerLogs(ctx context.Context, container string, options dockercontainer.LogsOptions) (io.ReadCloser, error)
+	ContainerExecCreate(ctx context.Context, containerID string, options dockercontainer.ExecOptions) (dockercontainer.ExecCreateResponse, error)
+	ContainerExecAttach(ctx context.Context, execID string, config dockercontainer.ExecAttachOptions) (dockertypes.HijackedResponse, error)
+	ContainerExecInspect(ctx context.Context, execID string) (dockercontainer.ExecInspect, error)
 	ImagePull(ctx context.Context, refStr string, options dockerimage.PullOptions) (io.ReadCloser, error)
 	ContainerCreate(ctx context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string, options dockercontainer.StartOptions) error
@@ -61,6 +66,7 @@ type dockerRuntime struct {
 	client      dockerClient
 	dialContext dialContextFunc
 	sleep       sleepFunc
+	hostname    func() (string, error)
 }
 
 type podmanImagePuller interface {
@@ -103,6 +109,7 @@ func newDockerRuntimeFromHost(runtimeHost string) (*dockerRuntime, error) {
 		client:      client,
 		dialContext: (&net.Dialer{Timeout: appReadinessDialTime}).DialContext,
 		sleep:       sleepWithContext,
+		hostname:    os.Hostname,
 	}, nil
 }
 
@@ -121,6 +128,7 @@ func newPodmanRuntime(runtimeHost string, registryInsecure bool) (*podmanRuntime
 			client:      client,
 			dialContext: (&net.Dialer{Timeout: appReadinessDialTime}).DialContext,
 			sleep:       sleepWithContext,
+			hostname:    os.Hostname,
 		},
 		puller:           puller,
 		registryInsecure: registryInsecure,
@@ -145,6 +153,7 @@ func newDockerRuntime(client dockerClient) *dockerRuntime {
 		client:      client,
 		dialContext: (&net.Dialer{Timeout: appReadinessDialTime}).DialContext,
 		sleep:       sleepWithContext,
+		hostname:    os.Hostname,
 	}
 }
 

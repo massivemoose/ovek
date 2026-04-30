@@ -322,6 +322,81 @@ func (client *Client) DeleteProjectEnvironment(ctx context.Context, projectName 
 	return mutation, nil
 }
 
+func (client *Client) GetProjectPocketBase(ctx context.Context, projectName string) (brainapi.ProjectPocketBaseStatus, error) {
+	responseBody, err := client.getJSON(ctx, "/v1/projects/"+url.PathEscape(strings.TrimSpace(projectName))+"/pocketbase")
+	if err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, err
+	}
+
+	var status brainapi.ProjectPocketBaseStatus
+	if err := json.Unmarshal(responseBody, &status); err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, fmt.Errorf("decode PocketBase status response: %w", err)
+	}
+
+	return status, nil
+}
+
+func (client *Client) InitProjectPocketBase(ctx context.Context, projectName string, requestBody brainapi.InitProjectPocketBaseRequest) (brainapi.ProjectPocketBaseStatus, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, fmt.Errorf("marshal PocketBase init request: %w", err)
+	}
+
+	request, err := client.newRequest(
+		ctx,
+		http.MethodPost,
+		"/v1/projects/"+url.PathEscape(strings.TrimSpace(projectName))+"/pocketbase/init",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, err
+	}
+
+	var status brainapi.ProjectPocketBaseStatus
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, fmt.Errorf("decode PocketBase init response: %w", err)
+	}
+
+	return status, nil
+}
+
+func (client *Client) ProxyProjectPocketBase(ctx context.Context, projectName string, source *http.Request) (*http.Response, error) {
+	target := "/"
+	if source != nil && source.URL != nil {
+		target = source.URL.RequestURI()
+	}
+	requestPath := "/v1/projects/" + url.PathEscape(strings.TrimSpace(projectName)) + "/pocketbase/proxy?target=" + url.QueryEscape(target)
+
+	var body io.Reader
+	if source != nil {
+		body = source.Body
+	}
+	method := http.MethodGet
+	if source != nil && source.Method != "" {
+		method = source.Method
+	}
+	request, err := client.newRequest(ctx, method, requestPath, body)
+	if err != nil {
+		return nil, err
+	}
+	if source != nil {
+		copyProxyHeaders(request.Header, source.Header)
+	}
+
+	return client.streamClient.Do(request)
+}
+
 func (client *Client) CreateDeployment(ctx context.Context, projectName string, requestBody brainapi.CreateDeploymentRequest) (brainapi.Job, error) {
 	payload, err := json.Marshal(requestBody)
 	if err != nil {
@@ -532,4 +607,15 @@ func withLimit(requestPath string, limit int) string {
 		return requestPath
 	}
 	return fmt.Sprintf("%s?limit=%d", requestPath, limit)
+}
+
+func copyProxyHeaders(dst http.Header, src http.Header) {
+	for key, values := range src {
+		if strings.EqualFold(key, "Host") {
+			continue
+		}
+		for _, value := range values {
+			dst.Add(key, value)
+		}
+	}
 }
