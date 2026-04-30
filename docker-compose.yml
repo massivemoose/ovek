@@ -50,6 +50,8 @@ services:
     container_name: buildkit
     image: moby/buildkit:v0.28.1
     privileged: true
+    volumes:
+      - "./brain_data/buildkit:/var/lib/buildkit"
     networks:
       - ovek-net
 
@@ -60,6 +62,8 @@ services:
       - REGISTRY_STORAGE_DELETE_ENABLED=true
     ports:
       - "5001:5000"
+    volumes:
+      - "./brain_data/registry:/var/lib/registry"
     networks:
       - ovek-net
 

@@ -52,6 +52,8 @@ services:
     command:
       - "--addr=tcp://0.0.0.0:1234"
     privileged: true
+    volumes:
+      - "./brain_data/buildkit:/var/lib/buildkit:z"
     networks:
       - ovek-net
 
@@ -62,6 +64,8 @@ services:
       - REGISTRY_STORAGE_DELETE_ENABLED=true
     ports:
       - "5001:5000"
+    volumes:
+      - "./brain_data/registry:/var/lib/registry:z"
     networks:
       - ovek-net
 

@@ -35,6 +35,7 @@ What these targets do:
 - `podman-vm-up` rebuilds and force-recreates the Podman stack so code changes in Brain actually land in the running control-plane container between iterations.
 - `podman-vm-smoke` runs the shared Linux Podman smoke suite inside the VM.
 - The VM startup helper also precreates `brain_data/projects`, `brain_data/traefik/dynamic`, and `brain_data/job-logs` so Traefik's file provider and Brain's local state paths exist before containers start.
+- BuildKit state lives under `brain_data/buildkit`, and the local registry lives under `brain_data/registry`, so repeated `podman-vm-up` runs can reuse builder and image cache instead of pulling every base image again.
 
 The VM copy is disposable test state. It is intentionally not treated as a bidirectional workspace.
 The helper sync preserves `brain_data` across resyncs so repeated `make podman-vm-up` and `make podman-vm-smoke` runs do not delete live bind-mount sources out from under running containers.
