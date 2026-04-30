@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -20,6 +21,22 @@ func TestPocketBaseDataDir(t *testing.T) {
 	want := filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName)
 	if got != want {
 		t.Fatalf("expected PocketBase data dir %q, got %q", want, got)
+	}
+}
+
+func TestEnsurePocketBaseDataDirAllowsImageUserWrites(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "demo-app", pocketBaseDataDirName)
+
+	if err := ensurePocketBaseDataDir(dataDir); err != nil {
+		t.Fatalf("expected PocketBase data dir creation to succeed, got error: %v", err)
+	}
+
+	info, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatalf("expected PocketBase data dir to exist, got error: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o770 {
+		t.Fatalf("expected PocketBase data dir permissions %o, got %o", 0o770, got)
 	}
 }
 

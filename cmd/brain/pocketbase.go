@@ -22,6 +22,8 @@ const (
 	pocketBaseDataDirName   = "pb_data"
 	pocketBaseDataMountPath = "/pb_data"
 	pocketBaseNetworkAlias  = "db"
+	pocketBaseDataUID       = 100
+	pocketBaseDataGID       = 101
 )
 
 type pocketBaseSpec struct {
@@ -61,7 +63,7 @@ func ensureProjectPocketBase(ctx context.Context, imageRuntime Runtime, containe
 		Network:             network,
 	})
 
-	if err := os.MkdirAll(spec.HostDataDir, 0o755); err != nil {
+	if err := ensurePocketBaseDataDir(spec.HostDataDir); err != nil {
 		return "", fmt.Errorf("create PocketBase data directory %q: %w", spec.HostDataDir, err)
 	}
 
@@ -103,6 +105,22 @@ func ensureProjectPocketBase(ctx context.Context, imageRuntime Runtime, containe
 	}
 
 	return createResponse.ID, nil
+}
+
+func ensurePocketBaseDataDir(path string) error {
+	if err := os.MkdirAll(path, 0o770); err != nil {
+		return err
+	}
+	if os.Geteuid() == 0 {
+		if err := os.Chown(path, pocketBaseDataUID, pocketBaseDataGID); err != nil {
+			return fmt.Errorf("set owner: %w", err)
+		}
+	}
+	if err := os.Chmod(path, 0o770); err != nil {
+		return fmt.Errorf("set permissions: %w", err)
+	}
+
+	return nil
 }
 
 func newPocketBaseContainerSpec(spec pocketBaseSpec) pocketBaseContainerSpec {
