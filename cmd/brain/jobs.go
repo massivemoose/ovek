@@ -19,6 +19,14 @@ import (
 const (
 	jobStatusQueued   = "queued"
 	jobTypeDeployment = "deployment"
+
+	jobPhaseQueued              = "queued"
+	jobPhaseStarting            = "starting"
+	jobPhaseBuildingImage       = "building image"
+	jobPhaseProvisioningPB      = "provisioning PocketBase"
+	jobPhaseStartingApp         = "starting app"
+	jobPhaseWaitingForReadiness = "waiting for readiness"
+	jobPhasePromoting           = "promoting"
 )
 
 var projectNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -188,11 +196,12 @@ func createQueuedJobWithActiveCheck(db *sql.DB, projectName string, repoURL stri
 	}
 
 	if _, err := tx.Exec(
-		"INSERT INTO jobs(id, project_name, repo_url, status, created_at, config_revision_id) VALUES(?, ?, ?, ?, ?, ?)",
+		"INSERT INTO jobs(id, project_name, repo_url, status, phase, created_at, config_revision_id) VALUES(?, ?, ?, ?, ?, ?, ?)",
 		jobID,
 		projectName,
 		repoURL,
 		jobStatusQueued,
+		jobPhaseQueued,
 		createdAt,
 		nullableString(configRevisionID),
 	); err != nil {
@@ -222,7 +231,7 @@ func findActiveDeploymentJob(ctx context.Context, tx *sql.Tx, projectName string
 	activeJob, err := scanJob(
 		tx.QueryRowContext(
 			ctx,
-			`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+			`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 			 FROM jobs
 			 WHERE project_name = ?
 			   AND status IN (?, ?)
@@ -249,7 +258,7 @@ func activeDeploymentJobMessage(job job) string {
 
 func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 	rows, err := db.Query(
-		`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+		`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 		 FROM jobs
 		 WHERE project_name = ?
 		 ORDER BY created_at DESC
@@ -281,7 +290,7 @@ func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 func getJob(db *sql.DB, jobID string) (job, error) {
 	job, err := scanJob(
 		db.QueryRow(
-			`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+			`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 			 FROM jobs
 			 WHERE id = ?`,
 			jobID,
@@ -300,6 +309,7 @@ type jobScanner interface {
 
 func scanJob(scanner jobScanner) (job, error) {
 	var job job
+	var phase sql.NullString
 	var logPath sql.NullString
 	var imageRef sql.NullString
 	var errorMessage sql.NullString
@@ -312,6 +322,7 @@ func scanJob(scanner jobScanner) (job, error) {
 		&job.ProjectName,
 		&job.RepoURL,
 		&job.Status,
+		&phase,
 		&logPath,
 		&imageRef,
 		&errorMessage,
@@ -326,6 +337,9 @@ func scanJob(scanner jobScanner) (job, error) {
 
 	if logPath.Valid {
 		job.LogPath = logPath.String
+	}
+	if phase.Valid {
+		job.Phase = phase.String
 	}
 	if imageRef.Valid {
 		job.ImageRef = imageRef.String

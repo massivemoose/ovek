@@ -197,9 +197,10 @@ func recoverInterruptedJobs(db *sql.DB) error {
 func claimQueuedJob(db *sql.DB, jobID string, startedAt string) (bool, error) {
 	result, err := db.Exec(
 		`UPDATE jobs
-		 SET status = ?, started_at = ?, error_message = NULL
+		 SET status = ?, phase = ?, started_at = ?, error_message = NULL
 		 WHERE id = ? AND status = ?`,
 		jobStatusRunning,
+		jobPhaseStarting,
 		startedAt,
 		jobID,
 		jobStatusQueued,
@@ -232,7 +233,7 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 
 	updateResult, err := tx.Exec(
 		`UPDATE jobs
-		 SET status = ?, finished_at = ?, error_message = ?, log_path = ?, image_ref = ?
+		 SET status = ?, phase = NULL, finished_at = ?, error_message = ?, log_path = ?, image_ref = ?
 		 WHERE id = ? AND status = ?`,
 		jobStatusFailed,
 		finishedAt,
@@ -318,7 +319,7 @@ func markJobSucceeded(db *sql.DB, currentJob job, finishedAt string, result depl
 
 	updateResult, err := tx.Exec(
 		`UPDATE jobs
-		 SET status = ?, finished_at = ?, error_message = NULL, log_path = ?, image_ref = ?
+		 SET status = ?, phase = NULL, finished_at = ?, error_message = NULL, log_path = ?, image_ref = ?
 		 WHERE id = ? AND status = ?`,
 		jobStatusSucceeded,
 		finishedAt,
@@ -454,6 +455,22 @@ func requireDeploymentMetadata(result deploymentResult) error {
 	}
 	if result.PocketBaseContainerName == "" {
 		return fmt.Errorf("deployment result is missing PocketBase container name")
+	}
+
+	return nil
+}
+
+func updateJobPhase(db *sql.DB, jobID string, phase string) error {
+	_, err := db.Exec(
+		`UPDATE jobs
+		 SET phase = ?
+		 WHERE id = ? AND status = ?`,
+		strings.TrimSpace(phase),
+		jobID,
+		jobStatusRunning,
+	)
+	if err != nil {
+		return fmt.Errorf("update job phase: %w", err)
 	}
 
 	return nil
