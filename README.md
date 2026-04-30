@@ -141,6 +141,7 @@ The shared automated smoke path is `scripts/podman-smoke.sh`. It validates first
 
 See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM workflow, optional hostname setup, and the real-Linux acceptance path.
 See [docs/registry-model.md](docs/registry-model.md) for the registry host split that makes the Podman topology work.
+See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for a source-built trial deploy of the PocketBase-backed signup example.
 
 ## Managed Registry Artifact Cleanup
 
