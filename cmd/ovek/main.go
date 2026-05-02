@@ -44,6 +44,7 @@ func newRootRouter(stdin io.Reader, stdout io.Writer, stderr io.Writer, store *c
 		newEnvCommand(stdout, store, prompts),
 		newLogsCommand(stdout, store),
 		newPBCommand(stdout, store, prompts),
+		newRunCommand(stdout, store, prompts),
 		newSecretCommand(stdout, store, prompts),
 		newStatusCommand(stdout, store),
 	)
