@@ -163,6 +163,33 @@ CREATE TABLE project_pocketbase_credentials (
 ALTER TABLE jobs ADD COLUMN phase TEXT;
 `,
 	},
+	{
+		version: 6,
+		name:    "add deployment source metadata",
+		upSQL: `
+ALTER TABLE jobs ADD COLUMN source_type TEXT;
+ALTER TABLE jobs ADD COLUMN source_ref TEXT;
+
+UPDATE jobs
+   SET source_type = 'repo'
+ WHERE source_type IS NULL OR source_type = '';
+
+UPDATE jobs
+   SET source_ref = repo_url
+ WHERE source_ref IS NULL OR source_ref = '';
+
+ALTER TABLE deployments ADD COLUMN source_type TEXT;
+ALTER TABLE deployments ADD COLUMN source_ref TEXT;
+
+UPDATE deployments
+   SET source_type = COALESCE((SELECT jobs.source_type FROM jobs WHERE jobs.id = deployments.id), 'repo')
+ WHERE source_type IS NULL OR source_type = '';
+
+UPDATE deployments
+   SET source_ref = COALESCE((SELECT jobs.source_ref FROM jobs WHERE jobs.id = deployments.id), '')
+ WHERE source_ref IS NULL OR source_ref = '';
+`,
+	},
 }
 
 func openBrainDB(dataDir string) (*sql.DB, error) {

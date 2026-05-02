@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,9 +40,14 @@ func TestOpenBrainDBCreatesDatabaseAndSchema(t *testing.T) {
 	assertMigrationRecorded(t, db, 3)
 	assertMigrationRecorded(t, db, 4)
 	assertMigrationRecorded(t, db, 5)
+	assertMigrationRecorded(t, db, 6)
 	assertColumnExists(t, db, "jobs", "phase")
 	assertColumnExists(t, db, "jobs", "config_revision_id")
+	assertColumnExists(t, db, "jobs", "source_type")
+	assertColumnExists(t, db, "jobs", "source_ref")
 	assertColumnExists(t, db, "deployments", "config_revision_id")
+	assertColumnExists(t, db, "deployments", "source_type")
+	assertColumnExists(t, db, "deployments", "source_ref")
 }
 
 func TestOpenBrainDBIsIdempotent(t *testing.T) {
@@ -68,6 +74,90 @@ func TestOpenBrainDBIsIdempotent(t *testing.T) {
 	assertMigrationRecorded(t, db, 3)
 	assertMigrationRecorded(t, db, 4)
 	assertMigrationRecorded(t, db, 5)
+	assertMigrationRecorded(t, db, 6)
+}
+
+func TestSourceMetadataMigrationBackfillsExistingJobsAndDeployments(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("expected data dir create to succeed, got error: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", filepath.Join(dataDir, databaseFileName))
+	if err != nil {
+		t.Fatalf("expected database open to succeed, got error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("expected foreign keys pragma to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS schema_migrations (
+	version INTEGER PRIMARY KEY,
+	name TEXT NOT NULL,
+	applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+`); err != nil {
+		t.Fatalf("expected schema migration table create to succeed, got error: %v", err)
+	}
+	for _, migration := range migrations {
+		if migration.version >= 6 {
+			continue
+		}
+		if _, err := db.Exec(migration.upSQL); err != nil {
+			t.Fatalf("expected migration %d setup to succeed, got error: %v", migration.version, err)
+		}
+		if _, err := db.Exec(
+			"INSERT INTO schema_migrations(version, name) VALUES(?, ?)",
+			migration.version,
+			migration.name,
+		); err != nil {
+			t.Fatalf("expected migration %d record setup to succeed, got error: %v", migration.version, err)
+		}
+	}
+	if _, err := db.Exec(
+		`INSERT INTO projects(name, status, created_at) VALUES(?, ?, ?)`,
+		"demo-app",
+		projectStatusRunning,
+		"2026-05-01T00:00:00Z",
+	); err != nil {
+		t.Fatalf("expected project seed to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO jobs(id, project_name, repo_url, status, created_at) VALUES(?, ?, ?, ?, ?)`,
+		"job-123",
+		"demo-app",
+		"https://example.com/demo.git",
+		jobStatusSucceeded,
+		"2026-05-01T00:00:00Z",
+	); err != nil {
+		t.Fatalf("expected job seed to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO deployments(id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		"job-123",
+		"demo-app",
+		"localhost:5001/ovek-demo-app:job-123",
+		"ovek-demo-app-app-job-123",
+		"demo-app-net",
+		"ovek-demo-app-pb",
+		deploymentStatusSucceeded,
+		"2026-05-01T00:00:00Z",
+	); err != nil {
+		t.Fatalf("expected deployment seed to succeed, got error: %v", err)
+	}
+
+	if err := ensureSchema(db); err != nil {
+		t.Fatalf("expected schema migration to succeed, got error: %v", err)
+	}
+
+	assertMigrationRecorded(t, db, 6)
+	assertTextValue(t, db, "jobs", "source_type", "id = 'job-123'", jobSourceTypeRepo)
+	assertTextValue(t, db, "jobs", "source_ref", "id = 'job-123'", "https://example.com/demo.git")
+	assertTextValue(t, db, "deployments", "source_type", "id = 'job-123'", jobSourceTypeRepo)
+	assertTextValue(t, db, "deployments", "source_ref", "id = 'job-123'", "https://example.com/demo.git")
 }
 
 func assertTableExists(t *testing.T, db *sql.DB, tableName string) {
@@ -132,4 +222,17 @@ func assertColumnExists(t *testing.T, db *sql.DB, tableName string, columnName s
 	}
 
 	t.Fatalf("expected table %q to have column %q", tableName, columnName)
+}
+
+func assertTextValue(t *testing.T, db *sql.DB, tableName string, columnName string, whereClause string, want string) {
+	t.Helper()
+
+	var got string
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s", columnName, tableName, whereClause)
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Fatalf("expected query %q to succeed, got error: %v", query, err)
+	}
+	if got != want {
+		t.Fatalf("expected %s.%s to be %q, got %q", tableName, columnName, want, got)
+	}
 }

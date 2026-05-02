@@ -43,6 +43,12 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	if job.RepoURL != "https://example.com/demo.git" {
 		t.Fatalf("expected repo URL %q, got %q", "https://example.com/demo.git", job.RepoURL)
 	}
+	if job.SourceType != jobSourceTypeRepo {
+		t.Fatalf("expected source type %q, got %q", jobSourceTypeRepo, job.SourceType)
+	}
+	if job.SourceRef != "https://example.com/demo.git" {
+		t.Fatalf("expected source ref %q, got %q", "https://example.com/demo.git", job.SourceRef)
+	}
 	if job.Status != jobStatusQueued {
 		t.Fatalf("expected status %q, got %q", jobStatusQueued, job.Status)
 	}
@@ -57,6 +63,12 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	}
 	if persistedJob.ID != job.ID {
 		t.Fatalf("expected persisted job ID %q, got %q", job.ID, persistedJob.ID)
+	}
+	if persistedJob.SourceType != jobSourceTypeRepo {
+		t.Fatalf("expected persisted source type %q, got %q", jobSourceTypeRepo, persistedJob.SourceType)
+	}
+	if persistedJob.SourceRef != "https://example.com/demo.git" {
+		t.Fatalf("expected persisted source ref %q, got %q", "https://example.com/demo.git", persistedJob.SourceRef)
 	}
 	if len(enqueuer.jobIDs) != 1 {
 		t.Fatalf("expected 1 enqueued job, got %d", len(enqueuer.jobIDs))

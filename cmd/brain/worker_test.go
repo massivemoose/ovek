@@ -321,6 +321,12 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 	if deployment.Status != deploymentStatusSucceeded {
 		t.Fatalf("expected deployment status %q, got %q", deploymentStatusSucceeded, deployment.Status)
 	}
+	if deployment.SourceType != jobSourceTypeRepo {
+		t.Fatalf("expected deployment source type %q, got %q", jobSourceTypeRepo, deployment.SourceType)
+	}
+	if deployment.SourceRef != "https://example.com/demo.git" {
+		t.Fatalf("expected deployment source ref %q, got %q", "https://example.com/demo.git", deployment.SourceRef)
+	}
 	if got := getProjectCurrentDeploymentID(t, db, createdJob.ProjectName); got != createdJob.ID {
 		t.Fatalf("expected current deployment ID %q, got %q", createdJob.ID, got)
 	}
@@ -698,9 +704,11 @@ func getDeploymentRecord(t *testing.T, db *sql.DB, deploymentID string) deployme
 	t.Helper()
 
 	var record deploymentRecord
+	var sourceType sql.NullString
+	var sourceRef sql.NullString
 	var configRevisionID sql.NullString
 	err := db.QueryRow(
-		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
+		`SELECT id, project_name, image_ref, source_type, source_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
 		 FROM deployments
 		 WHERE id = ?`,
 		deploymentID,
@@ -708,6 +716,8 @@ func getDeploymentRecord(t *testing.T, db *sql.DB, deploymentID string) deployme
 		&record.ID,
 		&record.ProjectName,
 		&record.ImageRef,
+		&sourceType,
+		&sourceRef,
 		&record.AppContainerName,
 		&record.NetworkName,
 		&record.PocketBaseContainerName,
@@ -717,6 +727,12 @@ func getDeploymentRecord(t *testing.T, db *sql.DB, deploymentID string) deployme
 	)
 	if err != nil {
 		t.Fatalf("expected deployment %q lookup to succeed, got error: %v", deploymentID, err)
+	}
+	if sourceType.Valid {
+		record.SourceType = sourceType.String
+	}
+	if sourceRef.Valid {
+		record.SourceRef = sourceRef.String
 	}
 	if configRevisionID.Valid {
 		record.ConfigRevisionID = configRevisionID.String

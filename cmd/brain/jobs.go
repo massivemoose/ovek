@@ -19,6 +19,7 @@ import (
 const (
 	jobStatusQueued   = "queued"
 	jobTypeDeployment = "deployment"
+	jobSourceTypeRepo = brainapi.JobSourceTypeRepo
 
 	jobPhaseQueued              = "queued"
 	jobPhaseStarting            = "starting"
@@ -156,9 +157,19 @@ func createQueuedDeploymentJob(db *sql.DB, projectName string, repoURL string) (
 }
 
 func createQueuedJobWithActiveCheck(db *sql.DB, projectName string, repoURL string, rejectActive bool) (job, error) {
+	return createQueuedJobWithSource(db, projectName, jobSourceTypeRepo, repoURL, rejectActive)
+}
+
+func createQueuedJobWithSource(db *sql.DB, projectName string, sourceType string, sourceRef string, rejectActive bool) (job, error) {
 	jobID, err := newID()
 	if err != nil {
 		return job{}, err
+	}
+	sourceType = strings.TrimSpace(sourceType)
+	sourceRef = strings.TrimSpace(sourceRef)
+	repoURL := ""
+	if sourceType == jobSourceTypeRepo {
+		repoURL = sourceRef
 	}
 
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
@@ -196,10 +207,12 @@ func createQueuedJobWithActiveCheck(db *sql.DB, projectName string, repoURL stri
 	}
 
 	if _, err := tx.Exec(
-		"INSERT INTO jobs(id, project_name, repo_url, status, phase, created_at, config_revision_id) VALUES(?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO jobs(id, project_name, repo_url, source_type, source_ref, status, phase, created_at, config_revision_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		jobID,
 		projectName,
 		repoURL,
+		sourceType,
+		sourceRef,
 		jobStatusQueued,
 		jobPhaseQueued,
 		createdAt,
@@ -221,6 +234,8 @@ func createQueuedJobWithActiveCheck(db *sql.DB, projectName string, repoURL stri
 		ID:               jobID,
 		ProjectName:      projectName,
 		RepoURL:          repoURL,
+		SourceType:       sourceType,
+		SourceRef:        sourceRef,
 		Status:           jobStatusQueued,
 		CreatedAt:        createdAt,
 		ConfigRevisionID: optionalRevisionID(configRevisionID, configRevisionFound),
@@ -231,7 +246,7 @@ func findActiveDeploymentJob(ctx context.Context, tx *sql.Tx, projectName string
 	activeJob, err := scanJob(
 		tx.QueryRowContext(
 			ctx,
-			`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+			`SELECT id, project_name, repo_url, source_type, source_ref, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 			 FROM jobs
 			 WHERE project_name = ?
 			   AND status IN (?, ?)
@@ -258,7 +273,7 @@ func activeDeploymentJobMessage(job job) string {
 
 func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 	rows, err := db.Query(
-		`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+		`SELECT id, project_name, repo_url, source_type, source_ref, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 		 FROM jobs
 		 WHERE project_name = ?
 		 ORDER BY created_at DESC
@@ -290,7 +305,7 @@ func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 func getJob(db *sql.DB, jobID string) (job, error) {
 	job, err := scanJob(
 		db.QueryRow(
-			`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+			`SELECT id, project_name, repo_url, source_type, source_ref, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 			 FROM jobs
 			 WHERE id = ?`,
 			jobID,
@@ -309,6 +324,8 @@ type jobScanner interface {
 
 func scanJob(scanner jobScanner) (job, error) {
 	var job job
+	var sourceType sql.NullString
+	var sourceRef sql.NullString
 	var phase sql.NullString
 	var logPath sql.NullString
 	var imageRef sql.NullString
@@ -321,6 +338,8 @@ func scanJob(scanner jobScanner) (job, error) {
 		&job.ID,
 		&job.ProjectName,
 		&job.RepoURL,
+		&sourceType,
+		&sourceRef,
 		&job.Status,
 		&phase,
 		&logPath,
@@ -335,6 +354,12 @@ func scanJob(scanner jobScanner) (job, error) {
 		return job, err
 	}
 
+	if sourceType.Valid {
+		job.SourceType = sourceType.String
+	}
+	if sourceRef.Valid {
+		job.SourceRef = sourceRef.String
+	}
 	if logPath.Valid {
 		job.LogPath = logPath.String
 	}
@@ -382,6 +407,12 @@ func newID() (string, error) {
 
 func decorateJob(job job) job {
 	job.Type = brainapi.JobTypeDeployment
+	if job.SourceType == "" {
+		job.SourceType = jobSourceTypeRepo
+	}
+	if job.SourceRef == "" && job.RepoURL != "" {
+		job.SourceRef = job.RepoURL
+	}
 	job.Links = jobLinks{
 		Self:       brainapi.JobPath(job.ID),
 		Logs:       brainapi.JobLogsPath(job.ID),
