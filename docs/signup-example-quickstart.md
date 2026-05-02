@@ -1,6 +1,8 @@
 # Signup Example Quickstart
 
-This is the current trial path for deploying a small Go app from source with Ovek. The example app writes email signups to the per-project PocketBase sidecar that Ovek manages.
+This is the transitional trial path for deploying a small Go app from source with Ovek. The primary runtime direction is now image-first `ovek run`; see [capsule-runs.md](capsule-runs.md) for building, pushing, and running prebuilt images.
+
+The example app writes email signups to the per-project PocketBase sidecar that Ovek manages.
 
 Example repo:
 
