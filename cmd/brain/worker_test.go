@@ -335,6 +335,64 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 	}
 }
 
+func TestJobManagerPromotesImageSourceJob(t *testing.T) {
+	db := newTestDB(t)
+	createdJob, err := createQueuedJobWithSource(db, "demo-app", jobSourceTypeImage, "ghcr.io/example/demo:2026.05.01", false)
+	if err != nil {
+		t.Fatalf("expected image job creation to succeed, got error: %v", err)
+	}
+
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		if currentJob.SourceType != jobSourceTypeImage {
+			t.Fatalf("expected source type %q, got %q", jobSourceTypeImage, currentJob.SourceType)
+		}
+		if currentJob.SourceRef != "ghcr.io/example/demo:2026.05.01" {
+			t.Fatalf("expected source ref %q, got %q", "ghcr.io/example/demo:2026.05.01", currentJob.SourceRef)
+		}
+		if currentJob.RepoURL != "" {
+			t.Fatalf("expected image job repo URL to be empty, got %q", currentJob.RepoURL)
+		}
+
+		return deploymentResult{
+			LogPath:                 "/tmp/image-run.log",
+			ImageRef:                currentJob.SourceRef,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
+		}, nil
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+
+	finishedJob := waitForJobStatus(t, db, createdJob.ID, jobStatusSucceeded)
+	if finishedJob.ImageRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected finished job image ref %q, got %q", "ghcr.io/example/demo:2026.05.01", finishedJob.ImageRef)
+	}
+	if finishedJob.SourceType != jobSourceTypeImage {
+		t.Fatalf("expected finished job source type %q, got %q", jobSourceTypeImage, finishedJob.SourceType)
+	}
+
+	deployment := getDeploymentRecord(t, db, createdJob.ID)
+	if deployment.ImageRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected deployment image ref %q, got %q", "ghcr.io/example/demo:2026.05.01", deployment.ImageRef)
+	}
+	if deployment.SourceType != jobSourceTypeImage {
+		t.Fatalf("expected deployment source type %q, got %q", jobSourceTypeImage, deployment.SourceType)
+	}
+	if deployment.SourceRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected deployment source ref %q, got %q", "ghcr.io/example/demo:2026.05.01", deployment.SourceRef)
+	}
+	if got := getProjectCurrentDeploymentID(t, db, createdJob.ProjectName); got != createdJob.ID {
+		t.Fatalf("expected current deployment ID %q, got %q", createdJob.ID, got)
+	}
+}
+
 func TestJobManagerRecoversInterruptedRunningJobsOnStart(t *testing.T) {
 	db := newTestDB(t)
 	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
@@ -572,6 +630,54 @@ func TestJobManagerLogsArtifactCleanupFailuresButKeepsSuccessfulJobState(t *test
 	}
 	if got := getProjectStatus(t, db, secondJob.ProjectName); got != projectStatusRunning {
 		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
+	}
+}
+
+func TestJobManagerSkipsArtifactCleanupForSupersededImageDeployment(t *testing.T) {
+	db := newTestDB(t)
+	firstJob, err := createQueuedJobWithSource(db, "demo-app", jobSourceTypeImage, "ghcr.io/example/demo:first", false)
+	if err != nil {
+		t.Fatalf("expected first image job creation to succeed, got error: %v", err)
+	}
+	secondJob, err := createQueuedJob(db, "demo-app", "https://example.com/second.git")
+	if err != nil {
+		t.Fatalf("expected second job creation to succeed, got error: %v", err)
+	}
+
+	artifactCleaner := &fakeRegistryArtifactCleaner{}
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		imageRef := "localhost:5001/ovek-demo-app:" + currentJob.ID
+		if currentJob.SourceType == jobSourceTypeImage {
+			imageRef = currentJob.SourceRef
+		}
+		result := deploymentResult{
+			LogPath:                 "/tmp/build.log",
+			ImageRef:                imageRef,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
+		}
+		if currentJob.ID == secondJob.ID {
+			result.SupersededDeploymentID = firstJob.ID
+		}
+
+		return result, nil
+	}), artifactCleaner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(firstJob.ID)
+	manager.Enqueue(secondJob.ID)
+
+	waitForJobStatus(t, db, firstJob.ID, jobStatusSucceeded)
+	waitForJobStatus(t, db, secondJob.ID, jobStatusSucceeded)
+
+	if len(artifactCleaner.cleanedRefs) != 0 {
+		t.Fatalf("expected no artifact cleanup for superseded image deployment, got %#v", artifactCleaner.cleanedRefs)
 	}
 }
 

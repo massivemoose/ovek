@@ -49,16 +49,19 @@ func main() {
 
 	processor := newManagedDeploymentProcessor(
 		db,
-		newBuildProcessor(
-			cfg.DataDir,
-			cfg.BuildKitHost,
-			cfg.BuildRegistryPublishHost,
-			cfg.RuntimeRegistryHost,
-			cfg.RailpackFrontendImage,
-			cfg.RegistryInsecure,
-			systemCommandRunner{},
-			projectConfigStore,
-		),
+		sourceDispatchProcessor{
+			repo: newBuildProcessor(
+				cfg.DataDir,
+				cfg.BuildKitHost,
+				cfg.BuildRegistryPublishHost,
+				cfg.RuntimeRegistryHost,
+				cfg.RailpackFrontendImage,
+				cfg.RegistryInsecure,
+				systemCommandRunner{},
+				projectConfigStore,
+			),
+			image: newImageProcessor(cfg.DataDir, projectConfigStore),
+		},
 		runtime,
 		cfg.ProjectsHostDataDir,
 		cfg.PocketBaseImage,

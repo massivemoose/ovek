@@ -17,13 +17,15 @@ import (
 )
 
 const (
-	jobStatusQueued   = "queued"
-	jobTypeDeployment = "deployment"
-	jobSourceTypeRepo = brainapi.JobSourceTypeRepo
+	jobStatusQueued    = "queued"
+	jobTypeDeployment  = "deployment"
+	jobSourceTypeRepo  = brainapi.JobSourceTypeRepo
+	jobSourceTypeImage = brainapi.JobSourceTypeImage
 
 	jobPhaseQueued              = "queued"
 	jobPhaseStarting            = "starting"
 	jobPhaseBuildingImage       = "building image"
+	jobPhasePreparingImage      = "preparing image"
 	jobPhaseProvisioningPB      = "provisioning PocketBase"
 	jobPhaseStartingApp         = "starting app"
 	jobPhaseWaitingForReadiness = "waiting for readiness"

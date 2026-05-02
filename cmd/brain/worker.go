@@ -548,7 +548,7 @@ func (manager *jobManager) cleanupSupersededDeploymentImage(ctx context.Context,
 		return
 	}
 
-	imageRef, found, err := getDeploymentImageRef(manager.db, projectName, deploymentID)
+	imageRef, managed, found, err := getDeploymentManagedImageRef(manager.db, projectName, deploymentID)
 	if err != nil {
 		log.Printf("warning: failed to load superseded deployment %q image for project %q cleanup: %v", deploymentID, projectName, err)
 		return
@@ -557,27 +557,30 @@ func (manager *jobManager) cleanupSupersededDeploymentImage(ctx context.Context,
 		log.Printf("warning: superseded deployment %q image for project %q was missing during cleanup", deploymentID, projectName)
 		return
 	}
+	if !managed {
+		return
+	}
 	if err := manager.artifactCleaner.CleanupImage(ctx, imageRef); err != nil {
 		log.Printf("warning: failed to clean up superseded deployment %q image %q: %v", deploymentID, imageRef, err)
 	}
 }
 
-func getDeploymentImageRef(db *sql.DB, projectName string, deploymentID string) (string, bool, error) {
+func getDeploymentManagedImageRef(db *sql.DB, projectName string, deploymentID string) (string, bool, bool, error) {
 	var imageRef string
+	var sourceType sql.NullString
 	err := db.QueryRow(
-		`SELECT image_ref
+		`SELECT image_ref, source_type
 		 FROM deployments
-		 WHERE id = ? AND project_name = ? AND (source_type IS NULL OR source_type = ?)`,
+		 WHERE id = ? AND project_name = ?`,
 		deploymentID,
 		projectName,
-		jobSourceTypeRepo,
-	).Scan(&imageRef)
+	).Scan(&imageRef, &sourceType)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return "", false, false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("get deployment %q image ref for project %q: %w", deploymentID, projectName, err)
+		return "", false, false, fmt.Errorf("get deployment %q image ref for project %q: %w", deploymentID, projectName, err)
 	}
 
-	return imageRef, true, nil
+	return imageRef, !sourceType.Valid || sourceType.String == jobSourceTypeRepo, true, nil
 }
