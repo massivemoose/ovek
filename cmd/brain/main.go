@@ -128,6 +128,7 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("PUT /v1/projects/{projectName}/env/{name}", requireCriticalReauth(cfg, db, "project_env.authorized", handleSetProjectEnvironment(projectConfigStore)))
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/env/{name}", requireCriticalReauth(cfg, db, "project_env.authorized", handleDeleteProjectEnvironment(projectConfigStore)))
 	apiMux.HandleFunc("POST /v1/projects/{projectName}/deployments", requireCriticalReauth(cfg, db, "deploy.authorized", handleCreateDeployment(db, enqueuer)))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/runs", requireCriticalReauth(cfg, db, "run.authorized", handleCreateRun(db, enqueuer)))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs", handleGetJobLogs(db, cfg.DataDir))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs/stream", handleGetJobLogsStream(db, cfg.DataDir))

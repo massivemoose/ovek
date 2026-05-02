@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
 )
@@ -33,6 +34,8 @@ const (
 )
 
 var projectNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+const maxCapsuleRefLength = 512
 
 type deploymentEnqueuer interface {
 	Enqueue(jobID string)
@@ -102,6 +105,28 @@ func handleCreateDeployment(db *sql.DB, enqueuer deploymentEnqueuer) http.Handle
 	}
 }
 
+func handleCreateRun(db *sql.DB, enqueuer deploymentEnqueuer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		var request createRunRequest
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidRequestBody, "invalid request body")
+			return
+		}
+
+		createRunJob(w, db, enqueuer, projectName, request.CapsuleRef)
+	}
+}
+
 func handleGetJob(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := strings.TrimSpace(r.PathValue("jobID"))
@@ -150,12 +175,60 @@ func createDeploymentJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentE
 	writeJSON(w, http.StatusAccepted, job)
 }
 
+func createRunJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentEnqueuer, projectName string, capsuleRef string) {
+	capsuleRef, ok := validateCapsuleRef(w, capsuleRef)
+	if !ok {
+		return
+	}
+
+	job, err := createQueuedRunJob(db, projectName, capsuleRef)
+	if err != nil {
+		var activeErr activeDeploymentJobError
+		if errors.As(err, &activeErr) {
+			writeJSONError(w, http.StatusConflict, errorCodeActiveDeploymentExists, activeDeploymentJobMessage(activeErr.job))
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, errorCodeCreateJobFailed, "failed to create deployment job")
+		return
+	}
+
+	if enqueuer != nil {
+		enqueuer.Enqueue(job.ID)
+	}
+
+	w.Header().Set("Location", jobPath(job.ID))
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func validateCapsuleRef(w http.ResponseWriter, capsuleRef string) (string, bool) {
+	if strings.TrimSpace(capsuleRef) == "" {
+		writeJSONError(w, http.StatusBadRequest, errorCodeCapsuleRefRequired, "capsuleRef is required")
+		return "", false
+	}
+	if len(capsuleRef) > maxCapsuleRefLength {
+		writeJSONError(w, http.StatusBadRequest, errorCodeInvalidCapsuleRef, fmt.Sprintf("capsuleRef must be at most %d characters", maxCapsuleRefLength))
+		return "", false
+	}
+	for _, value := range capsuleRef {
+		if unicode.IsSpace(value) || unicode.IsControl(value) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidCapsuleRef, "capsuleRef must not contain whitespace or control characters")
+			return "", false
+		}
+	}
+
+	return capsuleRef, true
+}
+
 func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error) {
 	return createQueuedJobWithActiveCheck(db, projectName, repoURL, false)
 }
 
 func createQueuedDeploymentJob(db *sql.DB, projectName string, repoURL string) (job, error) {
 	return createQueuedJobWithActiveCheck(db, projectName, repoURL, true)
+}
+
+func createQueuedRunJob(db *sql.DB, projectName string, capsuleRef string) (job, error) {
+	return createQueuedJobWithSource(db, projectName, jobSourceTypeImage, capsuleRef, true)
 }
 
 func createQueuedJobWithActiveCheck(db *sql.DB, projectName string, repoURL string, rejectActive bool) (job, error) {

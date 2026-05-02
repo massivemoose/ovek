@@ -80,6 +80,10 @@ type CreateDeploymentRequest struct {
 	RepoURL string `json:"repoUrl"`
 }
 
+type CreateRunRequest struct {
+	CapsuleRef string `json:"capsuleRef"`
+}
+
 type ProjectEnvironmentEntry struct {
 	Name      string  `json:"name"`
 	Secret    bool    `json:"secret"`

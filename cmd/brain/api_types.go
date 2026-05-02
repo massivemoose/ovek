@@ -8,6 +8,7 @@ type deploymentRecord = brainapi.Deployment
 type jobLinks = brainapi.JobLinks
 type job = brainapi.Job
 type createDeploymentRequest = brainapi.CreateDeploymentRequest
+type createRunRequest = brainapi.CreateRunRequest
 type projectRuntimeApp = brainapi.ProjectRuntimeApp
 type projectRuntimeContainer = brainapi.ProjectRuntimeContainer
 type projectRuntimeNetwork = brainapi.ProjectRuntimeNetwork
