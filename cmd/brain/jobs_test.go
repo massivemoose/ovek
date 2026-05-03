@@ -69,6 +69,52 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	}
 }
 
+func TestCreateDeploymentRejectsDuplicateActiveJob(t *testing.T) {
+	enqueuer := &recordingEnqueuer{}
+	handler, db := newTestHandler(t, enqueuer)
+
+	activeJob, err := createQueuedJob(db, "demo-app", "https://example.com/first.git")
+	if err != nil {
+		t.Fatalf("expected active job seed to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET status = ? WHERE id = ?", jobStatusRunning, activeJob.ID); err != nil {
+		t.Fatalf("expected active job update to succeed, got error: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects/demo-app/deployments",
+		strings.NewReader(`{"repoUrl":"https://example.com/second.git"}`),
+	)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d with body %q", http.StatusConflict, recorder.Code, recorder.Body.String())
+	}
+
+	var response apiError
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("expected response body to decode, got error: %v", err)
+	}
+	if response.Code != errorCodeActiveDeploymentExists {
+		t.Fatalf("expected error code %q, got %q", errorCodeActiveDeploymentExists, response.Code)
+	}
+	if !strings.Contains(response.Message, activeJob.ID) {
+		t.Fatalf("expected error message to include active job ID %q, got %q", activeJob.ID, response.Message)
+	}
+	if len(enqueuer.jobIDs) != 0 {
+		t.Fatalf("expected no enqueued jobs, got %d", len(enqueuer.jobIDs))
+	}
+
+	count := queryCount(t, db, `SELECT COUNT(1) FROM jobs WHERE project_name = ?`, "demo-app")
+	if count != 1 {
+		t.Fatalf("expected only the active job to remain, got %d jobs", count)
+	}
+}
+
 func TestListProjectJobsReturnsNewestFirst(t *testing.T) {
 	handler, db := newTestHandler(t, noopEnqueuer{})
 

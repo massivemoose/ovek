@@ -15,6 +15,7 @@ const (
 	errorCodeInvalidProjectName        = "invalid_project_name"
 	errorCodeInvalidLimit              = "invalid_limit"
 	errorCodeRepoURLRequired           = "repo_url_required"
+	errorCodeActiveDeploymentExists    = "active_deployment_exists"
 	errorCodeCreateJobFailed           = "create_deployment_job_failed"
 	errorCodeListProjectsFailed        = "list_projects_failed"
 	errorCodeListDeploymentsFailed     = "list_deployments_failed"

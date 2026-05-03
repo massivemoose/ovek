@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -18,12 +19,28 @@ import (
 const (
 	jobStatusQueued   = "queued"
 	jobTypeDeployment = "deployment"
+
+	jobPhaseQueued              = "queued"
+	jobPhaseStarting            = "starting"
+	jobPhaseBuildingImage       = "building image"
+	jobPhaseProvisioningPB      = "provisioning PocketBase"
+	jobPhaseStartingApp         = "starting app"
+	jobPhaseWaitingForReadiness = "waiting for readiness"
+	jobPhasePromoting           = "promoting"
 )
 
 var projectNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type deploymentEnqueuer interface {
 	Enqueue(jobID string)
+}
+
+type activeDeploymentJobError struct {
+	job job
+}
+
+func (err activeDeploymentJobError) Error() string {
+	return fmt.Sprintf("project %q already has active deployment job %q", err.job.ProjectName, err.job.ID)
 }
 
 func handleListProjectJobs(db *sql.DB) http.HandlerFunc {
@@ -111,8 +128,13 @@ func createDeploymentJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentE
 		return
 	}
 
-	job, err := createQueuedJob(db, projectName, repoURL)
+	job, err := createQueuedDeploymentJob(db, projectName, repoURL)
 	if err != nil {
+		var activeErr activeDeploymentJobError
+		if errors.As(err, &activeErr) {
+			writeJSONError(w, http.StatusConflict, errorCodeActiveDeploymentExists, activeDeploymentJobMessage(activeErr.job))
+			return
+		}
 		writeJSONError(w, http.StatusInternalServerError, errorCodeCreateJobFailed, "failed to create deployment job")
 		return
 	}
@@ -126,6 +148,14 @@ func createDeploymentJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentE
 }
 
 func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error) {
+	return createQueuedJobWithActiveCheck(db, projectName, repoURL, false)
+}
+
+func createQueuedDeploymentJob(db *sql.DB, projectName string, repoURL string) (job, error) {
+	return createQueuedJobWithActiveCheck(db, projectName, repoURL, true)
+}
+
+func createQueuedJobWithActiveCheck(db *sql.DB, projectName string, repoURL string, rejectActive bool) (job, error) {
 	jobID, err := newID()
 	if err != nil {
 		return job{}, err
@@ -147,6 +177,18 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 		return job{}, err
 	}
 
+	if rejectActive {
+		activeJob, found, err := findActiveDeploymentJob(context.Background(), tx, projectName)
+		if err != nil {
+			_ = tx.Rollback()
+			return job{}, err
+		}
+		if found {
+			_ = tx.Rollback()
+			return job{}, activeDeploymentJobError{job: activeJob}
+		}
+	}
+
 	configRevisionID, configRevisionFound, err := latestProjectConfigRevisionID(context.Background(), tx, projectName)
 	if err != nil {
 		_ = tx.Rollback()
@@ -154,11 +196,12 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 	}
 
 	if _, err := tx.Exec(
-		"INSERT INTO jobs(id, project_name, repo_url, status, created_at, config_revision_id) VALUES(?, ?, ?, ?, ?, ?)",
+		"INSERT INTO jobs(id, project_name, repo_url, status, phase, created_at, config_revision_id) VALUES(?, ?, ?, ?, ?, ?, ?)",
 		jobID,
 		projectName,
 		repoURL,
 		jobStatusQueued,
+		jobPhaseQueued,
 		createdAt,
 		nullableString(configRevisionID),
 	); err != nil {
@@ -184,9 +227,38 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 	}), nil
 }
 
+func findActiveDeploymentJob(ctx context.Context, tx *sql.Tx, projectName string) (job, bool, error) {
+	activeJob, err := scanJob(
+		tx.QueryRowContext(
+			ctx,
+			`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+			 FROM jobs
+			 WHERE project_name = ?
+			   AND status IN (?, ?)
+			 ORDER BY created_at ASC
+			 LIMIT 1`,
+			projectName,
+			jobStatusQueued,
+			jobStatusRunning,
+		),
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return job{}, false, nil
+	}
+	if err != nil {
+		return job{}, false, err
+	}
+
+	return decorateJob(activeJob), true, nil
+}
+
+func activeDeploymentJobMessage(job job) string {
+	return fmt.Sprintf("project %q already has an active deployment job %q with status %q; wait for it to finish before starting another deploy", job.ProjectName, job.ID, job.Status)
+}
+
 func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 	rows, err := db.Query(
-		`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+		`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 		 FROM jobs
 		 WHERE project_name = ?
 		 ORDER BY created_at DESC
@@ -218,7 +290,7 @@ func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 func getJob(db *sql.DB, jobID string) (job, error) {
 	job, err := scanJob(
 		db.QueryRow(
-			`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+			`SELECT id, project_name, repo_url, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 			 FROM jobs
 			 WHERE id = ?`,
 			jobID,
@@ -237,6 +309,7 @@ type jobScanner interface {
 
 func scanJob(scanner jobScanner) (job, error) {
 	var job job
+	var phase sql.NullString
 	var logPath sql.NullString
 	var imageRef sql.NullString
 	var errorMessage sql.NullString
@@ -249,6 +322,7 @@ func scanJob(scanner jobScanner) (job, error) {
 		&job.ProjectName,
 		&job.RepoURL,
 		&job.Status,
+		&phase,
 		&logPath,
 		&imageRef,
 		&errorMessage,
@@ -263,6 +337,9 @@ func scanJob(scanner jobScanner) (job, error) {
 
 	if logPath.Valid {
 		job.LogPath = logPath.String
+	}
+	if phase.Valid {
+		job.Phase = phase.String
 	}
 	if imageRef.Valid {
 		job.ImageRef = imageRef.String

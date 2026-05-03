@@ -117,6 +117,18 @@ func TestBuildProcessorRunsGitCloneAndBuildctl(t *testing.T) {
 	if !strings.Contains(string(logContents), "$ buildctl --addr docker-container://buildkit build --progress=plain") {
 		t.Fatalf("expected buildctl command in log, got %q", string(logContents))
 	}
+	for _, fragment := range []string{
+		"lifecycle: cloning source",
+		"lifecycle: source cloned",
+		"lifecycle: planning build with Railpack",
+		"lifecycle: build plan prepared",
+		"lifecycle: building image with BuildKit; first runs may pull large base images",
+		"lifecycle: image built and pushed",
+	} {
+		if !strings.Contains(string(logContents), fragment) {
+			t.Fatalf("expected build lifecycle log to contain %q, got %q", fragment, string(logContents))
+		}
+	}
 }
 
 func TestBuildProcessorCleansUpWorkspaceOnCloneFailure(t *testing.T) {

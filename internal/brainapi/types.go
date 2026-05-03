@@ -57,6 +57,7 @@ type Job struct {
 	ProjectName      string   `json:"projectName"`
 	RepoURL          string   `json:"repoUrl"`
 	Status           string   `json:"status"`
+	Phase            string   `json:"phase,omitempty"`
 	LogPath          string   `json:"logPath,omitempty"`
 	ImageRef         string   `json:"imageRef,omitempty"`
 	ErrorMessage     string   `json:"errorMessage,omitempty"`

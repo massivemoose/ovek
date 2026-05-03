@@ -1,7 +1,7 @@
 PODMAN_MACHINE ?= podman-machine-default
 OVEK_VM_DIR ?= /var/home/core/ovek
 PODMAN_VM_REPO ?= $(OVEK_VM_DIR)
-PODMAN_VM_COMPOSE := cd '$(PODMAN_VM_REPO)' && mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs
+PODMAN_VM_COMPOSE := cd '$(PODMAN_VM_REPO)' && mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs brain_data/buildkit brain_data/registry
 
 .PHONY: podman-machine-init
 podman-machine-init:
@@ -53,7 +53,7 @@ podman-vm-shell: podman-machine-sync
 
 .PHONY: podman-linux-up
 podman-linux-up:
-	mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs
+	mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs brain_data/buildkit brain_data/registry
 	sudo podman compose -f podman-compose.yml up -d --build --force-recreate
 
 .PHONY: podman-linux-smoke

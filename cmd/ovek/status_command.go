@@ -144,9 +144,9 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	} else {
 		rows := make([][]string, 0, len(jobs))
 		for _, job := range jobs {
-			rows = append(rows, []string{job.ID, job.Status, job.CreatedAt, job.RepoURL, recentJobError(job)})
+			rows = append(rows, []string{job.ID, job.Status, recentJobPhase(job), job.CreatedAt, job.RepoURL, recentJobError(job)})
 		}
-		output.WriteTable(cmd.stdout, []string{"Job", "Status", "Created", "Repo", "Error"}, rows)
+		output.WriteTable(cmd.stdout, []string{"Job", "Status", "Phase", "Created", "Repo", "Error"}, rows)
 	}
 
 	_, _ = fmt.Fprintln(cmd.stdout)
@@ -195,6 +195,13 @@ func recentJobError(job brainapi.Job) string {
 		return "-"
 	}
 	return job.ErrorMessage
+}
+
+func recentJobPhase(job brainapi.Job) string {
+	if strings.TrimSpace(job.Phase) == "" {
+		return "-"
+	}
+	return job.Phase
 }
 
 func runtimeAppSummary(app *brainapi.ProjectRuntimeApp) string {

@@ -77,7 +77,8 @@ func TestStatusShowsProjectDetail(t *testing.T) {
 				},
 				{
 					ID:        "job_123",
-					Status:    "succeeded",
+					Status:    "running",
+					Phase:     "building image",
 					RepoURL:   "https://example.com/demo.git",
 					CreatedAt: "2026-04-15T00:01:00Z",
 				},
@@ -117,6 +118,8 @@ func TestStatusShowsProjectDetail(t *testing.T) {
 		"dep_123",
 		"job_123",
 		"job_124",
+		"Phase",
+		"building image",
 		"Error",
 		"app readiness failed: timed out waiting for port",
 	} {

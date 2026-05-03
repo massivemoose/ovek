@@ -97,6 +97,9 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 	}
 	defer os.RemoveAll(workspace)
 
+	if err := writeBuildLifecycleLine(logWriter, "cloning source"); err != nil {
+		return result, err
+	}
 	if err := processor.runCommand(
 		ctx,
 		commandSpec{
@@ -109,6 +112,9 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 	); err != nil {
 		return result, fmt.Errorf("git clone: %w", err)
 	}
+	if err := writeBuildLifecycleLine(logWriter, "source cloned"); err != nil {
+		return result, err
+	}
 
 	planDir := filepath.Join(workspace, railpackPlanDirName)
 	if err := os.MkdirAll(planDir, 0o755); err != nil {
@@ -117,6 +123,9 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 
 	planPath := filepath.Join(planDir, railpackPlanFileName)
 	infoPath := filepath.Join(planDir, railpackInfoFileName)
+	if err := writeBuildLifecycleLine(logWriter, "planning build with Railpack"); err != nil {
+		return result, err
+	}
 	if err := processor.runCommand(
 		ctx,
 		commandSpec{
@@ -129,7 +138,13 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 	); err != nil {
 		return result, fmt.Errorf("railpack prepare: %w", err)
 	}
+	if err := writeBuildLifecycleLine(logWriter, "build plan prepared"); err != nil {
+		return result, err
+	}
 
+	if err := writeBuildLifecycleLine(logWriter, "building image with BuildKit; first runs may pull large base images"); err != nil {
+		return result, err
+	}
 	if err := processor.runCommand(
 		ctx,
 		commandSpec{
@@ -141,6 +156,9 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 		},
 	); err != nil {
 		return result, fmt.Errorf("buildctl build: %w", err)
+	}
+	if err := writeBuildLifecycleLine(logWriter, "image built and pushed"); err != nil {
+		return result, err
 	}
 
 	return result, nil
@@ -160,6 +178,14 @@ func (processor buildProcessor) runCommand(ctx context.Context, command commandS
 	}
 
 	return processor.runner.Run(ctx, command)
+}
+
+func writeBuildLifecycleLine(writer io.Writer, message string) error {
+	if _, err := fmt.Fprintf(writer, "lifecycle: %s\n", message); err != nil {
+		return fmt.Errorf("write build lifecycle log: %w", err)
+	}
+
+	return nil
 }
 
 func (systemCommandRunner) Run(ctx context.Context, command commandSpec) error {

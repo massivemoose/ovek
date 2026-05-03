@@ -156,6 +156,13 @@ CREATE TABLE project_pocketbase_credentials (
 );
 `,
 	},
+	{
+		version: 5,
+		name:    "add job phase",
+		upSQL: `
+ALTER TABLE jobs ADD COLUMN phase TEXT;
+`,
+	},
 }
 
 func openBrainDB(dataDir string) (*sql.DB, error) {
