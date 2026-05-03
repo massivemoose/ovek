@@ -1,19 +1,31 @@
-# ovek
+# Ovek
 
-Ovek is a local-first control plane for building and running app projects through Brain.
+Ovek is a lightweight capsule runtime for your VPS. Build an OCI image locally, in CI, or in a future hosted builder, then run it on your own server with `ovek run <project> <capsule-ref>`.
 
-## Brain Deploy Flow
+## Runtime And Deploy Flows
 
-The current Brain deployment path is:
+The primary runtime path is image-first:
 
-1. `git clone`
-2. `railpack prepare`
-3. `buildctl build`
-4. push the built image to the local registry
-5. pull that registry-backed image into the runtime
-6. start the managed app and PocketBase containers
+1. build and push an OCI image outside the Ovek runtime host
+2. `ovek run <project> <capsule-ref>`
+3. Brain records an image-sourced deployment job
+4. the runtime pulls that image
+5. Brain starts the managed app and PocketBase containers
+6. readiness, promotion, routing, status, logs, and cleanup use the normal runtime pipeline
 
-The older `railpack build --output` plus `docker import` path is no longer the active build flow.
+See [docs/capsule-runs.md](docs/capsule-runs.md) for local and CI image build/push examples, `ovek run`, and validation commands.
+
+The source-build path still exists as a transitional/dev convenience:
+
+1. `ovek deploy <project> <repoURL>`
+2. `git clone`
+3. `railpack prepare`
+4. `buildctl build`
+5. push the built image to the local registry
+6. pull that registry-backed image into the runtime
+7. start the managed app and PocketBase containers
+
+The older `railpack build --output` plus `docker import` path is no longer the active source-build flow.
 
 ## Local Dev Topology
 
@@ -141,7 +153,8 @@ The shared automated smoke path is `scripts/podman-smoke.sh`. It validates first
 
 See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM workflow, optional hostname setup, and the real-Linux acceptance path.
 See [docs/registry-model.md](docs/registry-model.md) for the registry host split that makes the Podman topology work.
-See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for a source-built trial deploy of the PocketBase-backed signup example.
+See [docs/capsule-runs.md](docs/capsule-runs.md) for the image-first `ovek run` path.
+See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for the transitional source-built trial deploy of the PocketBase-backed signup example.
 
 ## Managed Registry Artifact Cleanup
 

@@ -366,16 +366,20 @@ func insertSucceededDeployment(tx *sql.Tx, currentJob job, result deploymentResu
 			id,
 			project_name,
 			image_ref,
+			source_type,
+			source_ref,
 			app_container_name,
 			network_name,
 			pb_container_name,
 			status,
 			created_at,
 			config_revision_id
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		currentJob.ID,
 		currentJob.ProjectName,
 		result.ImageRef,
+		currentJob.SourceType,
+		currentJob.SourceRef,
 		result.AppContainerName,
 		result.NetworkName,
 		result.PocketBaseContainerName,
@@ -478,9 +482,11 @@ func updateJobPhase(db *sql.DB, jobID string, phase string) error {
 
 func getProjectCurrentDeployment(db *sql.DB, projectName string) (deploymentRecord, bool, error) {
 	var deployment deploymentRecord
+	var sourceType sql.NullString
+	var sourceRef sql.NullString
 	var configRevisionID sql.NullString
 	err := db.QueryRow(
-		`SELECT d.id, d.project_name, d.image_ref, d.app_container_name, d.network_name, d.pb_container_name, d.status, d.created_at, d.config_revision_id
+		`SELECT d.id, d.project_name, d.image_ref, d.source_type, d.source_ref, d.app_container_name, d.network_name, d.pb_container_name, d.status, d.created_at, d.config_revision_id
 		 FROM projects p
 		 JOIN deployments d ON d.id = p.current_deployment_id
 		 WHERE p.name = ?`,
@@ -489,6 +495,8 @@ func getProjectCurrentDeployment(db *sql.DB, projectName string) (deploymentReco
 		&deployment.ID,
 		&deployment.ProjectName,
 		&deployment.ImageRef,
+		&sourceType,
+		&sourceRef,
 		&deployment.AppContainerName,
 		&deployment.NetworkName,
 		&deployment.PocketBaseContainerName,
@@ -501,6 +509,12 @@ func getProjectCurrentDeployment(db *sql.DB, projectName string) (deploymentReco
 	}
 	if err != nil {
 		return deploymentRecord{}, false, fmt.Errorf("get current deployment for project %q: %w", projectName, err)
+	}
+	if sourceType.Valid {
+		deployment.SourceType = sourceType.String
+	}
+	if sourceRef.Valid {
+		deployment.SourceRef = sourceRef.String
 	}
 	if configRevisionID.Valid {
 		deployment.ConfigRevisionID = configRevisionID.String
@@ -534,7 +548,7 @@ func (manager *jobManager) cleanupSupersededDeploymentImage(ctx context.Context,
 		return
 	}
 
-	imageRef, found, err := getDeploymentImageRef(manager.db, projectName, deploymentID)
+	imageRef, managed, found, err := getDeploymentManagedImageRef(manager.db, projectName, deploymentID)
 	if err != nil {
 		log.Printf("warning: failed to load superseded deployment %q image for project %q cleanup: %v", deploymentID, projectName, err)
 		return
@@ -543,26 +557,30 @@ func (manager *jobManager) cleanupSupersededDeploymentImage(ctx context.Context,
 		log.Printf("warning: superseded deployment %q image for project %q was missing during cleanup", deploymentID, projectName)
 		return
 	}
+	if !managed {
+		return
+	}
 	if err := manager.artifactCleaner.CleanupImage(ctx, imageRef); err != nil {
 		log.Printf("warning: failed to clean up superseded deployment %q image %q: %v", deploymentID, imageRef, err)
 	}
 }
 
-func getDeploymentImageRef(db *sql.DB, projectName string, deploymentID string) (string, bool, error) {
+func getDeploymentManagedImageRef(db *sql.DB, projectName string, deploymentID string) (string, bool, bool, error) {
 	var imageRef string
+	var sourceType sql.NullString
 	err := db.QueryRow(
-		`SELECT image_ref
+		`SELECT image_ref, source_type
 		 FROM deployments
 		 WHERE id = ? AND project_name = ?`,
 		deploymentID,
 		projectName,
-	).Scan(&imageRef)
+	).Scan(&imageRef, &sourceType)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return "", false, false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("get deployment %q image ref for project %q: %w", deploymentID, projectName, err)
+		return "", false, false, fmt.Errorf("get deployment %q image ref for project %q: %w", deploymentID, projectName, err)
 	}
 
-	return imageRef, true, nil
+	return imageRef, !sourceType.Valid || sourceType.String == jobSourceTypeRepo, true, nil
 }

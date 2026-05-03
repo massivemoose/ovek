@@ -173,8 +173,10 @@ func listProjectDeploymentImageRefs(db *sql.DB, projectName string) ([]string, e
 		`SELECT image_ref
 		 FROM deployments
 		 WHERE project_name = ?
+		   AND (source_type IS NULL OR source_type = ?)
 		 ORDER BY created_at ASC`,
 		projectName,
+		jobSourceTypeRepo,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list deployment image refs for project %q: %w", projectName, err)

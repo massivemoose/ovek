@@ -39,7 +39,7 @@ func newManagedDeploymentProcessor(db *sql.DB, builder deploymentProcessor, prov
 }
 
 func (processor managedDeploymentProcessor) Process(ctx context.Context, job job) (result deploymentResult, err error) {
-	if err := updateJobPhase(processor.db, job.ID, jobPhaseBuildingImage); err != nil {
+	if err := updateJobPhase(processor.db, job.ID, sourcePreparationPhase(job)); err != nil {
 		return result, err
 	}
 	result, err = processor.builder.Process(ctx, job)
@@ -53,7 +53,7 @@ func (processor managedDeploymentProcessor) Process(ctx context.Context, job job
 	}
 	result.LogScrubber = runtimeConfig.SecretScrubber
 
-	appendJobLogLine(result.LogPath, "lifecycle: build succeeded", result.LogScrubber)
+	appendJobLogLine(result.LogPath, sourceReadyLogLine(job), result.LogScrubber)
 	defer func() {
 		if err != nil {
 			appendJobLogError(result.LogPath, err.Error(), result.LogScrubber)
@@ -122,6 +122,22 @@ func (processor managedDeploymentProcessor) Process(ctx context.Context, job job
 	result.SupersededDeploymentID = currentDeployment.ID
 	appendJobLogLine(result.LogPath, "lifecycle: runtime promotion prepared", result.LogScrubber)
 	return result, nil
+}
+
+func sourcePreparationPhase(job job) string {
+	if job.SourceType == jobSourceTypeImage {
+		return jobPhasePreparingImage
+	}
+
+	return jobPhaseBuildingImage
+}
+
+func sourceReadyLogLine(job job) string {
+	if job.SourceType == jobSourceTypeImage {
+		return "lifecycle: image ready"
+	}
+
+	return "lifecycle: build succeeded"
 }
 
 func (processor managedDeploymentProcessor) removeCurrentJobApp(ctx context.Context, job job, result deploymentResult) error {

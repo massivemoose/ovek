@@ -95,6 +95,26 @@ func TestProdDeployRequiresReauth(t *testing.T) {
 	assertAPIError(t, recorder, http.StatusUnauthorized, errorCodeReauthRequired, "reauth required")
 }
 
+func TestProdRunRequiresReauth(t *testing.T) {
+	handler, db := newProdTestHandler(t)
+	apiKey, err := bootstrapAdminUser(db, "admin", "secret-pass")
+	if err != nil {
+		t.Fatalf("expected bootstrap helper to succeed, got error: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects/demo-app/runs",
+		strings.NewReader(`{"capsuleRef":"ghcr.io/example/demo:2026.05.01"}`),
+	)
+	request.Header.Set(headerAPIKey, apiKey)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusUnauthorized, errorCodeReauthRequired, "reauth required")
+}
+
 func TestProdReauthAllowsCriticalDeployAndWritesAuditLog(t *testing.T) {
 	handler, db := newProdTestHandler(t)
 	apiKey, err := bootstrapAdminUser(db, "admin", "secret-pass")
@@ -139,6 +159,50 @@ func TestProdReauthAllowsCriticalDeployAndWritesAuditLog(t *testing.T) {
 	}
 	if count := queryCount(t, db, "SELECT COUNT(1) FROM audit_logs WHERE event_type = 'deploy.authorized' AND project_name = 'demo-app'"); count != 1 {
 		t.Fatalf("expected deploy audit log, got %d rows", count)
+	}
+}
+
+func TestProdReauthAllowsCriticalRunAndWritesAuditLog(t *testing.T) {
+	handler, db := newProdTestHandler(t)
+	apiKey, err := bootstrapAdminUser(db, "admin", "secret-pass")
+	if err != nil {
+		t.Fatalf("expected bootstrap helper to succeed, got error: %v", err)
+	}
+
+	reauthRequest := httptest.NewRequest(http.MethodPost, "/v1/auth/reauth", strings.NewReader(`{"password":"secret-pass"}`))
+	reauthRequest.Header.Set(headerAPIKey, apiKey)
+	reauthRecorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(reauthRecorder, reauthRequest)
+
+	if reauthRecorder.Code != http.StatusOK {
+		t.Fatalf("expected reauth status %d, got %d", http.StatusOK, reauthRecorder.Code)
+	}
+
+	var reauthResponse brainapi.ReauthResponse
+	if err := json.NewDecoder(reauthRecorder.Body).Decode(&reauthResponse); err != nil {
+		t.Fatalf("expected reauth response to decode, got error: %v", err)
+	}
+	if reauthResponse.ReauthToken == "" {
+		t.Fatal("expected reauth token to be returned")
+	}
+
+	runRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects/demo-app/runs",
+		strings.NewReader(`{"capsuleRef":"ghcr.io/example/demo:2026.05.01"}`),
+	)
+	runRequest.Header.Set(headerAPIKey, apiKey)
+	runRequest.Header.Set(headerReauthToken, reauthResponse.ReauthToken)
+	runRecorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(runRecorder, runRequest)
+
+	if runRecorder.Code != http.StatusAccepted {
+		t.Fatalf("expected run status %d, got %d", http.StatusAccepted, runRecorder.Code)
+	}
+	if count := queryCount(t, db, "SELECT COUNT(1) FROM audit_logs WHERE event_type = 'run.authorized' AND project_name = 'demo-app'"); count != 1 {
+		t.Fatalf("expected run audit log, got %d rows", count)
 	}
 }
 

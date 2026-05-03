@@ -144,9 +144,9 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	} else {
 		rows := make([][]string, 0, len(jobs))
 		for _, job := range jobs {
-			rows = append(rows, []string{job.ID, job.Status, recentJobPhase(job), job.CreatedAt, job.RepoURL, recentJobError(job)})
+			rows = append(rows, []string{job.ID, job.Status, recentJobPhase(job), job.CreatedAt, recentJobSource(job), recentJobError(job)})
 		}
-		output.WriteTable(cmd.stdout, []string{"Job", "Status", "Phase", "Created", "Repo", "Error"}, rows)
+		output.WriteTable(cmd.stdout, []string{"Job", "Status", "Phase", "Created", "Source", "Error"}, rows)
 	}
 
 	_, _ = fmt.Fprintln(cmd.stdout)
@@ -162,10 +162,11 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 			deployment.ID,
 			deployment.Status,
 			deployment.CreatedAt,
+			deploymentSource(deployment),
 			deployment.ImageRef,
 		})
 	}
-	output.WriteTable(cmd.stdout, []string{"Deployment", "Status", "Created", "Image"}, rows)
+	output.WriteTable(cmd.stdout, []string{"Deployment", "Status", "Created", "Source", "Image"}, rows)
 	return nil
 }
 
@@ -204,6 +205,17 @@ func recentJobPhase(job brainapi.Job) string {
 	return job.Phase
 }
 
+func recentJobSource(job brainapi.Job) string {
+	if strings.TrimSpace(job.SourceRef) != "" {
+		return job.SourceRef
+	}
+	if strings.TrimSpace(job.RepoURL) != "" {
+		return job.RepoURL
+	}
+
+	return "-"
+}
+
 func runtimeAppSummary(app *brainapi.ProjectRuntimeApp) string {
 	if app == nil {
 		return "-"
@@ -223,4 +235,12 @@ func runtimeNetworkSummary(network *brainapi.ProjectRuntimeNetwork) string {
 		return "-"
 	}
 	return network.Name
+}
+
+func deploymentSource(deployment brainapi.Deployment) string {
+	if strings.TrimSpace(deployment.SourceRef) != "" {
+		return deployment.SourceRef
+	}
+
+	return "-"
 }

@@ -83,6 +83,46 @@ func TestCreateDeploymentReturnsStructuredAPIError(t *testing.T) {
 	}
 }
 
+func TestCreateRunPostsCapsuleRef(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Method; got != http.MethodPost {
+			t.Fatalf("expected method %q, got %q", http.MethodPost, got)
+		}
+		if got := r.URL.Path; got != "/v1/projects/demo-app/runs" {
+			t.Fatalf("expected path %q, got %q", "/v1/projects/demo-app/runs", got)
+		}
+		var request brainapi.CreateRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("expected request to decode, got error: %v", err)
+		}
+		if request.CapsuleRef != "ghcr.io/example/demo:2026.05.01" {
+			t.Fatalf("expected capsule ref %q, got %q", "ghcr.io/example/demo:2026.05.01", request.CapsuleRef)
+		}
+		_ = json.NewEncoder(w).Encode(brainapi.Job{
+			ID:         "job_run",
+			Status:     "queued",
+			SourceType: brainapi.JobSourceTypeImage,
+			SourceRef:  request.CapsuleRef,
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	job, err := client.CreateRun(context.Background(), "demo-app", brainapi.CreateRunRequest{
+		CapsuleRef: "ghcr.io/example/demo:2026.05.01",
+	})
+	if err != nil {
+		t.Fatalf("expected run request to succeed, got error: %v", err)
+	}
+	if job.ID != "job_run" || job.SourceType != brainapi.JobSourceTypeImage {
+		t.Fatalf("expected run job response to decode, got %#v", job)
+	}
+}
+
 func TestBootstrapDecodesResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(brainapi.BootstrapAuthResponse{

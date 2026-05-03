@@ -74,6 +74,64 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	}
 }
 
+func TestManagedDeploymentProcessorRunsImageJobWithoutRepoBuild(t *testing.T) {
+	db := newTestDB(t)
+	dataDir := t.TempDir()
+	sourceProcessor := sourceDispatchProcessor{
+		repo: processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+			t.Fatalf("expected image job %q not to call repo builder", currentJob.ID)
+			return deploymentResult{}, nil
+		}),
+		image: newImageProcessor(dataDir),
+	}
+	provisioner := &fakeProjectProvisioner{}
+	processor := newManagedDeploymentProcessor(db, sourceProcessor, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
+
+	result, err := processor.Process(context.Background(), job{
+		ID:          "job-image",
+		ProjectName: "demo-app",
+		SourceType:  jobSourceTypeImage,
+		SourceRef:   "ghcr.io/example/demo:2026.05.01",
+	})
+	if err != nil {
+		t.Fatalf("expected image deployment processing to succeed, got error: %v", err)
+	}
+
+	if result.ImageRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected image ref %q, got %q", "ghcr.io/example/demo:2026.05.01", result.ImageRef)
+	}
+	if result.LogPath != jobLogPath(dataDir, "job-image") {
+		t.Fatalf("expected managed job log path %q, got %q", jobLogPath(dataDir, "job-image"), result.LogPath)
+	}
+	if provisioner.appImageRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected provisioned app image ref %q, got %q", "ghcr.io/example/demo:2026.05.01", provisioner.appImageRef)
+	}
+	if provisioner.readyCalls != 1 {
+		t.Fatalf("expected readiness to be checked once, got %d", provisioner.readyCalls)
+	}
+	if got := provisioner.sequence; len(got) != 3 || got[0] != "pocketbase" || got[1] != "app" || got[2] != "ready" {
+		t.Fatalf("expected provisioner order [pocketbase app ready], got %#v", got)
+	}
+
+	logBytes, err := os.ReadFile(result.LogPath)
+	if err != nil {
+		t.Fatalf("expected image job log to be readable, got error: %v", err)
+	}
+	logs := string(logBytes)
+	for _, fragment := range []string{
+		"lifecycle: using prebuilt image ghcr.io/example/demo:2026.05.01",
+		"lifecycle: image ready",
+		"lifecycle: provisioning PocketBase",
+		"lifecycle: starting app container",
+		"lifecycle: waiting for app readiness",
+		"lifecycle: app ready",
+	} {
+		if !strings.Contains(logs, fragment) {
+			t.Fatalf("expected image job logs to contain %q, got %q", fragment, logs)
+		}
+	}
+}
+
 func TestManagedDeploymentProcessorReturnsBuildFailureWithoutProvisioning(t *testing.T) {
 	db := newTestDB(t)
 	builder := processorFunc(func(_ context.Context, _ job) (deploymentResult, error) {

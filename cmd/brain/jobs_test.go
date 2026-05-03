@@ -43,6 +43,12 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	if job.RepoURL != "https://example.com/demo.git" {
 		t.Fatalf("expected repo URL %q, got %q", "https://example.com/demo.git", job.RepoURL)
 	}
+	if job.SourceType != jobSourceTypeRepo {
+		t.Fatalf("expected source type %q, got %q", jobSourceTypeRepo, job.SourceType)
+	}
+	if job.SourceRef != "https://example.com/demo.git" {
+		t.Fatalf("expected source ref %q, got %q", "https://example.com/demo.git", job.SourceRef)
+	}
 	if job.Status != jobStatusQueued {
 		t.Fatalf("expected status %q, got %q", jobStatusQueued, job.Status)
 	}
@@ -57,6 +63,75 @@ func TestCreateDeploymentReturnsQueuedJob(t *testing.T) {
 	}
 	if persistedJob.ID != job.ID {
 		t.Fatalf("expected persisted job ID %q, got %q", job.ID, persistedJob.ID)
+	}
+	if persistedJob.SourceType != jobSourceTypeRepo {
+		t.Fatalf("expected persisted source type %q, got %q", jobSourceTypeRepo, persistedJob.SourceType)
+	}
+	if persistedJob.SourceRef != "https://example.com/demo.git" {
+		t.Fatalf("expected persisted source ref %q, got %q", "https://example.com/demo.git", persistedJob.SourceRef)
+	}
+	if len(enqueuer.jobIDs) != 1 {
+		t.Fatalf("expected 1 enqueued job, got %d", len(enqueuer.jobIDs))
+	}
+	if enqueuer.jobIDs[0] != job.ID {
+		t.Fatalf("expected enqueued job ID %q, got %q", job.ID, enqueuer.jobIDs[0])
+	}
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusDeploying {
+		t.Fatalf("expected project status %q, got %q", projectStatusDeploying, got)
+	}
+}
+
+func TestCreateRunReturnsQueuedImageJob(t *testing.T) {
+	enqueuer := &recordingEnqueuer{}
+	handler, db := newTestHandler(t, enqueuer)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects/demo-app/runs",
+		strings.NewReader(`{"capsuleRef":"ghcr.io/example/demo:2026.05.01"}`),
+	)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d with body %q", http.StatusAccepted, recorder.Code, recorder.Body.String())
+	}
+
+	var job job
+	if err := json.NewDecoder(recorder.Body).Decode(&job); err != nil {
+		t.Fatalf("expected response body to decode, got error: %v", err)
+	}
+	if got := recorder.Header().Get("Location"); got != jobPath(job.ID) {
+		t.Fatalf("expected Location header %q, got %q", jobPath(job.ID), got)
+	}
+	if job.ProjectName != "demo-app" {
+		t.Fatalf("expected project name %q, got %q", "demo-app", job.ProjectName)
+	}
+	if job.RepoURL != "" {
+		t.Fatalf("expected repo URL to be empty for image job, got %q", job.RepoURL)
+	}
+	if job.SourceType != jobSourceTypeImage {
+		t.Fatalf("expected source type %q, got %q", jobSourceTypeImage, job.SourceType)
+	}
+	if job.SourceRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected source ref %q, got %q", "ghcr.io/example/demo:2026.05.01", job.SourceRef)
+	}
+	if job.Status != jobStatusQueued {
+		t.Fatalf("expected status %q, got %q", jobStatusQueued, job.Status)
+	}
+	assertJobLinks(t, job)
+
+	persistedJob, err := getJob(db, job.ID)
+	if err != nil {
+		t.Fatalf("expected job to persist, got error: %v", err)
+	}
+	if persistedJob.SourceType != jobSourceTypeImage {
+		t.Fatalf("expected persisted source type %q, got %q", jobSourceTypeImage, persistedJob.SourceType)
+	}
+	if persistedJob.SourceRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected persisted source ref %q, got %q", "ghcr.io/example/demo:2026.05.01", persistedJob.SourceRef)
 	}
 	if len(enqueuer.jobIDs) != 1 {
 		t.Fatalf("expected 1 enqueued job, got %d", len(enqueuer.jobIDs))
@@ -112,6 +187,96 @@ func TestCreateDeploymentRejectsDuplicateActiveJob(t *testing.T) {
 	count := queryCount(t, db, `SELECT COUNT(1) FROM jobs WHERE project_name = ?`, "demo-app")
 	if count != 1 {
 		t.Fatalf("expected only the active job to remain, got %d jobs", count)
+	}
+}
+
+func TestCreateRunRejectsDuplicateActiveJob(t *testing.T) {
+	enqueuer := &recordingEnqueuer{}
+	handler, db := newTestHandler(t, enqueuer)
+
+	activeJob, err := createQueuedJob(db, "demo-app", "https://example.com/first.git")
+	if err != nil {
+		t.Fatalf("expected active job seed to succeed, got error: %v", err)
+	}
+	if _, err := db.Exec("UPDATE jobs SET status = ? WHERE id = ?", jobStatusRunning, activeJob.ID); err != nil {
+		t.Fatalf("expected active job update to succeed, got error: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects/demo-app/runs",
+		strings.NewReader(`{"capsuleRef":"ghcr.io/example/demo:next"}`),
+	)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d with body %q", http.StatusConflict, recorder.Code, recorder.Body.String())
+	}
+
+	var response apiError
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("expected response body to decode, got error: %v", err)
+	}
+	if response.Code != errorCodeActiveDeploymentExists {
+		t.Fatalf("expected error code %q, got %q", errorCodeActiveDeploymentExists, response.Code)
+	}
+	if !strings.Contains(response.Message, activeJob.ID) {
+		t.Fatalf("expected error message to include active job ID %q, got %q", activeJob.ID, response.Message)
+	}
+	if len(enqueuer.jobIDs) != 0 {
+		t.Fatalf("expected no enqueued jobs, got %d", len(enqueuer.jobIDs))
+	}
+}
+
+func TestCreateRunValidatesCapsuleRef(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name:        "empty",
+			body:        `{"capsuleRef":""}`,
+			wantCode:    errorCodeCapsuleRefRequired,
+			wantMessage: "capsuleRef is required",
+		},
+		{
+			name:        "space",
+			body:        `{"capsuleRef":"ghcr.io/example/demo:bad ref"}`,
+			wantCode:    errorCodeInvalidCapsuleRef,
+			wantMessage: "capsuleRef must not contain whitespace or control characters",
+		},
+		{
+			name:        "control",
+			body:        "{\"capsuleRef\":\"ghcr.io/example/demo:bad\\u0007ref\"}",
+			wantCode:    errorCodeInvalidCapsuleRef,
+			wantMessage: "capsuleRef must not contain whitespace or control characters",
+		},
+		{
+			name:        "too long",
+			body:        `{"capsuleRef":"` + strings.Repeat("a", maxCapsuleRefLength+1) + `"}`,
+			wantCode:    errorCodeInvalidCapsuleRef,
+			wantMessage: "capsuleRef must be at most 512 characters",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			handler, _ := newTestHandler(t, noopEnqueuer{})
+
+			request := httptest.NewRequest(http.MethodPost, "/v1/projects/demo-app/runs", strings.NewReader(test.body))
+			request.Header.Set("X-API-Key", "test-key")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			assertAPIError(t, recorder, http.StatusBadRequest, test.wantCode, test.wantMessage)
+		})
 	}
 }
 

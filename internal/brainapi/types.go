@@ -1,6 +1,10 @@
 package brainapi
 
-const JobTypeDeployment = "deployment"
+const (
+	JobTypeDeployment  = "deployment"
+	JobSourceTypeRepo  = "repo"
+	JobSourceTypeImage = "image"
+)
 
 type APIError struct {
 	Code    string `json:"code"`
@@ -37,6 +41,8 @@ type Deployment struct {
 	ID                      string `json:"id"`
 	ProjectName             string `json:"projectName"`
 	ImageRef                string `json:"imageRef"`
+	SourceType              string `json:"sourceType,omitempty"`
+	SourceRef               string `json:"sourceRef,omitempty"`
 	AppContainerName        string `json:"appContainerName"`
 	NetworkName             string `json:"networkName"`
 	PocketBaseContainerName string `json:"pocketBaseContainerName"`
@@ -56,6 +62,8 @@ type Job struct {
 	Type             string   `json:"type"`
 	ProjectName      string   `json:"projectName"`
 	RepoURL          string   `json:"repoUrl"`
+	SourceType       string   `json:"sourceType,omitempty"`
+	SourceRef        string   `json:"sourceRef,omitempty"`
 	Status           string   `json:"status"`
 	Phase            string   `json:"phase,omitempty"`
 	LogPath          string   `json:"logPath,omitempty"`
@@ -70,6 +78,10 @@ type Job struct {
 
 type CreateDeploymentRequest struct {
 	RepoURL string `json:"repoUrl"`
+}
+
+type CreateRunRequest struct {
+	CapsuleRef string `json:"capsuleRef"`
 }
 
 type ProjectEnvironmentEntry struct {

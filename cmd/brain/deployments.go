@@ -77,7 +77,7 @@ func handleGetProjectDeployment(db *sql.DB) http.HandlerFunc {
 
 func listProjectDeployments(db *sql.DB, projectName string, limit int) ([]deploymentRecord, error) {
 	rows, err := db.Query(
-		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
+		`SELECT id, project_name, image_ref, source_type, source_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
 		 FROM deployments
 		 WHERE project_name = ?
 		 ORDER BY created_at DESC
@@ -109,7 +109,7 @@ func listProjectDeployments(db *sql.DB, projectName string, limit int) ([]deploy
 func getProjectDeployment(db *sql.DB, projectName string, deploymentID string) (deploymentRecord, error) {
 	return scanDeploymentRecord(
 		db.QueryRow(
-			`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
+			`SELECT id, project_name, image_ref, source_type, source_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
 			 FROM deployments
 			 WHERE project_name = ? AND id = ?`,
 			projectName,
@@ -124,11 +124,15 @@ type deploymentRecordScanner interface {
 
 func scanDeploymentRecord(scanner deploymentRecordScanner) (deploymentRecord, error) {
 	var deployment deploymentRecord
+	var sourceType sql.NullString
+	var sourceRef sql.NullString
 	var configRevisionID sql.NullString
 	if err := scanner.Scan(
 		&deployment.ID,
 		&deployment.ProjectName,
 		&deployment.ImageRef,
+		&sourceType,
+		&sourceRef,
 		&deployment.AppContainerName,
 		&deployment.NetworkName,
 		&deployment.PocketBaseContainerName,
@@ -137,6 +141,12 @@ func scanDeploymentRecord(scanner deploymentRecordScanner) (deploymentRecord, er
 		&configRevisionID,
 	); err != nil {
 		return deployment, err
+	}
+	if sourceType.Valid {
+		deployment.SourceType = sourceType.String
+	}
+	if sourceRef.Valid {
+		deployment.SourceRef = sourceRef.String
 	}
 	if configRevisionID.Valid {
 		deployment.ConfigRevisionID = configRevisionID.String

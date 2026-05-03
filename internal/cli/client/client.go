@@ -432,6 +432,41 @@ func (client *Client) CreateDeployment(ctx context.Context, projectName string, 
 	return job, nil
 }
 
+func (client *Client) CreateRun(ctx context.Context, projectName string, requestBody brainapi.CreateRunRequest) (brainapi.Job, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.Job{}, fmt.Errorf("marshal run request: %w", err)
+	}
+
+	request, err := client.newRequest(
+		ctx,
+		http.MethodPost,
+		"/v1/projects/"+url.PathEscape(strings.TrimSpace(projectName))+"/runs",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return brainapi.Job{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.Job{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.Job{}, err
+	}
+
+	var job brainapi.Job
+	if err := json.NewDecoder(response.Body).Decode(&job); err != nil {
+		return brainapi.Job{}, fmt.Errorf("decode run response: %w", err)
+	}
+
+	return job, nil
+}
+
 func (client *Client) GetJob(ctx context.Context, jobID string) (brainapi.Job, error) {
 	responseBody, err := client.getJSON(ctx, brainapi.JobPath(strings.TrimSpace(jobID)))
 	if err != nil {
