@@ -24,7 +24,8 @@ Recommended command flow:
 3. `make podman-vm-bootstrap-compose`
 4. `make podman-vm-up`
 5. `make podman-vm-smoke`
-6. `make podman-vm-down`
+6. `make podman-vm-capsule-smoke`
+7. `make podman-vm-down`
 
 What these targets do:
 
@@ -33,7 +34,8 @@ What these targets do:
 - `podman-vm-bootstrap-compose` installs `podman-compose` inside the Podman machine if no compose provider is present yet.
 - `podman-vm-up` runs the canonical `podman-compose.yml` inside the VM.
 - `podman-vm-up` rebuilds and force-recreates the Podman stack so code changes in Brain actually land in the running control-plane container between iterations.
-- `podman-vm-smoke` runs the shared Linux Podman smoke suite inside the VM.
+- `podman-vm-smoke` runs the transitional source-build Podman smoke suite inside the VM.
+- `podman-vm-capsule-smoke` runs the image-first capsule smoke suite from the host against the VM-exposed Traefik port.
 - The VM startup helper also precreates `brain_data/projects`, `brain_data/traefik/dynamic`, and `brain_data/job-logs` so Traefik's file provider and Brain's local state paths exist before containers start.
 - BuildKit state lives under `brain_data/buildkit`, and the local registry lives under `brain_data/registry`, so repeated `podman-vm-up` runs can reuse builder and image cache instead of pulling every base image again.
 
@@ -48,14 +50,15 @@ Common commands:
 
 1. `./pm up`
 2. `./pm smoke`
-3. `./pm compose ps`
-4. `./pm compose logs brain`
-5. `./pm podman ps -a`
-6. `./pm logs <CONTAINER_NAME>`
-7. `./pm api GET /v1/ping`
-8. `./pm api GET /v1/projects/demo-app/runtime`
-9. `./pm app demo-app /`
-10. `./pm down`
+3. `./pm capsule-smoke`
+4. `./pm compose ps`
+5. `./pm compose logs brain`
+6. `./pm podman ps -a`
+7. `./pm logs <CONTAINER_NAME>`
+8. `./pm api GET /v1/ping`
+9. `./pm api GET /v1/projects/demo-app/runtime`
+10. `./pm app demo-app /`
+11. `./pm down`
 
 The HTTP helpers curl through the forwarded Traefik port on the Mac host and inject the required `Host:` headers. `./pm api` also injects the local dev API key.
 
@@ -72,13 +75,13 @@ If additional generated directories appear later, add them to `.podman-machine-s
 
 ### Hostname Ergonomics
 
-The required smoke path is `curl`-first and uses explicit `Host:` headers, so browser DNS is not part of the baseline requirement.
+The source-build smoke path is `curl`-first and uses explicit `Host:` headers, so browser DNS is not part of that baseline requirement.
 
-If you want browser testing on macOS, optional `/etc/hosts` entries like the following are enough for one Brain route and one demo project route:
+The capsule smoke path uses the real `ovek` CLI, so `brain.localhost` must resolve on the host running the script. If your resolver does not already map `.localhost` names to loopback, add entries like the following:
 
-1. `echo '127.0.0.1 brain.localhost demo-app.localhost' | sudo tee -a /etc/hosts`
+1. `echo '127.0.0.1 brain.localhost demo-app.localhost signup-demo.localhost' | sudo tee -a /etc/hosts`
 
-This is convenience only. The smoke harness does not depend on it.
+The capsule smoke still checks routed app reachability with an explicit `Host:` header; the hostname requirement is for CLI access to Brain.
 
 ### Compose Provider Note
 
@@ -93,11 +96,14 @@ Use the same compose file and the same smoke runner on a Linux host:
 1. `sudo systemctl start podman.socket`
 2. `make podman-linux-up`
 3. `make podman-linux-smoke`
-4. `make podman-linux-down`
+4. `make podman-linux-capsule-smoke`
+5. `make podman-linux-down`
 
 This is the same path used by CI and is the baseline proof that the Linux Podman contract still works.
 
-## What The Smoke Suite Verifies
+## What The Smoke Suites Verify
+
+`scripts/podman-smoke.sh` covers the transitional source-build path:
 
 - Brain starts and answers at `brain.localhost`
 - first deploy succeeds
@@ -109,9 +115,17 @@ This is the same path used by CI and is the baseline proof that the Linux Podman
 - Brain restart preserves the promoted runtime
 - cleanup removes current runtime state and returns the project to `idle`
 
+`scripts/podman-capsule-smoke.sh` covers the image-first capsule path:
+
+- builds or reuses `./bin/ovek`
+- logs into Brain with an isolated temporary CLI config
+- ensures PocketBase app secrets exist for the signup example
+- runs `ghcr.io/massivemoose/ovek-signup-example:latest` with `ovek run`
+- verifies image-run job logs, runtime logs, routed app reachability, PocketBase status, and cleanup
+
 Current limits:
 
-- the automated smoke suite checks PocketBase provisioning and reconciliation indirectly through deploy/runtime success, but it does not yet assert application-level data persistence through PocketBase writes
+- the automated smoke suites check PocketBase provisioning and status, but they do not yet assert application-level data persistence through PocketBase record writes
 - SELinux labeling and hardened-host bind-mount checks still need a true Linux follow-up outside the macOS VM lane
 
 Current Podman baseline note:

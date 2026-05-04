@@ -144,17 +144,21 @@ Developer entrypoints:
 - `make podman-machine-rootful`
 - `make podman-vm-up`
 - `make podman-vm-smoke`
+- `make podman-vm-capsule-smoke`
 - `make podman-vm-down`
 - `make podman-linux-up`
 - `make podman-linux-smoke`
+- `make podman-linux-capsule-smoke`
 - `make podman-linux-down`
 
-The shared automated smoke path is `scripts/podman-smoke.sh`. It validates first deploy, redeploy, routed app reachability, runtime logs, Brain restart reconciliation, and cleanup.
+The transitional source-build smoke path is `scripts/podman-smoke.sh`. It validates first deploy, redeploy, routed app reachability, runtime logs, Brain restart reconciliation, and cleanup for `ovek deploy`.
+
+The image-first capsule smoke path is `scripts/podman-capsule-smoke.sh`. It validates `ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`, job logs, runtime logs, routed app reachability, PocketBase sidecar status, and cleanup. Override the image with `OVEK_CAPSULE_IMAGE=<image-ref>` when testing another public capsule.
 
 See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM workflow, optional hostname setup, and the real-Linux acceptance path.
 See [docs/registry-model.md](docs/registry-model.md) for the registry host split that makes the Podman topology work.
 See [docs/capsule-runs.md](docs/capsule-runs.md) for the image-first `ovek run` path.
-See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for the transitional source-built trial deploy of the PocketBase-backed signup example.
+See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for the PocketBase-backed signup example.
 
 ## Managed Registry Artifact Cleanup
 

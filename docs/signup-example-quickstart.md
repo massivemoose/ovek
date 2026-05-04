@@ -1,6 +1,6 @@
 # Signup Example Quickstart
 
-This is the transitional trial path for deploying a small Go app from source with Ovek. The primary runtime direction is now image-first `ovek run`; see [capsule-runs.md](capsule-runs.md) for building, pushing, and running prebuilt images.
+This is the image-first trial path for running a small Go app capsule with Ovek. The app image should be built outside the Ovek runtime host, published to GHCR, and run with `ovek run`.
 
 The example app writes email signups to the per-project PocketBase sidecar that Ovek manages.
 
@@ -8,6 +8,12 @@ Example repo:
 
 ```text
 https://github.com/massivemoose/ovek-signup-example
+```
+
+Default public capsule image:
+
+```text
+ghcr.io/massivemoose/ovek-signup-example:latest
 ```
 
 ## Build Ovek
@@ -33,7 +39,7 @@ On Linux or a VPS with Podman:
 1. `sudo systemctl start podman.socket`
 2. `make podman-linux-up`
 
-Expected: Brain, Traefik, BuildKit, and the local registry are running.
+Expected: Brain, Traefik, BuildKit, and the local registry are running. The image-first path does not use BuildKit for the app run, but the local stack still includes it for the transitional source-build path.
 
 ## Configure Local Browser Hostnames
 
@@ -69,13 +75,21 @@ If you are driving a VPS through the SSH tunnel from your laptop instead, use:
 
 Expected: PocketBase is running, initialized is `yes`, and app secrets are configured. Ovek stores the generated PocketBase app credentials as project env/secrets for the next deploy.
 
-## Deploy The Example
+## Run The Published Capsule
+
+1. `./bin/ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`
+
+Expected: the command streams run logs and exits successfully after the capsule image is pulled, promoted, and ready.
+
+The first run can take a while while Podman pulls the public image and the PocketBase image. During that time, `ovek status signup-demo` should show the active run phase.
+
+## Transitional Source Build
+
+If you intentionally want Ovek to build the app on the runtime host, use the transitional source-build path:
 
 1. `./bin/ovek deploy signup-demo https://github.com/massivemoose/ovek-signup-example`
 
-Expected: the command streams deploy logs and exits successfully after the app is built, promoted, and ready.
-
-The first deploy can take a while while BuildKit and Railpack pull base images. During that time, `ovek status signup-demo` should show the active deploy phase.
+Expected: Brain clones the repo, builds it with Railpack/BuildKit, pushes the result to the local registry, then runs the built image through the same runtime path.
 
 ## Open The App
 
@@ -132,11 +146,11 @@ Check PocketBase status:
 
 1. `./bin/ovek pb status signup-demo`
 
-Follow deploy logs:
+Follow runtime logs:
 
 1. `./bin/ovek logs signup-demo`
 
-Show deploy logs without following:
+Show runtime logs without following:
 
 1. `./bin/ovek logs signup-demo --no-follow`
 
@@ -157,8 +171,8 @@ If `ovek pb tunnel` reports that port `8090` is already in use:
 
 1. `./bin/ovek pb tunnel signup-demo --listen 127.0.0.1:8091`
 
-If a deploy appears stuck, rerun:
+If a run or deploy appears stuck, rerun:
 
 1. `./bin/ovek status signup-demo`
 
-Success condition: the recent job has a phase, such as `building image` or `waiting for readiness`, or it eventually moves to `succeeded` or `failed`.
+Success condition: the recent job has a phase, such as `preparing image`, `building image`, or `waiting for readiness`, or it eventually moves to `succeeded` or `failed`.

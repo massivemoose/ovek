@@ -39,6 +39,35 @@ Run the pushed image:
 
 Success: Ovek records the job source as `image`, stores the image ref as the deployment image, and skips git/Railpack/BuildKit entirely.
 
+## Canonical Signup Example Capsule
+
+The canonical public example is:
+
+```text
+https://github.com/massivemoose/ovek-signup-example
+```
+
+Publish it from the example repo with a public GHCR image tag:
+
+1. `docker login ghcr.io`
+2. `docker buildx build --platform linux/amd64 -t ghcr.io/massivemoose/ovek-signup-example:<tag> -t ghcr.io/massivemoose/ovek-signup-example:latest --push .`
+3. `docker buildx imagetools inspect ghcr.io/massivemoose/ovek-signup-example:<tag>`
+
+Success: the image is visible as a public GHCR package and can be pulled without registry credentials.
+
+The capsule smoke and quickstart default to:
+
+```text
+ghcr.io/massivemoose/ovek-signup-example:latest
+```
+
+The signup example creates its PocketBase collection on app startup, so initialize app-facing PocketBase secrets before the first run:
+
+1. `./bin/ovek pb init signup-demo --app-secrets`
+2. `./bin/ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`
+
+Success: the image is pulled from GHCR, Ovek injects the captured PocketBase app credentials, and the app becomes reachable at `signup-demo.localhost`.
+
 ## Validate A Run
 
 Check status:

@@ -20,6 +20,7 @@ Stack lifecycle:
   ./pm bootstrap-compose       Install a compose provider in the VM
   ./pm up                      Build/recreate the Podman VM stack
   ./pm smoke                   Run the Podman VM smoke suite
+  ./pm capsule-smoke           Run the Podman VM capsule smoke suite
   ./pm down                    Stop/remove the Podman VM stack
 
 VM/container inspection:
@@ -164,6 +165,9 @@ case "${command}" in
 		;;
 	smoke)
 		run_host make podman-vm-smoke
+		;;
+	capsule-smoke)
+		run_host make podman-vm-capsule-smoke
 		;;
 	down)
 		run_host make podman-vm-down
