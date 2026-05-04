@@ -64,7 +64,7 @@ func TestPocketBaseInitSendsRequestAndPrintsStatus(t *testing.T) {
 		"admin@example.com",
 		"Revision",
 		"rev_pb",
-		"Environment updated. Run 'ovek deploy <project> <repoURL>' to apply changes.",
+		"Environment updated. Run 'ovek run <project> <capsule-ref>' to apply changes.",
 	} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("expected output to contain %q, got %q", fragment, output)
