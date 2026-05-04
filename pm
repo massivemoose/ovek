@@ -21,6 +21,9 @@ Stack lifecycle:
   ./pm up                      Build/recreate the Podman VM stack
   ./pm smoke                   Run the Podman VM smoke suite
   ./pm capsule-smoke           Run the Podman VM capsule smoke suite
+  ./pm builder-up              Build/recreate the legacy builder stack
+  ./pm builder-smoke           Run the legacy source-build smoke suite
+  ./pm builder-down            Stop/remove the legacy builder stack
   ./pm down                    Stop/remove the Podman VM stack
 
 VM/container inspection:
@@ -168,6 +171,15 @@ case "${command}" in
 		;;
 	capsule-smoke)
 		run_host make podman-vm-capsule-smoke
+		;;
+	builder-up)
+		run_host make podman-vm-builder-up
+		;;
+	builder-smoke)
+		run_host make podman-vm-builder-smoke
+		;;
+	builder-down)
+		run_host make podman-vm-builder-down
 		;;
 	down)
 		run_host make podman-vm-down

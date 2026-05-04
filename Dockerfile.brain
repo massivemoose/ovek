@@ -9,27 +9,12 @@ COPY cmd/brain ./cmd/brain
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -o /out/brain ./cmd/brain
 
-FROM moby/buildkit:v0.28.1 AS buildkitcli
-
 FROM debian:bookworm-slim
 
-ARG RAILPACK_VERSION=0.23.0
-ARG TARGETARCH
-
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git \
+ && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-RUN case "${TARGETARCH}" in \
-      amd64) railpack_arch="x86_64" ;; \
-      arm64) railpack_arch="arm64" ;; \
-      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
- && curl -fsSL -o /tmp/railpack.tar.gz "https://github.com/railwayapp/railpack/releases/download/v${RAILPACK_VERSION}/railpack-v${RAILPACK_VERSION}-${railpack_arch}-unknown-linux-musl.tar.gz" \
- && tar -xzf /tmp/railpack.tar.gz -C /usr/local/bin railpack \
- && rm /tmp/railpack.tar.gz
-
-COPY --from=buildkitcli /usr/bin/buildctl /usr/local/bin/buildctl
 COPY --from=build /out/brain /usr/local/bin/brain
 
 EXPOSE 8081
