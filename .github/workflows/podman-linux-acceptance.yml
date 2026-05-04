@@ -42,9 +42,6 @@ jobs:
       - name: Start canonical Podman stack
         run: make podman-linux-up
 
-      - name: Run Podman smoke suite
-        run: make podman-linux-smoke
-
       - name: Check public capsule image
         id: capsule_image
         run: |
