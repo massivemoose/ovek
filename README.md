@@ -1,180 +1,93 @@
 # Ovek
 
-Ovek is a lightweight capsule runtime for your VPS. Build an OCI image locally, in CI, or in a future hosted builder, then run it on your own server with `ovek run <project> <capsule-ref>`.
+Ovek is a lightweight app capsule runtime for your VPS. Build an OCI image outside the server, publish it to a registry, then run it on your own machine with:
 
-## Runtime And Deploy Flows
+```text
+ovek run <project> <capsule-ref>
+```
 
-The primary runtime path is image-first:
+Brain is the small control plane that runs on the VPS. It pulls capsule images through Podman, starts app containers, creates per-project PocketBase sidecars, manages routing through Traefik, injects project env/secrets, waits for readiness, streams logs, and cleans up managed runtime resources.
 
-1. build and push an OCI image outside the Ovek runtime host
-2. `ovek run <project> <capsule-ref>`
-3. Brain records an image-sourced deployment job
-4. the runtime pulls that image
-5. Brain starts the managed app and PocketBase containers
-6. readiness, promotion, routing, status, logs, and cleanup use the normal runtime pipeline
+## Capsule Runtime Flow
 
-See [docs/capsule-runs.md](docs/capsule-runs.md) for local and CI image build/push examples, `ovek run`, and validation commands.
+1. Build and publish an OCI image from your laptop, CI, or a hosted builder.
+2. Initialize any project sidecars or secrets, such as `ovek pb init <project> --app-secrets`.
+3. Run the capsule with `ovek run <project> <capsule-ref>`.
+4. Ovek pulls the image, starts the app plus sidecars, waits for readiness, and routes `<project>.localhost` to the app.
+5. Use `ovek status`, `ovek logs`, and `ovek pb status` to inspect the running project.
 
-The source-build path still exists as a transitional/dev convenience:
+Capsule v1 is intentionally simple:
 
-1. `ovek deploy <project> <repoURL>`
-2. `git clone`
-3. `railpack prepare`
-4. `buildctl build`
-5. push the built image to the local registry
-6. pull that registry-backed image into the runtime
-7. start the managed app and PocketBase containers
+- listen on the injected `PORT`, currently `8080`
+- use `POCKETBASE_URL` when the app needs the managed PocketBase sidecar
+- read project env/secrets from normal environment variables
+- become ready by accepting TCP connections on `PORT`
 
-The older `railpack build --output` plus `docker import` path is no longer the active source-build flow.
+## Quickstart
 
-## Local Dev Topology
+Build the CLI:
 
-The local Compose stack includes:
+1. `mkdir -p ./bin`
+2. `go build -o ./bin/ovek ./cmd/ovek`
 
-- `brain`: the Brain API and deploy worker
-- `buildkitd`: the standalone BuildKit daemon Brain talks to through `buildctl`
-- `registry`: the local registry used as the build/runtime handoff
-- `traefik`: the edge router for `brain.localhost` and deployed apps at `<project>.localhost`
+Start the Linux-first Podman stack on macOS with Podman Machine:
 
-Brain creates tenant app containers and per-project PocketBase sidecars dynamically through the selected runtime engine. Those app containers are not part of the static Compose file.
+1. `make podman-machine-init`
+2. `make podman-machine-rootful`
+3. `make podman-vm-bootstrap-compose`
+4. `make podman-vm-up`
 
-Traefik no longer watches container labels directly. Brain now owns the routing source of truth by writing dynamic file-provider config under `TRAEFIK_DYNAMIC_CONFIG_DIR`.
+Or start it on Linux:
 
-Current project runtime reads now include:
+1. `sudo systemctl start podman.socket`
+2. `make podman-linux-up`
 
-- `GET /v1/projects/{projectName}/runtime`
-- `GET /v1/projects/{projectName}/runtime/logs`
+Authenticate the CLI against the local Brain route:
 
-## Registry And Builder Config
+1. `./bin/ovek auth login --profile local --host http://brain.localhost --api-key dev-brain-key`
+2. `./bin/ovek auth status`
 
-Brain currently supports these registry- and builder-related settings:
+Run the canonical signup capsule:
 
-- `RUNTIME_ENGINE`
-  - runtime engine Brain uses for managed app and PocketBase lifecycle
-  - supported values: `docker`, `podman`
-  - local default: `docker`
-- `RUNTIME_HOST`
-  - optional runtime API socket/host override
-  - Podman default when `RUNTIME_ENGINE=podman`: `unix:///run/podman/podman.sock`
-- `BUILDKIT_HOST`
-  - BuildKit endpoint used by `railpack prepare` and `buildctl`
-  - local default: `docker-container://buildkit`
-- `BUILD_REGISTRY_PUBLISH_HOST`
-  - registry host written into the builder-side pushed image ref
-  - local default: `host.docker.internal:5001`
-- `RUNTIME_REGISTRY_HOST`
-  - registry host stored in Brain state and used for runtime pulls
-  - local default: `localhost:5001`
-- `REGISTRY_API_BASE_URL`
-  - Brain-internal registry API endpoint used for managed artifact cleanup
-  - local default: `http://registry:5000`
-- `RAILPACK_FRONTEND_IMAGE`
-  - Railpack frontend image passed to `buildctl`
-  - local default: `ghcr.io/railwayapp/railpack-frontend`
-- `REGISTRY_INSECURE`
-  - enables insecure-registry push behavior for the local registry path
-  - local default: `true`
-- `TRAEFIK_DYNAMIC_CONFIG_DIR`
-  - directory where Brain writes Traefik file-provider config
-  - local default: `/var/lib/ovek/traefik/dynamic`
-- `TRAEFIK_BRAIN_SERVICE_URL`
-  - internal Brain URL Traefik should route `brain.localhost` to
-  - local default: `http://brain:8081`
+1. `./bin/ovek pb init signup-demo --app-secrets`
+2. `./bin/ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`
+3. `./bin/ovek status signup-demo`
+4. `./bin/ovek logs signup-demo --no-follow`
 
-### Why Local Dev Uses Two Registry Hosts
+Open the app:
 
-Local Docker Desktop development currently uses an intentional split:
+```text
+http://signup-demo.localhost/
+```
 
-- builder publish host: `host.docker.internal:5001`
-- runtime pull host: `localhost:5001`
+See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for the full app capsule walkthrough.
 
-This hides a Docker Desktop reachability mismatch behind config:
+## Podman Development
 
-- the builder path runs inside the Brain container and needs a host name that resolves back to the host-published registry port
-- the runtime image ref stored by Brain should stay usable from the local Docker runtime, where `localhost:5001` is the right pull address
+The local development stack is Podman-first and Linux-first. On macOS, the helper targets run the same Linux stack inside `podman machine`.
 
-If you run Ovek in a different environment, update `BUILD_REGISTRY_PUBLISH_HOST`, `RUNTIME_REGISTRY_HOST`, and `REGISTRY_API_BASE_URL` together so:
+Useful entrypoints:
 
-1. BuildKit can push successfully
-2. the runtime engine can pull successfully
-3. Brain can reach the registry API for managed cleanup
-
-See [docs/registry-model.md](docs/registry-model.md) for the full registry trust model, Docker/Podman host split, and local insecure-registry assumptions.
-
-## Local Compose Defaults
-
-The local `docker-compose.yml` keeps the dev registry behavior explicit:
-
-- `RUNTIME_ENGINE=docker`
-- `BUILD_REGISTRY_PUBLISH_HOST=host.docker.internal:5001`
-- `RUNTIME_REGISTRY_HOST=localhost:5001`
-- `REGISTRY_API_BASE_URL=http://registry:5000`
-- `REGISTRY_INSECURE=true`
-- `TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/ovek/traefik/dynamic`
-- `TRAEFIK_BRAIN_SERVICE_URL=http://brain:8081`
-
-The registry exposes host port `5001`, while the Brain container reaches its API over the internal Compose service name `registry:5000`.
-Traefik reads dynamic config from the shared `brain_data/traefik` volume instead of watching the Docker provider.
-
-## Podman Dev Scaffold
-
-An initial Linux-first Podman stack lives in `podman-compose.yml`.
-
-- It keeps the current BuildKit plus registry build flow.
-- It switches Brain to `RUNTIME_ENGINE=podman`.
-- It expects a rootful Podman service socket by default at `unix:///run/podman/podman.sock`.
-- The default Podman scaffold uses a split registry path:
-  - `BUILD_REGISTRY_PUBLISH_HOST=registry:5000`
-  - `RUNTIME_REGISTRY_HOST=localhost:5001`
-  - `REGISTRY_API_BASE_URL=http://registry:5000`
-- These values stay configurable, but the split reflects the current topology where BuildKit and Brain live inside the compose network while the Podman runtime engine pulls from the VM host side.
-
-## Linux-Faithful Podman Testing
-
-Podman validation now uses two explicit lanes:
-
-- a local macOS lane that runs the canonical Linux Podman stack inside `podman machine`
-- a real Linux acceptance lane in CI using the same `podman-compose.yml`
-
-The compose topology stays Linux-first. macOS uses helper tooling around `podman machine` instead of a second compose file.
-
-Developer entrypoints:
-
-- `make podman-machine-init`
-- `make podman-machine-rootful`
 - `make podman-vm-up`
-- `make podman-vm-smoke`
 - `make podman-vm-capsule-smoke`
 - `make podman-vm-down`
 - `make podman-linux-up`
-- `make podman-linux-smoke`
 - `make podman-linux-capsule-smoke`
 - `make podman-linux-down`
+- `./pm up`
+- `./pm capsule-smoke`
+- `./pm down`
 
-The transitional source-build smoke path is `scripts/podman-smoke.sh`. It validates first deploy, redeploy, routed app reachability, runtime logs, Brain restart reconciliation, and cleanup for `ovek deploy`.
+The primary acceptance path is `scripts/podman-capsule-smoke.sh`. It runs the public signup capsule through `ovek run`, checks job logs, runtime logs, routed app reachability, PocketBase sidecar status, and cleanup.
 
-The image-first capsule smoke path is `scripts/podman-capsule-smoke.sh`. It validates `ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`, job logs, runtime logs, routed app reachability, PocketBase sidecar status, and cleanup. Override the image with `OVEK_CAPSULE_IMAGE=<image-ref>` when testing another public capsule.
+See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM and Linux validation flows.
 
-See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM workflow, optional hostname setup, and the real-Linux acceptance path.
-See [docs/registry-model.md](docs/registry-model.md) for the registry host split that makes the Podman topology work.
-See [docs/capsule-runs.md](docs/capsule-runs.md) for the image-first `ovek run` path.
-See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for the PocketBase-backed signup example.
+## More Docs
 
-## Managed Registry Artifact Cleanup
+- [Capsule runs](docs/capsule-runs.md): capsule expectations, GHCR image publishing, and validation commands.
+- [Project env and secrets](docs/project-env-secrets.md): project configuration captured by the next capsule run.
+- [Podman testing](docs/podman-testing.md): local VM and Linux acceptance workflows.
 
-Brain now treats registry-backed deployment images as managed artifacts.
+## Current MVP Shape
 
-- When a deployment successfully supersedes an older deployment, Brain attempts to delete the superseded image manifest from the local managed registry.
-- When `DELETE /v1/projects/{projectName}/runtime` succeeds, Brain also attempts to delete the project's stored deployment image manifests and managed build log files.
-- Artifact cleanup is best-effort. Deploy success and runtime cleanup success do not get downgraded just because a manifest delete was skipped or failed.
-
-Current scope:
-
-- cleanup only targets refs that match `RUNTIME_REGISTRY_HOST`
-- cleanup removes manifest reachability through the registry API
-- cleanup only removes job log files that live under Brain's managed `job-logs` directory
-- offline blob garbage collection is still out of scope
-
-## Local Validation
-
-Use the command-by-command flow in `.llms/test-plan.md` for the preferred local manual validation path.
+Ovek's public path is app capsules on Podman. The MVP is intentionally focused on prebuilt OCI images plus a tiny VPS runtime.

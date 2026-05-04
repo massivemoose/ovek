@@ -1,8 +1,8 @@
 # Project Environment And Secrets
 
-Ovek stores project environment configuration in immutable revisions. A deployment job captures the latest revision when `ovek run` or `ovek deploy` creates the job, and the managed app container receives that captured revision when it starts.
+Ovek stores project environment configuration in immutable revisions. A run job captures the latest revision when `ovek run` creates the job, and the managed app container receives that captured revision when it starts.
 
-Changes made with `ovek env` or `ovek secret` affect the next run/deployment only. They do not mutate or restart the currently running app.
+Changes made with `ovek env` or `ovek secret` affect the next capsule run only. They do not mutate or restart the currently running app.
 
 ## CLI
 
@@ -58,4 +58,4 @@ Future work should add a first-class re-encryption command.
 
 ## Log Redaction
 
-Brain redacts exact secret values from deployment job logs before writing command output and lifecycle/error lines to persisted job logs. This applies to both source-build deploy jobs and image run jobs. Redaction is best effort and ignores secrets shorter than four characters to avoid noisy accidental replacements.
+Brain redacts exact secret values from run job logs before writing command output and lifecycle/error lines to persisted job logs. Redaction is best effort and ignores secrets shorter than four characters to avoid noisy accidental replacements.

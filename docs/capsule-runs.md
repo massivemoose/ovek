@@ -1,45 +1,35 @@
 # Capsule Runs
 
-Ovek's primary runtime path is image-first: build an OCI image somewhere that is not the tiny VPS, push it to a registry the VPS runtime can pull from, then run it with `ovek run <project> <capsule-ref>`.
+Ovek's primary runtime path is image-first: build an OCI image somewhere other than the tiny VPS, push it to a registry the VPS can pull from, then run it with `ovek run <project> <capsule-ref>`.
 
-Capsule v1 is intentionally simple. It is an OCI image that follows Ovek runtime expectations:
+Capsule v1 is intentionally simple:
 
 - listen on `PORT`, currently injected as `8080`
 - use `POCKETBASE_URL` when the app needs the managed per-project PocketBase sidecar
 - read project env/secrets from normal environment variables
 - become ready by accepting TCP connections on `PORT`
 
-`ovek deploy <project> <repoURL>` still exists, but it is the transitional source-build path. It clones the repo and runs Railpack/BuildKit on the Ovek host, so it is best treated as local dogfood or larger-host convenience rather than the tiny-VPS default.
+## Publish A Capsule
 
-## Local Image Build And Push
+The app repo can use any OCI-compatible build tool. A common path is a `Dockerfile` as the build recipe plus Podman, Buildah, Docker Buildx, or a GitHub Actions workflow as the producer.
 
-From an app repo that has a Dockerfile or another OCI-compatible build setup:
+For GHCR with Podman:
 
-1. `docker build -t localhost:5001/<image-name>:<tag> .`
-2. `docker push localhost:5001/<image-name>:<tag>`
+1. `podman login ghcr.io`
+2. `podman build --format oci --platform linux/amd64 -t ghcr.io/<owner>/<image-name>:<tag> .`
+3. `podman push ghcr.io/<owner>/<image-name>:<tag>`
 
-Success: the image exists in a registry reachable by the runtime engine. In the local Docker and Podman scaffolds, `localhost:5001` is the host-published development registry.
+Success: the image is visible in GHCR and the Ovek host can pull it by reference.
 
-Run it with Ovek:
+For public examples, make the GHCR package public so a fresh Ovek host can pull without registry credentials.
 
-1. `./bin/ovek run <project> localhost:5001/<image-name>:<tag>`
-
-Success: the command streams job logs and exits after the image is pulled, the managed app/PocketBase runtime is provisioned, readiness passes, and the deployment is promoted.
-
-## CI Image Build And Push
-
-For a registry such as GHCR:
-
-1. `docker login ghcr.io`
-2. `docker buildx build --platform linux/amd64 -t ghcr.io/<owner>/<image-name>:<tag> --push .`
-
-Run the pushed image:
+## Run A Capsule
 
 1. `./bin/ovek run <project> ghcr.io/<owner>/<image-name>:<tag>`
 
-Success: Ovek records the job source as `image`, stores the image ref as the deployment image, and skips git/Railpack/BuildKit entirely.
+Success: Ovek records the job source as `image`, stores the image ref as the deployment image, skips host-side app builds, pulls the image through Podman, provisions app and sidecar containers, waits for readiness, promotes the runtime, and routes the project hostname.
 
-## Canonical Signup Example Capsule
+## Canonical Signup Example
 
 The canonical public example is:
 
@@ -47,15 +37,7 @@ The canonical public example is:
 https://github.com/massivemoose/ovek-signup-example
 ```
 
-Publish it from the example repo with a public GHCR image tag:
-
-1. `docker login ghcr.io`
-2. `docker buildx build --platform linux/amd64 -t ghcr.io/massivemoose/ovek-signup-example:<tag> -t ghcr.io/massivemoose/ovek-signup-example:latest --push .`
-3. `docker buildx imagetools inspect ghcr.io/massivemoose/ovek-signup-example:<tag>`
-
-Success: the image is visible as a public GHCR package and can be pulled without registry credentials.
-
-The capsule smoke and quickstart default to:
+The published capsule is:
 
 ```text
 ghcr.io/massivemoose/ovek-signup-example:latest
@@ -105,11 +87,3 @@ Open a PocketBase tunnel for dashboard/API inspection:
 1. `./bin/ovek pb tunnel <project> --listen 127.0.0.1:8091`
 
 Success: the tunnel stays open and forwards to the managed PocketBase sidecar.
-
-## Transitional Source Build Path
-
-Use source deploy when you intentionally want Ovek to build on the host:
-
-1. `./bin/ovek deploy <project> <repoURL>`
-
-Success: Brain clones the repo, prepares a Railpack plan, builds with BuildKit, pushes to the local managed registry, then runs the resulting image through the same provisioning, readiness, promotion, routing, status, logs, and cleanup path.
