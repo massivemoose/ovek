@@ -31,8 +31,8 @@ func TestLoadConfigReadsAPIKey(t *testing.T) {
 	if cfg.RuntimeEngine != defaultRuntimeEngine {
 		t.Fatalf("expected runtime engine %q, got %q", defaultRuntimeEngine, cfg.RuntimeEngine)
 	}
-	if cfg.RuntimeHost != "" {
-		t.Fatalf("expected runtime host %q, got %q", "", cfg.RuntimeHost)
+	if cfg.RuntimeHost != defaultPodmanRuntimeHost {
+		t.Fatalf("expected runtime host %q, got %q", defaultPodmanRuntimeHost, cfg.RuntimeHost)
 	}
 	if cfg.BuildKitHost != defaultBuildKitHost {
 		t.Fatalf("expected BuildKit host %q, got %q", defaultBuildKitHost, cfg.BuildKitHost)
@@ -158,20 +158,20 @@ func TestLoadConfigAllowsProdModeWithoutStaticAPIKey(t *testing.T) {
 	}
 }
 
-func TestLoadConfigReadsPodmanRuntimeDefaults(t *testing.T) {
+func TestLoadConfigReadsExplicitDockerRuntime(t *testing.T) {
 	t.Setenv("OVEK_AUTH_MODE", authModeDev)
 	t.Setenv("BRAIN_API_KEY", "test-key")
-	t.Setenv("RUNTIME_ENGINE", runtimeEnginePodman)
+	t.Setenv("RUNTIME_ENGINE", runtimeEngineDocker)
 
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatalf("expected config to load, got error: %v", err)
 	}
-	if cfg.RuntimeEngine != runtimeEnginePodman {
-		t.Fatalf("expected runtime engine %q, got %q", runtimeEnginePodman, cfg.RuntimeEngine)
+	if cfg.RuntimeEngine != runtimeEngineDocker {
+		t.Fatalf("expected runtime engine %q, got %q", runtimeEngineDocker, cfg.RuntimeEngine)
 	}
-	if cfg.RuntimeHost != defaultPodmanRuntimeHost {
-		t.Fatalf("expected runtime host %q, got %q", defaultPodmanRuntimeHost, cfg.RuntimeHost)
+	if cfg.RuntimeHost != "" {
+		t.Fatalf("expected runtime host %q, got %q", "", cfg.RuntimeHost)
 	}
 }
 

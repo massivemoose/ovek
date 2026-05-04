@@ -3,6 +3,11 @@ OVEK_VM_DIR ?= /var/home/core/ovek
 PODMAN_VM_REPO ?= $(OVEK_VM_DIR)
 PODMAN_VM_COMPOSE := cd '$(PODMAN_VM_REPO)' && mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs brain_data/buildkit brain_data/registry
 
+.PHONY: build-cli
+build-cli:
+	mkdir -p bin
+	go build -o ./bin/ovek ./cmd/ovek
+
 .PHONY: podman-machine-init
 podman-machine-init:
 	@if podman machine inspect '$(PODMAN_MACHINE)' >/dev/null 2>&1; then \
@@ -43,6 +48,10 @@ podman-vm-up: podman-vm-check
 podman-vm-smoke: podman-vm-up
 	podman machine ssh '$(PODMAN_MACHINE)' "cd '$(PODMAN_VM_REPO)' && COMPOSE_CMD='./scripts/podman-machine-compose.sh' ./scripts/podman-smoke.sh"
 
+.PHONY: podman-vm-capsule-smoke
+podman-vm-capsule-smoke: build-cli podman-vm-up
+	./scripts/podman-capsule-smoke.sh
+
 .PHONY: podman-vm-down
 podman-vm-down: podman-machine-rootful
 	podman machine ssh '$(PODMAN_MACHINE)' "cd '$(PODMAN_VM_REPO)' && ./scripts/podman-machine-compose.sh down -v --remove-orphans"
@@ -59,6 +68,10 @@ podman-linux-up:
 .PHONY: podman-linux-smoke
 podman-linux-smoke:
 	COMPOSE_CMD='sudo podman compose -f podman-compose.yml' ./scripts/podman-smoke.sh
+
+.PHONY: podman-linux-capsule-smoke
+podman-linux-capsule-smoke: build-cli
+	./scripts/podman-capsule-smoke.sh
 
 .PHONY: podman-linux-down
 podman-linux-down:

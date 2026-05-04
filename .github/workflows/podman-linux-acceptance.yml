@@ -42,8 +42,29 @@ jobs:
       - name: Start canonical Podman stack
         run: make podman-linux-up
 
-      - name: Run Podman smoke suite
-        run: make podman-linux-smoke
+      - name: Check public capsule image
+        id: capsule_image
+        run: |
+          if sudo podman pull ghcr.io/massivemoose/ovek-signup-example:latest; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Public signup example capsule is unavailable; skipping capsule smoke."
+          fi
+
+      - name: Set up Go for capsule smoke
+        if: steps.capsule_image.outputs.available == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Configure capsule smoke hostnames
+        if: steps.capsule_image.outputs.available == 'true'
+        run: echo '127.0.0.1 brain.localhost signup-demo.localhost' | sudo tee -a /etc/hosts
+
+      - name: Run capsule smoke suite
+        if: steps.capsule_image.outputs.available == 'true'
+        run: make podman-linux-capsule-smoke
 
       - name: Print Podman stack logs on failure
         if: failure()

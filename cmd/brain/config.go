@@ -17,7 +17,7 @@ const defaultRegistryAPIBaseURL = "http://registry:5000"
 const defaultRailpackFrontendImage = "ghcr.io/railwayapp/railpack-frontend"
 const defaultRegistryInsecure = true
 const defaultAuthMode = authModeDev
-const defaultRuntimeEngine = runtimeEngineDocker
+const defaultRuntimeEngine = runtimeEnginePodman
 const defaultTraefikDynamicConfigDir = "/var/lib/ovek/traefik/dynamic"
 const defaultTraefikBrainServiceURL = "http://brain:8081"
 const defaultPodmanRuntimeHost = "unix:///run/podman/podman.sock"
@@ -58,8 +58,8 @@ func loadConfig() (config, error) {
 	if runtimeEngine == "" {
 		runtimeEngine = defaultRuntimeEngine
 	}
-	if runtimeEngine != runtimeEngineDocker && runtimeEngine != runtimeEnginePodman {
-		return config{}, errors.New("RUNTIME_ENGINE must be docker or podman")
+	if runtimeEngine != runtimeEnginePodman && runtimeEngine != runtimeEngineDocker {
+		return config{}, errors.New("RUNTIME_ENGINE must be podman or docker")
 	}
 
 	runtimeHost := strings.TrimSpace(os.Getenv("RUNTIME_HOST"))
