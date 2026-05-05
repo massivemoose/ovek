@@ -2,6 +2,8 @@
 
 This quickstart runs the canonical PocketBase-backed signup app as an Ovek capsule. The app image is built outside the Ovek runtime host, published to GHCR, and activated with `ovek run`.
 
+For a real Ubuntu VPS trial, use [vps-trial.md](vps-trial.md). This quickstart is the local development path for macOS with Podman Machine or a local Linux host.
+
 Example app:
 
 ```text
@@ -34,7 +36,7 @@ On macOS with Podman Machine:
 3. `make podman-vm-bootstrap-compose`
 4. `make podman-vm-up`
 
-On Linux or a VPS with Podman:
+On a local Linux host with Podman:
 
 1. `sudo systemctl start podman.socket`
 2. `make podman-linux-up`
@@ -47,13 +49,6 @@ For same-machine browser testing:
 
 1. `echo '127.0.0.1 brain.localhost signup-demo.localhost' | sudo tee -a /etc/hosts`
 
-For VPS browser testing from your laptop, forward the VPS port 80 first:
-
-1. `ssh -N -L 8088:127.0.0.1:80 <user>@<vps-host>`
-2. `echo '127.0.0.1 brain.localhost signup-demo.localhost' | sudo tee -a /etc/hosts`
-
-With the SSH tunnel open, use `http://signup-demo.localhost:8088/` from your laptop browser.
-
 ## Authenticate The CLI
 
 From the machine running Ovek:
@@ -62,11 +57,6 @@ From the machine running Ovek:
 2. `./bin/ovek auth status`
 
 Expected: the active profile points at `http://brain.localhost`.
-
-If you are driving a VPS through the SSH tunnel from your laptop instead:
-
-1. `./bin/ovek auth login --profile vps-trial --host http://brain.localhost:8088 --api-key dev-brain-key`
-2. `./bin/ovek auth status`
 
 ## Initialize PocketBase
 
@@ -89,10 +79,6 @@ For same-machine browser testing:
 
 1. `open http://signup-demo.localhost/`
 
-For VPS browser testing through the SSH tunnel:
-
-1. `open http://signup-demo.localhost:8088/`
-
 Expected: the signup form loads. Submit an email address and confirm the app redirects to `/success`.
 
 ## Inspect PocketBase
@@ -103,17 +89,13 @@ On macOS with the Podman Machine helper:
 
 1. `./pm podman exec ovek-signup-demo-pb pocketbase --dir=/pb_data superuser upsert local-admin@signup-demo.ovek.local local-dev-password-please-change`
 
-On Linux or a VPS:
+On Linux:
 
 1. `sudo podman exec ovek-signup-demo-pb pocketbase --dir=/pb_data superuser upsert local-admin@signup-demo.ovek.local local-dev-password-please-change`
 
 Start a local PocketBase tunnel:
 
 1. `./bin/ovek pb tunnel signup-demo --listen 127.0.0.1:8091`
-
-If the tunnel is running on a VPS and you want to inspect from your laptop:
-
-1. `ssh -N -L 8091:127.0.0.1:8091 <user>@<vps-host>`
 
 Open the PocketBase dashboard:
 

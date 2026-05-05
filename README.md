@@ -25,6 +25,8 @@ Capsule v1 is intentionally simple:
 
 ## Quickstart
 
+For a real Ubuntu VPS trial over an SSH tunnel, use [docs/vps-trial.md](docs/vps-trial.md). The commands below are the local development path for macOS with Podman Machine or Linux.
+
 Build the CLI:
 
 1. `mkdir -p ./bin`
@@ -37,7 +39,7 @@ Start the Linux-first Podman stack on macOS with Podman Machine:
 3. `make podman-vm-bootstrap-compose`
 4. `make podman-vm-up`
 
-Or start it on Linux:
+Or start it on a local Linux machine:
 
 1. `sudo systemctl start podman.socket`
 2. `make podman-linux-up`
@@ -62,6 +64,17 @@ http://signup-demo.localhost/
 
 See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for the full app capsule walkthrough.
 
+## VPS Trial
+
+The first real-server path is Ubuntu + Podman + SSH tunnel:
+
+1. install Ovek on the VPS with `./scripts/ovek-vps-install.sh`
+2. forward laptop port `8088` to VPS port `80`
+3. bootstrap CLI auth with `ovek auth bootstrap`
+4. run the public signup capsule with `ovek run`
+
+See [docs/vps-trial.md](docs/vps-trial.md) for the command-by-command flow.
+
 ## Podman Development
 
 The local development stack is Podman-first and Linux-first. On macOS, the helper targets run the same Linux stack inside `podman machine`.
@@ -74,11 +87,15 @@ Useful entrypoints:
 - `make podman-linux-up`
 - `make podman-linux-capsule-smoke`
 - `make podman-linux-down`
+- `make podman-linux-builder-up`
+- `make podman-linux-builder-smoke`
 - `./pm up`
 - `./pm capsule-smoke`
 - `./pm down`
 
 The primary acceptance path is `scripts/podman-capsule-smoke.sh`. It runs the public signup capsule through `ovek run`, checks job logs, runtime logs, routed app reachability, PocketBase sidecar status, and cleanup.
+
+Legacy source-build smoke runs only through the explicit builder stack.
 
 See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM and Linux validation flows.
 
@@ -87,6 +104,7 @@ See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM and Lin
 - [Capsule runs](docs/capsule-runs.md): capsule expectations, GHCR image publishing, and validation commands.
 - [Project env and secrets](docs/project-env-secrets.md): project configuration captured by the next capsule run.
 - [Podman testing](docs/podman-testing.md): local VM and Linux acceptance workflows.
+- [Ubuntu VPS trial](docs/vps-trial.md): first real-server flow over an SSH tunnel.
 
 ## Current MVP Shape
 

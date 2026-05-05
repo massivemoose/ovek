@@ -1,6 +1,6 @@
 # Podman Testing
 
-Ovek's MVP runtime path is Podman-first. The same Linux-first `podman-compose.yml` stack is used for local macOS testing through `podman machine` and for Linux acceptance.
+Ovek's MVP runtime path is Podman-first. The default `podman-compose.yml` stack is runtime-only: Brain plus Traefik. It is used for local macOS testing through `podman machine`, Linux acceptance, and the Ubuntu VPS trial.
 
 ## Mac Linux-Sandbox Workflow
 
@@ -24,7 +24,7 @@ What these targets do:
 - `podman-machine-rootful` ensures the machine is in `rootful=true` mode before starting it.
 - `podman-machine-sync` copies the repo into the VM with explicit excludes from `.podman-machine-syncignore`.
 - `podman-vm-bootstrap-compose` installs `podman-compose` inside the Podman machine if no compose provider is present yet.
-- `podman-vm-up` runs the canonical `podman-compose.yml` inside the VM.
+- `podman-vm-up` runs the runtime-only `podman-compose.yml` inside the VM.
 - `podman-vm-capsule-smoke` runs the image-first capsule smoke suite from the host against the VM-exposed Traefik port.
 - The VM startup helper precreates `brain_data/projects`, `brain_data/traefik/dynamic`, and `brain_data/job-logs` so Brain and Traefik have stable bind-mount sources.
 
@@ -59,7 +59,7 @@ The capsule smoke still checks routed app reachability with an explicit `Host:` 
 
 ## Real Linux Workflow
 
-Use the same compose file and capsule smoke runner on a Linux host:
+Use the runtime-only compose file and capsule smoke runner on a Linux host:
 
 1. `sudo systemctl start podman.socket`
 2. `make podman-linux-up`
@@ -67,6 +67,24 @@ Use the same compose file and capsule smoke runner on a Linux host:
 4. `make podman-linux-down`
 
 This is the same path used by CI and is the baseline proof that the Linux Podman contract works.
+
+For a real Ubuntu VPS trial over an SSH tunnel, use [vps-trial.md](vps-trial.md).
+
+## Legacy Source-Build Stack
+
+The old server-side source-build flow is still available for internal regression, but it is not the MVP acceptance path. It starts BuildKit and the local registry through `podman-compose.builder.yml`.
+
+On macOS with Podman Machine:
+
+1. `make podman-vm-builder-up`
+2. `make podman-vm-builder-smoke`
+3. `make podman-vm-builder-down`
+
+On Linux:
+
+1. `make podman-linux-builder-up`
+2. `make podman-linux-builder-smoke`
+3. `make podman-linux-builder-down`
 
 ## What Capsule Smoke Verifies
 
