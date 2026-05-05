@@ -23,8 +23,10 @@ services:
     security_opt:
       - "label=disable"
     environment:
-      - BRAIN_API_KEY=dev-brain-key
-      - RUNTIME_ENGINE=podman
+      - OVEK_AUTH_MODE=${OVEK_AUTH_MODE:-dev}
+      - BRAIN_API_KEY=${BRAIN_API_KEY:-dev-brain-key}
+      - OVEK_SECRETS_KEY=${OVEK_SECRETS_KEY:-}
+      - RUNTIME_ENGINE=${RUNTIME_ENGINE:-podman}
       - RUNTIME_HOST=${RUNTIME_HOST:-unix:///run/podman/podman.sock}
       - BUILDKIT_HOST=${BUILDKIT_HOST:-tcp://buildkitd:1234}
       - BUILD_REGISTRY_PUBLISH_HOST=${BUILD_REGISTRY_PUBLISH_HOST:-registry:5000}
