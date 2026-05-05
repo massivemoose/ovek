@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/mail"
 	"net/url"
@@ -129,6 +130,7 @@ func handleInitProjectPocketBase(service managedProjectPocketBaseService) http.H
 			return
 		}
 		if err != nil {
+			log.Printf("failed to initialize PocketBase for project %q: %v", projectName, err)
 			writeJSONError(w, http.StatusInternalServerError, errorCodePocketBaseFailed, "failed to initialize PocketBase")
 			return
 		}

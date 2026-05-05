@@ -103,6 +103,7 @@ OVEK_AUTH_MODE=prod
 OVEK_SECRETS_KEY=${secrets_key}
 RUNTIME_ENGINE=podman
 RUNTIME_HOST=unix:///run/podman/podman.sock
+POCKETBASE_IMAGE=docker.io/elestio/pocketbase:latest
 EOF
 	run_sudo install -m 0600 -o root -g root "${tmp_file}" "${env_file}"
 	rm -f "${tmp_file}"
