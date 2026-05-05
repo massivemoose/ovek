@@ -81,7 +81,7 @@ func (cmd *pbCommand) runInit(ctx context.Context, brainClient *client.Client, a
 	_, _ = fmt.Fprintln(cmd.stdout, "PocketBase initialized.")
 	writePocketBaseStatus(cmd.stdout, status)
 	if appSecrets {
-		_, _ = fmt.Fprintln(cmd.stdout, "Environment updated. Run 'ovek deploy <project> <repoURL>' to apply changes.")
+		_, _ = fmt.Fprintln(cmd.stdout, "Environment updated. Run 'ovek run <project> <capsule-ref>' to apply changes.")
 	}
 	return nil
 }

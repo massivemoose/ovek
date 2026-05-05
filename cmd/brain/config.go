@@ -10,7 +10,7 @@ import (
 const defaultDataDir = "/var/lib/ovek"
 const defaultBuildKitHost = "docker-container://buildkit"
 const defaultProjectsHostDataDir = "/var/lib/ovek/projects"
-const defaultPocketBaseImage = "elestio/pocketbase:latest"
+const defaultPocketBaseImage = "docker.io/elestio/pocketbase:latest"
 const defaultBuildRegistryPublishHost = "host.docker.internal:5001"
 const defaultRuntimeRegistryHost = "localhost:5001"
 const defaultRegistryAPIBaseURL = "http://registry:5000"

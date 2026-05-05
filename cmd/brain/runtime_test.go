@@ -246,6 +246,28 @@ func TestPodmanServiceImagePullerReturnsAPIError(t *testing.T) {
 	}
 }
 
+func TestPodmanServiceImagePullerReturnsStreamedPullError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"stream":"Trying to pull image"}` + "\n"))
+		_, _ = w.Write([]byte(`{"error":"no image found in image index for architecture \"arm64\", variant \"v8\", OS \"linux\""}` + "\n"))
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	err = puller.PullImage(context.Background(), "ghcr.io/example/demo:latest", false)
+	if err == nil {
+		t.Fatal("expected podman image pull to fail")
+	}
+	if !strings.Contains(err.Error(), "no image found in image index") {
+		t.Fatalf("expected podman pull error to include streamed error, got %v", err)
+	}
+}
+
 type fakeDockerClient struct {
 	networkInspectName     string
 	networkInspectResponse dockernetwork.Inspect

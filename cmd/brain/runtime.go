@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -265,6 +267,31 @@ func (puller *podmanServiceImagePuller) PullImage(ctx context.Context, imageRef 
 		}
 
 		return fmt.Errorf("podman image pull API returned %s: %s", response.Status, message)
+	}
+	if err := podmanPullResponseError(responseBody); err != nil {
+		return fmt.Errorf("podman image pull failed: %w", err)
+	}
+
+	return nil
+}
+
+func podmanPullResponseError(responseBody []byte) error {
+	for _, line := range strings.Split(string(responseBody), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			continue
+		}
+		for _, key := range []string{"error", "errorMessage", "cause"} {
+			value, ok := payload[key].(string)
+			if ok && strings.TrimSpace(value) != "" {
+				return errors.New(strings.TrimSpace(value))
+			}
+		}
 	}
 
 	return nil
