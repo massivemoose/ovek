@@ -30,6 +30,42 @@ func TestRouterReturnsUsageForHelp(t *testing.T) {
 	}
 }
 
+func TestRouterReturnsCommandUsageForCommandHelp(t *testing.T) {
+	command := &recordingCommand{name: "rm", summary: "Remove runtime", err: ErrUsage}
+	router := NewRouter("ovek", "Ovek CLI", command)
+
+	err := router.Run(context.Background(), []string{"rm", "--help"})
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("expected ErrUsage, got %v", err)
+	}
+
+	usageCommand, ok := UsageCommand(err)
+	if !ok {
+		t.Fatalf("expected command usage error, got %v", err)
+	}
+	if usageCommand != command {
+		t.Fatalf("expected usage command %p, got %p", command, usageCommand)
+	}
+}
+
+func TestRouterSupportsHelpForKnownCommand(t *testing.T) {
+	command := &recordingCommand{name: "rm", summary: "Remove runtime"}
+	router := NewRouter("ovek", "Ovek CLI", command)
+
+	err := router.Run(context.Background(), []string{"help", "rm"})
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("expected ErrUsage, got %v", err)
+	}
+
+	usageCommand, ok := UsageCommand(err)
+	if !ok {
+		t.Fatalf("expected command usage error, got %v", err)
+	}
+	if usageCommand != command {
+		t.Fatalf("expected usage command %p, got %p", command, usageCommand)
+	}
+}
+
 func TestRouterUsageListsCommands(t *testing.T) {
 	router := NewRouter(
 		"ovek",

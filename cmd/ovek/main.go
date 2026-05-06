@@ -26,7 +26,11 @@ func runApp(ctx context.Context, args []string, stdin io.Reader, stdout io.Write
 	case err == nil:
 		return 0
 	case errors.Is(err, command.ErrUsage):
-		router.Usage(stdout)
+		if usageCommand, ok := command.UsageCommand(err); ok {
+			usageCommand.Usage(stdout)
+		} else {
+			router.Usage(stdout)
+		}
 		return 0
 	default:
 		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)

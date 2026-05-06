@@ -183,3 +183,22 @@ func TestRemoveCommandRequiresProjectNameConfirmationForDatabaseRemoval(t *testi
 		t.Fatalf("expected confirmation error, got %q", stderr.String())
 	}
 }
+
+func TestRemoveHelpPrintsRemoveUsage(t *testing.T) {
+	store := config.NewStore(t.TempDir())
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode := runWithStore(context.Background(), []string{"rm", "--help"}, &stdout, &stderr, store)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %q", exitCode, stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "ovek rm <project> [--remove-database] [--delete-database-data]") {
+		t.Fatalf("expected rm usage, got %q", output)
+	}
+	if strings.Contains(output, "Commands:") {
+		t.Fatalf("expected command-specific usage, got root usage %q", output)
+	}
+}

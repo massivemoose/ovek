@@ -21,6 +21,26 @@ type HiddenCommand interface {
 	Hidden() bool
 }
 
+type UsageError struct {
+	Command Command
+}
+
+func (err *UsageError) Error() string {
+	return ErrUsage.Error()
+}
+
+func (err *UsageError) Unwrap() error {
+	return ErrUsage
+}
+
+func UsageCommand(err error) (Command, bool) {
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) || usageErr.Command == nil {
+		return nil, false
+	}
+	return usageErr.Command, true
+}
+
 type Router struct {
 	name     string
 	summary  string
@@ -62,8 +82,18 @@ func (router *Router) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return ErrUsage
 	}
-	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+	if args[0] == "-h" || args[0] == "--help" {
 		return ErrUsage
+	}
+	if args[0] == "help" {
+		if len(args) == 1 {
+			return ErrUsage
+		}
+		command, ok := router.commands[args[1]]
+		if !ok {
+			return fmt.Errorf("unknown command %q", args[1])
+		}
+		return &UsageError{Command: command}
 	}
 
 	command, ok := router.commands[args[0]]
@@ -71,7 +101,13 @@ func (router *Router) Run(ctx context.Context, args []string) error {
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 
-	return command.Run(ctx, args[1:])
+	if err := command.Run(ctx, args[1:]); err != nil {
+		if errors.Is(err, ErrUsage) {
+			return &UsageError{Command: command}
+		}
+		return err
+	}
+	return nil
 }
 
 func (router *Router) Usage(w io.Writer) {
