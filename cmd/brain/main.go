@@ -74,7 +74,8 @@ func main() {
 	)
 	cleaner := newManagedProjectCleaner(db, runtime, cfg.DataDir, artifactCleaner)
 	cleaner.ingress = ingress
-	projectRuntimeService := newManagedProjectRuntimeService(db, runtime)
+	cleaner.projectsHostDataDir = cfg.ProjectsHostDataDir
+	projectRuntimeService := newManagedProjectRuntimeService(db, runtime, ingress)
 	projectPocketBaseService := newManagedProjectPocketBaseService(db, runtime, cfg.ProjectsHostDataDir, cfg.PocketBaseImage, projectPocketBaseStore, projectConfigStore)
 	jobManager := newJobManager(db, processor, artifactCleaner)
 	jobManager.ingress = ingress
@@ -119,6 +120,9 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/deployments/{deploymentID}", handleGetProjectDeployment(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/jobs", handleListProjectJobs(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/runtime/start", requireCriticalReauth(cfg, db, "runtime_start.authorized", handleStartProjectRuntime(projectRuntimeService)))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/runtime/stop", requireCriticalReauth(cfg, db, "runtime_stop.authorized", handleStopProjectRuntime(projectRuntimeService)))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/runtime/restart", requireCriticalReauth(cfg, db, "runtime_restart.authorized", handleRestartProjectRuntime(projectRuntimeService)))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs", handleGetProjectRuntimeLogs(projectRuntimeService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime/logs/stream", handleGetProjectRuntimeLogsStream(projectRuntimeService))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/pocketbase", handleGetProjectPocketBase(projectPocketBaseService))
@@ -133,6 +137,7 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs", handleGetJobLogs(db, cfg.DataDir))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}/logs/stream", handleGetJobLogsStream(db, cfg.DataDir))
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/runtime", requireCriticalReauth(cfg, db, "runtime_delete.authorized", handleDeleteProjectRuntime(cleaner)))
+	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/runtime/app", requireCriticalReauth(cfg, db, "runtime_remove.authorized", handleDeleteProjectAppRuntime(cleaner)))
 
 	mux.HandleFunc("POST /v1/auth/bootstrap", handleBootstrapAuth(cfg, db))
 	mux.Handle("/v1/", authMiddleware(cfg, db, apiMux))

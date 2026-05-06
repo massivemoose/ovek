@@ -43,7 +43,7 @@ func TestEnvSetSendsEnvironmentMutationAndPrintsApplyHint(t *testing.T) {
 	}
 	output := stdout.String()
 	for _, fragment := range []string{
-		"Environment updated. Run 'ovek deploy <project> <repoURL>' to apply changes.",
+		"Environment updated. Run 'ovek run <project> <capsule-ref>' to apply changes.",
 		"Revision  rev_123",
 	} {
 		if !strings.Contains(output, fragment) {

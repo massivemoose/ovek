@@ -17,6 +17,10 @@ type Command interface {
 	Usage(io.Writer)
 }
 
+type HiddenCommand interface {
+	Hidden() bool
+}
+
 type Router struct {
 	name     string
 	summary  string
@@ -78,6 +82,9 @@ func (router *Router) Usage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "Commands:\n")
 	for _, commandName := range router.order {
 		command := router.commands[commandName]
+		if hidden, ok := command.(HiddenCommand); ok && hidden.Hidden() {
+			continue
+		}
 		_, _ = fmt.Fprintf(w, "  %-12s %s\n", command.Name(), command.Summary())
 	}
 }

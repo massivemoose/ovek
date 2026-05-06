@@ -57,8 +57,8 @@ Expected: the active profile points at `http://brain.localhost:8088`.
 
 ## 5. Initialize PocketBase
 
-1. `./bin/ovek pb init signup-demo --app-secrets`
-2. `./bin/ovek pb status signup-demo`
+1. `./bin/ovek db init signup-demo --app-secrets`
+2. `./bin/ovek db status signup-demo`
 
 The init command may prompt for your bootstrap password.
 
@@ -93,7 +93,7 @@ Create a dashboard-only PocketBase superuser on the VPS:
 
 Start a PocketBase tunnel from your laptop checkout:
 
-1. `./bin/ovek pb tunnel signup-demo --listen 127.0.0.1:8091`
+1. `./bin/ovek db tunnel signup-demo --listen 127.0.0.1:8091`
 
 Open the dashboard from your laptop:
 
@@ -110,13 +110,9 @@ Expected: the `signups` collection exists, and submitted emails appear as record
 
 ## 9. Clean Up The Project
 
-From your laptop checkout, read the local config path:
+From your laptop checkout:
 
-1. `./bin/ovek auth status`
-
-Open the config file shown by that command and use the `apiKey` value for the active `vps-trial` profile.
-
-1. `curl -sS -X DELETE -H "Host: brain.localhost" -H "X-API-Key: <api-key>" http://127.0.0.1:8088/v1/projects/signup-demo/runtime`
+1. `./bin/ovek rm signup-demo --remove-database`
 2. `./bin/ovek status signup-demo`
 
 Expected: project runtime is cleaned up and the project returns to `idle`.

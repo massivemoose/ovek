@@ -30,6 +30,8 @@ type Runtime interface {
 	EnsureProjectApp(ctx context.Context, job job, imageRef string, env []string) (string, error)
 	WaitForProjectAppReady(ctx context.Context, job job) error
 	ResolveProjectAppReadinessTarget(ctx context.Context, projectName string, deploymentID string) (appReadinessTarget, error)
+	StartProjectApp(ctx context.Context, deployment deploymentRecord) error
+	StopProjectApp(ctx context.Context, deployment deploymentRecord) error
 	RemoveProjectApp(ctx context.Context, deployment deploymentRecord) error
 	ListProjectApps(ctx context.Context, projectName string) ([]projectAppRuntime, error)
 	GetProjectPocketBaseRuntime(ctx context.Context, projectName string) (projectRuntimeContainer, bool, error)

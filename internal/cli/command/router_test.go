@@ -55,9 +55,30 @@ func TestRouterUsageListsCommands(t *testing.T) {
 	}
 }
 
+func TestRouterUsageSkipsHiddenCommands(t *testing.T) {
+	router := NewRouter(
+		"ovek",
+		"Ovek CLI",
+		&recordingCommand{name: "run", summary: "Run capsule image"},
+		&recordingCommand{name: "deploy", summary: "Legacy deploy", hidden: true},
+	)
+
+	var usage strings.Builder
+	router.Usage(&usage)
+
+	text := usage.String()
+	if !strings.Contains(text, "run") {
+		t.Fatalf("expected usage to contain visible command, got %q", text)
+	}
+	if strings.Contains(text, "deploy") {
+		t.Fatalf("expected usage to hide deploy command, got %q", text)
+	}
+}
+
 type recordingCommand struct {
 	name    string
 	summary string
+	hidden  bool
 	args    []string
 	err     error
 }
@@ -65,6 +86,8 @@ type recordingCommand struct {
 func (command *recordingCommand) Name() string { return command.name }
 
 func (command *recordingCommand) Summary() string { return command.summary }
+
+func (command *recordingCommand) Hidden() bool { return command.hidden }
 
 func (command *recordingCommand) Run(_ context.Context, args []string) error {
 	command.args = append([]string(nil), args...)

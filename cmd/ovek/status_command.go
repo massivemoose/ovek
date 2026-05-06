@@ -131,7 +131,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 		runtimePairs := [][2]string{
 			{"Deployment", stringOrDash(runtimeView.CurrentDeploymentID)},
 			{"App", runtimeAppSummary(runtimeView.App)},
-			{"PocketBase", runtimeContainerSummary(runtimeView.PocketBase)},
+			{"Database", runtimeContainerSummary(runtimeView.PocketBase)},
 			{"Network", runtimeNetworkSummary(runtimeView.Network)},
 		}
 		output.WriteKeyValues(cmd.stdout, runtimePairs)

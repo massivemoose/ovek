@@ -221,7 +221,7 @@ func runProjectEnvironmentMutation(ctx context.Context, brainClient *client.Clie
 }
 
 func writeEnvironmentUpdated(w io.Writer, revisionID string) {
-	_, _ = fmt.Fprintln(w, "Environment updated. Run 'ovek deploy <project> <repoURL>' to apply changes.")
+	_, _ = fmt.Fprintln(w, "Environment updated. Run 'ovek run <project> <capsule-ref>' to apply changes.")
 	output.WriteKeyValues(w, [][2]string{{"Revision", valueOrDash(revisionID)}})
 }
 

@@ -94,7 +94,7 @@ On Linux:
 - logs into Brain with an isolated temporary CLI config
 - ensures PocketBase app secrets exist for the signup example
 - runs `ghcr.io/massivemoose/ovek-signup-example:latest` with `ovek run`
-- verifies image-run job logs, runtime logs, routed app reachability, PocketBase status, and cleanup
+- verifies image-run job logs, runtime logs, routed app reachability, database status, and cleanup
 
 Current limits:
 

@@ -505,6 +505,9 @@ type fakeProjectRuntimeReader struct {
 	pocketBaseErr       error
 	networkErr          error
 	logsErr             error
+	startErr            error
+	stopErr             error
+	waitReadyErr        error
 }
 
 func (runtime fakeProjectRuntimeReader) ListProjectApps(_ context.Context, projectName string) ([]projectAppRuntime, error) {
@@ -545,6 +548,18 @@ func (runtime fakeProjectRuntimeReader) ReadProjectAppLogs(_ context.Context, de
 	return io.NopCloser(strings.NewReader(runtime.logsByDeploymentID[deployment.ID])), nil
 }
 
+func (runtime fakeProjectRuntimeReader) StartProjectApp(context.Context, deploymentRecord) error {
+	return runtime.startErr
+}
+
+func (runtime fakeProjectRuntimeReader) StopProjectApp(context.Context, deploymentRecord) error {
+	return runtime.stopErr
+}
+
+func (runtime fakeProjectRuntimeReader) WaitForProjectAppReady(context.Context, job) error {
+	return runtime.waitReadyErr
+}
+
 type fakeProjectRuntimeService struct {
 	runtimeView   projectRuntimeView
 	err           error
@@ -576,6 +591,18 @@ func (service fakeProjectRuntimeService) StreamRuntimeLogs(context.Context, stri
 	}
 
 	return io.NopCloser(bytes.NewBufferString(service.streamLogs)), nil
+}
+
+func (service fakeProjectRuntimeService) StartRuntime(context.Context, string) (projectRuntimeView, error) {
+	return service.runtimeView, service.err
+}
+
+func (service fakeProjectRuntimeService) StopRuntime(context.Context, string) (projectRuntimeView, error) {
+	return service.runtimeView, service.err
+}
+
+func (service fakeProjectRuntimeService) RestartRuntime(context.Context, string) (projectRuntimeView, error) {
+	return service.runtimeView, service.err
 }
 
 func assertJSONContains(t *testing.T, body string, want string) {
