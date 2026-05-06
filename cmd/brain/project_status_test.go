@@ -27,6 +27,31 @@ func TestReconcileAllProjectStatusesRepairsLegacyRunningProjectRows(t *testing.T
 	}
 }
 
+func TestReconcileAllProjectStatusesPreservesStoppedRuntimeRows(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "ovek-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+	if err := setProjectStatus(db, "demo-app", projectStatusStopped); err != nil {
+		t.Fatalf("expected stopped status setup to succeed, got error: %v", err)
+	}
+
+	if err := reconcileAllProjectStatuses(db); err != nil {
+		t.Fatalf("expected status reconciliation to succeed, got error: %v", err)
+	}
+
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusStopped {
+		t.Fatalf("expected project status %q, got %q", projectStatusStopped, got)
+	}
+}
+
 func TestReconcileAllProjectStatusesRepairsLegacyFailedProjectRows(t *testing.T) {
 	db := newTestDB(t)
 	seedProjectRecord(t, db, "demo-app")

@@ -162,6 +162,74 @@ func TestManagedProjectRuntimeServiceReturnsRuntimeNotFoundWithoutCurrentDeploym
 	}
 }
 
+func TestManagedProjectRuntimeServiceStopMarksProjectStopped(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-alpha",
+		ProjectName:             "alpha-app",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
+		NetworkName:             "alpha-app-net",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-10T00:00:00Z",
+	})
+	service := newManagedProjectRuntimeService(db, fakeProjectRuntimeReader{})
+
+	runtimeView, err := service.StopRuntime(context.Background(), "alpha-app")
+	if err != nil {
+		t.Fatalf("expected stop to succeed, got error: %v", err)
+	}
+
+	if got := getProjectStatus(t, db, "alpha-app"); got != projectStatusStopped {
+		t.Fatalf("expected project status %q, got %q", projectStatusStopped, got)
+	}
+	if runtimeView.App == nil || runtimeView.App.Running {
+		t.Fatalf("expected stopped app runtime view, got %#v", runtimeView.App)
+	}
+}
+
+func TestManagedProjectRuntimeServiceStartMarksProjectRunning(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-alpha",
+		ProjectName:             "alpha-app",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
+		NetworkName:             "alpha-app-net",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-10T00:00:00Z",
+	})
+	if err := setProjectStatus(db, "alpha-app", projectStatusStopped); err != nil {
+		t.Fatalf("expected stopped status setup to succeed, got error: %v", err)
+	}
+	service := newManagedProjectRuntimeService(db, fakeProjectRuntimeReader{
+		appsByProject: map[string][]projectAppRuntime{
+			"alpha-app": {
+				{
+					DeploymentID:     "dep-alpha",
+					AppContainerName: "ovek-alpha-app-app-dep-alpha",
+					ImageRef:         "ovek-alpha-app:dep-alpha",
+					Running:          true,
+				},
+			},
+		},
+	})
+
+	runtimeView, err := service.StartRuntime(context.Background(), "alpha-app")
+	if err != nil {
+		t.Fatalf("expected start to succeed, got error: %v", err)
+	}
+
+	if got := getProjectStatus(t, db, "alpha-app"); got != projectStatusRunning {
+		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
+	}
+	if runtimeView.App == nil || !runtimeView.App.Running {
+		t.Fatalf("expected running app runtime view, got %#v", runtimeView.App)
+	}
+}
+
 func TestGetProjectRuntimeReturnsRuntimeSummary(t *testing.T) {
 	dataDir := t.TempDir()
 	db, err := openBrainDB(dataDir)

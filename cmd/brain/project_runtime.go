@@ -259,6 +259,9 @@ func (service managedProjectRuntimeService) StopRuntime(ctx context.Context, pro
 			return projectRuntimeView{}, err
 		}
 	}
+	if err := setProjectStatus(service.db, projectName, projectStatusStopped); err != nil {
+		return projectRuntimeView{}, err
+	}
 	return service.GetRuntime(ctx, projectName)
 }
 
@@ -277,6 +280,9 @@ func (service managedProjectRuntimeService) StartRuntime(ctx context.Context, pr
 		if err := service.ingress.SyncProject(ctx, projectName); err != nil {
 			return projectRuntimeView{}, err
 		}
+	}
+	if err := setProjectStatus(service.db, projectName, projectStatusRunning); err != nil {
+		return projectRuntimeView{}, err
 	}
 	return service.GetRuntime(ctx, projectName)
 }
@@ -304,6 +310,9 @@ func (service managedProjectRuntimeService) RestartRuntime(ctx context.Context, 
 		if err := service.ingress.SyncProject(ctx, projectName); err != nil {
 			return projectRuntimeView{}, err
 		}
+	}
+	if err := setProjectStatus(service.db, projectName, projectStatusRunning); err != nil {
+		return projectRuntimeView{}, err
 	}
 	return service.GetRuntime(ctx, projectName)
 }
