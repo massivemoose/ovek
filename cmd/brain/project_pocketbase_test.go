@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
 )
@@ -110,6 +111,32 @@ func TestProjectPocketBaseInitDeletesNewCredentialWhenUpsertFails(t *testing.T) 
 	}
 	if count := queryCount(t, db, `SELECT COUNT(1) FROM project_pocketbase_credentials WHERE project_name = ?`, "demo-app"); count != 0 {
 		t.Fatalf("expected failed new credential to be deleted, got %d rows", count)
+	}
+}
+
+func TestProjectPocketBaseInitRetriesTransientLockedDatabaseUpsert(t *testing.T) {
+	originalSleep := sleepForPocketBaseUpsertRetry
+	sleepForPocketBaseUpsertRetry = func(context.Context, time.Duration) error { return nil }
+	t.Cleanup(func() {
+		sleepForPocketBaseUpsertRetry = originalSleep
+	})
+
+	db := newTestDB(t)
+	service, _, _, runtime := newTestProjectPocketBaseService(t, db)
+	runtime.upsertErrs = []error{
+		errors.New("PocketBase superuser command failed: 2026/05/06 database is locked (5) (SQLITE_BUSY)"),
+		nil,
+	}
+
+	status, err := service.Init(context.Background(), "demo-app", brainapi.InitProjectPocketBaseRequest{}, "dev")
+	if err != nil {
+		t.Fatalf("expected transient locked database upsert to retry successfully, got error: %v", err)
+	}
+	if !status.Initialized {
+		t.Fatalf("expected initialized status, got %#v", status)
+	}
+	if len(runtime.upserts) != 2 {
+		t.Fatalf("expected two upsert attempts, got %#v", runtime.upserts)
 	}
 }
 
@@ -248,6 +275,7 @@ type fakeProjectPocketBaseRuntime struct {
 	ensureErr         error
 	upserts           []fakePocketBaseUpsert
 	upsertErr         error
+	upsertErrs        []error
 	proxyTarget       string
 	proxyErr          error
 	runtimeFound      bool
@@ -277,6 +305,11 @@ func (runtime *fakeProjectPocketBaseRuntime) EnsureProjectPocketBase(_ context.C
 
 func (runtime *fakeProjectPocketBaseRuntime) UpsertProjectPocketBaseSuperuser(_ context.Context, _ string, email string, password string) error {
 	runtime.upserts = append(runtime.upserts, fakePocketBaseUpsert{email: email, password: password})
+	if len(runtime.upsertErrs) > 0 {
+		err := runtime.upsertErrs[0]
+		runtime.upsertErrs = runtime.upsertErrs[1:]
+		return err
+	}
 	return runtime.upsertErr
 }
 
