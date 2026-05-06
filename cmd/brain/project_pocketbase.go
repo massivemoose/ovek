@@ -33,6 +33,7 @@ var sleepForPocketBaseUpsertRetry = sleepWithContext
 
 type projectPocketBaseRuntime interface {
 	EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error)
+	WaitForProjectPocketBaseReady(ctx context.Context, projectName string) error
 	UpsertProjectPocketBaseSuperuser(ctx context.Context, projectName string, email string, password string) error
 	ProjectPocketBaseProxyTarget(ctx context.Context, projectName string) (string, error)
 	GetProjectPocketBaseRuntime(ctx context.Context, projectName string) (projectRuntimeContainer, bool, error)
@@ -194,6 +195,9 @@ func (service managedProjectPocketBaseService) Init(ctx context.Context, project
 	if _, err := service.runtime.EnsureProjectPocketBase(ctx, projectName, service.pocketBaseImage, service.projectsHostDataDir); err != nil {
 		return brainapi.ProjectPocketBaseStatus{}, fmt.Errorf("ensure PocketBase: %w", err)
 	}
+	if err := service.runtime.WaitForProjectPocketBaseReady(ctx, projectName); err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, fmt.Errorf("wait for PocketBase readiness: %w", err)
+	}
 
 	credential, created, err := service.credentialStore.GetOrCreate(ctx, projectName, email, now)
 	if err != nil {
@@ -256,7 +260,9 @@ func isRetryablePocketBaseUpsertError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "database is locked") || strings.Contains(message, "sqlite_busy")
+	return strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "sqlite_busy") ||
+		strings.Contains(message, "exit code 137")
 }
 
 func (service managedProjectPocketBaseService) Proxy(w http.ResponseWriter, r *http.Request, projectName string) error {

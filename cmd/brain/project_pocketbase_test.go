@@ -114,6 +114,26 @@ func TestProjectPocketBaseInitDeletesNewCredentialWhenUpsertFails(t *testing.T) 
 	}
 }
 
+func TestProjectPocketBaseInitWaitsForRuntimeReadyBeforeCredentialUpsert(t *testing.T) {
+	db := newTestDB(t)
+	service, _, _, runtime := newTestProjectPocketBaseService(t, db)
+	runtime.waitReadyErr = errors.New("not ready yet")
+
+	_, err := service.Init(context.Background(), "demo-app", brainapi.InitProjectPocketBaseRequest{}, "dev")
+	if err == nil || !strings.Contains(err.Error(), "wait for PocketBase readiness") {
+		t.Fatalf("expected readiness failure, got %v", err)
+	}
+	if runtime.waitReadyProjectName != "demo-app" {
+		t.Fatalf("expected readiness wait for project, got %q", runtime.waitReadyProjectName)
+	}
+	if len(runtime.upserts) != 0 {
+		t.Fatalf("expected no superuser upsert before readiness, got %#v", runtime.upserts)
+	}
+	if count := queryCount(t, db, `SELECT COUNT(1) FROM project_pocketbase_credentials WHERE project_name = ?`, "demo-app"); count != 0 {
+		t.Fatalf("expected no stored credential before readiness, got %d rows", count)
+	}
+}
+
 func TestProjectPocketBaseInitRetriesTransientLockedDatabaseUpsert(t *testing.T) {
 	originalSleep := sleepForPocketBaseUpsertRetry
 	sleepForPocketBaseUpsertRetry = func(context.Context, time.Duration) error { return nil }
@@ -131,6 +151,32 @@ func TestProjectPocketBaseInitRetriesTransientLockedDatabaseUpsert(t *testing.T)
 	status, err := service.Init(context.Background(), "demo-app", brainapi.InitProjectPocketBaseRequest{}, "dev")
 	if err != nil {
 		t.Fatalf("expected transient locked database upsert to retry successfully, got error: %v", err)
+	}
+	if !status.Initialized {
+		t.Fatalf("expected initialized status, got %#v", status)
+	}
+	if len(runtime.upserts) != 2 {
+		t.Fatalf("expected two upsert attempts, got %#v", runtime.upserts)
+	}
+}
+
+func TestProjectPocketBaseInitRetriesStartupKilledUpsert(t *testing.T) {
+	originalSleep := sleepForPocketBaseUpsertRetry
+	sleepForPocketBaseUpsertRetry = func(context.Context, time.Duration) error { return nil }
+	t.Cleanup(func() {
+		sleepForPocketBaseUpsertRetry = originalSleep
+	})
+
+	db := newTestDB(t)
+	service, _, _, runtime := newTestProjectPocketBaseService(t, db)
+	runtime.upsertErrs = []error{
+		errors.New("PocketBase superuser command failed: exit code 137"),
+		nil,
+	}
+
+	status, err := service.Init(context.Background(), "demo-app", brainapi.InitProjectPocketBaseRequest{}, "dev")
+	if err != nil {
+		t.Fatalf("expected startup-killed superuser upsert to retry successfully, got error: %v", err)
 	}
 	if !status.Initialized {
 		t.Fatalf("expected initialized status, got %#v", status)
@@ -269,18 +315,20 @@ func assertPocketBaseAppSecretsConfigured(t *testing.T, entries []brainapi.Proje
 }
 
 type fakeProjectPocketBaseRuntime struct {
-	ensureProjectName string
-	ensureImage       string
-	ensureDataDir     string
-	ensureErr         error
-	upserts           []fakePocketBaseUpsert
-	upsertErr         error
-	upsertErrs        []error
-	proxyTarget       string
-	proxyErr          error
-	runtimeFound      bool
-	runtimeView       projectRuntimeContainer
-	runtimeErr        error
+	ensureProjectName    string
+	ensureImage          string
+	ensureDataDir        string
+	ensureErr            error
+	waitReadyProjectName string
+	waitReadyErr         error
+	upserts              []fakePocketBaseUpsert
+	upsertErr            error
+	upsertErrs           []error
+	proxyTarget          string
+	proxyErr             error
+	runtimeFound         bool
+	runtimeView          projectRuntimeContainer
+	runtimeErr           error
 }
 
 type fakePocketBaseUpsert struct {
@@ -301,6 +349,11 @@ func (runtime *fakeProjectPocketBaseRuntime) EnsureProjectPocketBase(_ context.C
 		Running:       true,
 	}
 	return "pb-container-123", nil
+}
+
+func (runtime *fakeProjectPocketBaseRuntime) WaitForProjectPocketBaseReady(_ context.Context, projectName string) error {
+	runtime.waitReadyProjectName = projectName
+	return runtime.waitReadyErr
 }
 
 func (runtime *fakeProjectPocketBaseRuntime) UpsertProjectPocketBaseSuperuser(_ context.Context, _ string, email string, password string) error {
