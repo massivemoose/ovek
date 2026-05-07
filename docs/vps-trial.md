@@ -15,8 +15,14 @@ On a fresh Ubuntu VPS:
 1. `git clone https://github.com/massivemoose/ovek`
 2. `cd ovek`
 3. `./scripts/ovek-vps-install.sh`
+4. `./scripts/ovek-vps-check.sh`
 
-Expected: `ovek.service` is enabled and running, and the runtime-only stack starts Brain and Traefik. The default VPS stack does not start server-side builder services.
+Expected: `ovek.service` is enabled and running, the runtime-only stack starts Brain and Traefik, and the read-only preflight check passes. The default VPS stack does not start server-side builder services.
+
+If the preflight reports that sudo cannot run non-interactively:
+
+1. `sudo -v`
+2. `./scripts/ovek-vps-check.sh`
 
 ## 2. Build The CLI On Your Laptop
 
