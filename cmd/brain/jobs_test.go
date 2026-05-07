@@ -582,6 +582,10 @@ type noopProjectCleaner struct{}
 
 func (noopProjectCleaner) Cleanup(context.Context, string) error { return nil }
 
+func (noopProjectCleaner) RemoveRuntime(context.Context, string, projectRuntimeRemovalOptions) error {
+	return nil
+}
+
 type noopProjectRuntimeService struct{}
 
 func (noopProjectRuntimeService) GetRuntime(context.Context, string) (projectRuntimeView, error) {
@@ -594,6 +598,18 @@ func (noopProjectRuntimeService) ReadRuntimeLogs(context.Context, string) (io.Re
 
 func (noopProjectRuntimeService) StreamRuntimeLogs(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (noopProjectRuntimeService) StartRuntime(context.Context, string) (projectRuntimeView, error) {
+	return projectRuntimeView{}, nil
+}
+
+func (noopProjectRuntimeService) StopRuntime(context.Context, string) (projectRuntimeView, error) {
+	return projectRuntimeView{}, nil
+}
+
+func (noopProjectRuntimeService) RestartRuntime(context.Context, string) (projectRuntimeView, error) {
+	return projectRuntimeView{}, nil
 }
 
 type recordingEnqueuer struct {

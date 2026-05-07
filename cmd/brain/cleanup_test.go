@@ -90,6 +90,105 @@ func TestManagedProjectCleanerRemovesManagedResourcesInOrderAndClearsRuntimeStat
 	}
 }
 
+func TestManagedProjectCleanerRemoveRuntimePreservesDatabaseByDefault(t *testing.T) {
+	db := newTestDB(t)
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "ovek-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+
+	runtime := &fakeProjectCleanupRuntime{
+		appsByProject: map[string][]projectAppRuntime{
+			"demo-app": {
+				{
+					DeploymentID:            "dep-current",
+					ProjectName:             "demo-app",
+					AppContainerName:        "ovek-demo-app-app-dep-current",
+					ImageRef:                "ovek-demo-app:dep-current",
+					NetworkName:             "demo-app-net",
+					PocketBaseContainerName: "ovek-demo-app-pb",
+				},
+			},
+		},
+	}
+
+	err := newManagedProjectCleaner(db, runtime, defaultDataDir).RemoveRuntime(context.Background(), "demo-app", projectRuntimeRemovalOptions{})
+	if err != nil {
+		t.Fatalf("expected runtime removal to succeed, got error: %v", err)
+	}
+
+	wantSequence := []string{"app:ovek-demo-app-app-dep-current"}
+	if !reflect.DeepEqual(runtime.sequence, wantSequence) {
+		t.Fatalf("expected runtime removal sequence %#v, got %#v", wantSequence, runtime.sequence)
+	}
+	assertCurrentDeploymentUnset(t, db, "demo-app")
+	if got := getProjectStatus(t, db, "demo-app"); got != projectStatusIdle {
+		t.Fatalf("expected project status %q, got %q", projectStatusIdle, got)
+	}
+}
+
+func TestManagedProjectCleanerRemoveRuntimeCanRemoveDatabaseAndDeleteData(t *testing.T) {
+	db := newTestDB(t)
+	dataDir := t.TempDir()
+	seedCurrentDeployment(t, db, deploymentRecord{
+		ID:                      "dep-current",
+		ProjectName:             "demo-app",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
+		NetworkName:             "demo-app-net",
+		PocketBaseContainerName: "ovek-demo-app-pb",
+		Status:                  deploymentStatusSucceeded,
+		CreatedAt:               "2026-04-09T00:00:00Z",
+	})
+	pbDataDir := pocketBaseDataDir(dataDir, "demo-app")
+	if err := os.MkdirAll(pbDataDir, 0o755); err != nil {
+		t.Fatalf("expected test data dir setup to succeed, got error: %v", err)
+	}
+
+	runtime := &fakeProjectCleanupRuntime{
+		appsByProject: map[string][]projectAppRuntime{
+			"demo-app": {
+				{
+					DeploymentID:            "dep-current",
+					ProjectName:             "demo-app",
+					AppContainerName:        "ovek-demo-app-app-dep-current",
+					ImageRef:                "ovek-demo-app:dep-current",
+					NetworkName:             "demo-app-net",
+					PocketBaseContainerName: "ovek-demo-app-pb",
+				},
+			},
+		},
+	}
+	cleaner := newManagedProjectCleaner(db, runtime, defaultDataDir)
+	cleaner.projectsHostDataDir = dataDir
+
+	err := cleaner.RemoveRuntime(context.Background(), "demo-app", projectRuntimeRemovalOptions{
+		RemoveDatabase:     true,
+		DeleteDatabaseData: true,
+	})
+	if err != nil {
+		t.Fatalf("expected runtime removal to succeed, got error: %v", err)
+	}
+
+	wantSequence := []string{
+		"app:ovek-demo-app-app-dep-current",
+		"pocketbase:demo-app",
+		"network:demo-app",
+	}
+	if !reflect.DeepEqual(runtime.sequence, wantSequence) {
+		t.Fatalf("expected runtime removal sequence %#v, got %#v", wantSequence, runtime.sequence)
+	}
+	if _, err := os.Stat(pbDataDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected database data dir to be deleted, got err=%v", err)
+	}
+}
+
 func TestManagedProjectCleanerLeavesDatabaseStateUntouchedWhenAppRemovalFails(t *testing.T) {
 	db := newTestDB(t)
 	seedCurrentDeployment(t, db, deploymentRecord{
@@ -745,6 +844,10 @@ type failingProjectCleaner struct {
 }
 
 func (cleaner failingProjectCleaner) Cleanup(context.Context, string) error {
+	return cleaner.err
+}
+
+func (cleaner failingProjectCleaner) RemoveRuntime(context.Context, string, projectRuntimeRemovalOptions) error {
 	return cleaner.err
 }
 

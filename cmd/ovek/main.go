@@ -26,7 +26,11 @@ func runApp(ctx context.Context, args []string, stdin io.Reader, stdout io.Write
 	case err == nil:
 		return 0
 	case errors.Is(err, command.ErrUsage):
-		router.Usage(stdout)
+		if usageCommand, ok := command.UsageCommand(err); ok {
+			usageCommand.Usage(stdout)
+		} else {
+			router.Usage(stdout)
+		}
 		return 0
 	default:
 		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
@@ -41,12 +45,16 @@ func newRootRouter(stdin io.Reader, stdout io.Writer, stderr io.Writer, store *c
 		"Ovek CLI for working with the Brain control plane.",
 		newAuthCommand(stdout, stderr, store, prompts),
 		newDeployCommand(stdout, store, prompts),
+		newDBCommand(stdout, store, prompts),
 		newEnvCommand(stdout, store, prompts),
 		newLogsCommand(stdout, store),
-		newPBCommand(stdout, store, prompts),
+		newRemoveCommand(stdout, store, prompts),
+		newRestartCommand(stdout, store, prompts),
 		newRunCommand(stdout, store, prompts),
 		newSecretCommand(stdout, store, prompts),
+		newStartCommand(stdout, store, prompts),
 		newStatusCommand(stdout, store),
+		newStopCommand(stdout, store, prompts),
 	)
 }
 

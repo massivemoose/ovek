@@ -45,7 +45,7 @@ ghcr.io/massivemoose/ovek-signup-example:latest
 
 The signup example creates its PocketBase collection on app startup, so initialize app-facing PocketBase secrets before the first run:
 
-1. `./bin/ovek pb init signup-demo --app-secrets`
+1. `./bin/ovek db init signup-demo --app-secrets`
 2. `./bin/ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`
 
 Success: the image is pulled from GHCR, Ovek injects the captured PocketBase app credentials, and the app becomes reachable at `signup-demo.localhost`.
@@ -76,14 +76,14 @@ Check routing:
 
 Success: the managed app responds through Traefik.
 
-Check PocketBase:
+Check database:
 
-1. `./bin/ovek pb status <project>`
+1. `./bin/ovek db status <project>`
 
-Success: the PocketBase sidecar is running. If the app needs PocketBase credentials in its environment, run `./bin/ovek pb init <project> --app-secrets` before the next `ovek run`.
+Success: the PocketBase sidecar is running. If the app needs PocketBase credentials in its environment, run `./bin/ovek db init <project> --app-secrets` before the next `ovek run`.
 
-Open a PocketBase tunnel for dashboard/API inspection:
+Open a database tunnel for dashboard/API inspection:
 
-1. `./bin/ovek pb tunnel <project> --listen 127.0.0.1:8091`
+1. `./bin/ovek db tunnel <project> --listen 127.0.0.1:8091`
 
 Success: the tunnel stays open and forwards to the managed PocketBase sidecar.

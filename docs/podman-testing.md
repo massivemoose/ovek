@@ -2,6 +2,18 @@
 
 Ovek's MVP runtime path is Podman-first. The default `podman-compose.yml` stack is runtime-only: Brain plus Traefik. It is used for local macOS testing through `podman machine`, Linux acceptance, and the Ubuntu VPS trial.
 
+For command-by-command public product validation, use [manual-test-plan.md](manual-test-plan.md). For the real Ubuntu VPS flow, use [vps-trial.md](vps-trial.md).
+
+## Public Acceptance Paths
+
+Use one of these paths before asking public MVP users for feedback:
+
+1. `make podman-vm-capsule-smoke`
+2. `make podman-linux-capsule-smoke`
+3. `docs/vps-trial.md` on a fresh Ubuntu VPS
+
+Expected: the public signup capsule runs through `ovek run`, status/logs/database inspection works through the CLI, the app is reachable through Traefik, and cleanup uses `ovek rm`.
+
 ## Mac Linux-Sandbox Workflow
 
 Prerequisites:
@@ -42,12 +54,10 @@ Common commands:
 4. `./pm compose logs brain`
 5. `./pm podman ps -a`
 6. `./pm logs <CONTAINER_NAME>`
-7. `./pm api GET /v1/ping`
-8. `./pm api GET /v1/projects/signup-demo/runtime`
-9. `./pm app signup-demo /`
-10. `./pm down`
+7. `./pm app signup-demo /`
+8. `./pm down`
 
-The HTTP helpers curl through the forwarded Traefik port on the Mac host and inject the required `Host:` headers. `./pm api` also injects the local dev API key.
+For product behavior validation, prefer the public CLI flow in [manual-test-plan.md](manual-test-plan.md). Use `./pm` for host/container inspection when setup or routing needs troubleshooting.
 
 ## Hostname Ergonomics
 
@@ -68,11 +78,24 @@ Use the runtime-only compose file and capsule smoke runner on a Linux host:
 
 This is the same path used by CI and is the baseline proof that the Linux Podman contract works.
 
-For a real Ubuntu VPS trial over an SSH tunnel, use [vps-trial.md](vps-trial.md).
+## What Capsule Smoke Verifies
 
-## Legacy Source-Build Stack
+`scripts/podman-capsule-smoke.sh` covers the image-first user flow:
 
-The old server-side source-build flow is still available for internal regression, but it is not the MVP acceptance path. It starts BuildKit and the local registry through `podman-compose.builder.yml`.
+- builds or reuses `./bin/ovek`
+- logs into Brain with an isolated temporary CLI config
+- ensures PocketBase app secrets exist for the signup example
+- runs `ghcr.io/massivemoose/ovek-signup-example:latest` with `ovek run`
+- verifies image-run job logs, runtime logs, routed app reachability, database status, and cleanup
+
+Current limits:
+
+- capsule smoke checks PocketBase provisioning and status, but it does not yet assert application-level data persistence through PocketBase record writes
+- SELinux labeling and hardened-host bind-mount checks still need a true Linux follow-up outside the macOS VM lane
+
+## Internal Regression Only
+
+The legacy server-side source-build stack is not a public MVP path. It remains available only for internal regression of older builder plumbing, including the explicit builder compose file that starts BuildKit and the local registry.
 
 On macOS with Podman Machine:
 
@@ -85,18 +108,3 @@ On Linux:
 1. `make podman-linux-builder-up`
 2. `make podman-linux-builder-smoke`
 3. `make podman-linux-builder-down`
-
-## What Capsule Smoke Verifies
-
-`scripts/podman-capsule-smoke.sh` covers the image-first user flow:
-
-- builds or reuses `./bin/ovek`
-- logs into Brain with an isolated temporary CLI config
-- ensures PocketBase app secrets exist for the signup example
-- runs `ghcr.io/massivemoose/ovek-signup-example:latest` with `ovek run`
-- verifies image-run job logs, runtime logs, routed app reachability, PocketBase status, and cleanup
-
-Current limits:
-
-- capsule smoke checks PocketBase provisioning and status, but it does not yet assert application-level data persistence through PocketBase record writes
-- SELinux labeling and hardened-host bind-mount checks still need a true Linux follow-up outside the macOS VM lane

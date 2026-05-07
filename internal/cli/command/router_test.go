@@ -30,6 +30,42 @@ func TestRouterReturnsUsageForHelp(t *testing.T) {
 	}
 }
 
+func TestRouterReturnsCommandUsageForCommandHelp(t *testing.T) {
+	command := &recordingCommand{name: "rm", summary: "Remove runtime", err: ErrUsage}
+	router := NewRouter("ovek", "Ovek CLI", command)
+
+	err := router.Run(context.Background(), []string{"rm", "--help"})
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("expected ErrUsage, got %v", err)
+	}
+
+	usageCommand, ok := UsageCommand(err)
+	if !ok {
+		t.Fatalf("expected command usage error, got %v", err)
+	}
+	if usageCommand != command {
+		t.Fatalf("expected usage command %p, got %p", command, usageCommand)
+	}
+}
+
+func TestRouterSupportsHelpForKnownCommand(t *testing.T) {
+	command := &recordingCommand{name: "rm", summary: "Remove runtime"}
+	router := NewRouter("ovek", "Ovek CLI", command)
+
+	err := router.Run(context.Background(), []string{"help", "rm"})
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("expected ErrUsage, got %v", err)
+	}
+
+	usageCommand, ok := UsageCommand(err)
+	if !ok {
+		t.Fatalf("expected command usage error, got %v", err)
+	}
+	if usageCommand != command {
+		t.Fatalf("expected usage command %p, got %p", command, usageCommand)
+	}
+}
+
 func TestRouterUsageListsCommands(t *testing.T) {
 	router := NewRouter(
 		"ovek",
@@ -55,9 +91,30 @@ func TestRouterUsageListsCommands(t *testing.T) {
 	}
 }
 
+func TestRouterUsageSkipsHiddenCommands(t *testing.T) {
+	router := NewRouter(
+		"ovek",
+		"Ovek CLI",
+		&recordingCommand{name: "run", summary: "Run capsule image"},
+		&recordingCommand{name: "deploy", summary: "Legacy deploy", hidden: true},
+	)
+
+	var usage strings.Builder
+	router.Usage(&usage)
+
+	text := usage.String()
+	if !strings.Contains(text, "run") {
+		t.Fatalf("expected usage to contain visible command, got %q", text)
+	}
+	if strings.Contains(text, "deploy") {
+		t.Fatalf("expected usage to hide deploy command, got %q", text)
+	}
+}
+
 type recordingCommand struct {
 	name    string
 	summary string
+	hidden  bool
 	args    []string
 	err     error
 }
@@ -65,6 +122,8 @@ type recordingCommand struct {
 func (command *recordingCommand) Name() string { return command.name }
 
 func (command *recordingCommand) Summary() string { return command.summary }
+
+func (command *recordingCommand) Hidden() bool { return command.hidden }
 
 func (command *recordingCommand) Run(_ context.Context, args []string) error {
 	command.args = append([]string(nil), args...)

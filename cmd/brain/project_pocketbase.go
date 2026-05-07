@@ -23,12 +23,17 @@ const (
 	projectPocketBaseSuperuserEmailEnv    = "PB_SUPERUSER_EMAIL"
 	projectPocketBaseSuperuserPasswordEnv = "PB_SUPERUSER_PASSWORD"
 	projectPocketBasePasswordBytes        = 32
+	projectPocketBaseUpsertAttempts       = 6
+	projectPocketBaseUpsertRetryDelay     = 500 * time.Millisecond
 )
 
 var errProjectPocketBaseAlreadyInitialized = errors.New("project PocketBase credentials already initialized")
 
+var sleepForPocketBaseUpsertRetry = sleepWithContext
+
 type projectPocketBaseRuntime interface {
 	EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error)
+	WaitForProjectPocketBaseReady(ctx context.Context, projectName string) error
 	UpsertProjectPocketBaseSuperuser(ctx context.Context, projectName string, email string, password string) error
 	ProjectPocketBaseProxyTarget(ctx context.Context, projectName string) (string, error)
 	GetProjectPocketBaseRuntime(ctx context.Context, projectName string) (projectRuntimeContainer, bool, error)
@@ -190,12 +195,15 @@ func (service managedProjectPocketBaseService) Init(ctx context.Context, project
 	if _, err := service.runtime.EnsureProjectPocketBase(ctx, projectName, service.pocketBaseImage, service.projectsHostDataDir); err != nil {
 		return brainapi.ProjectPocketBaseStatus{}, fmt.Errorf("ensure PocketBase: %w", err)
 	}
+	if err := service.runtime.WaitForProjectPocketBaseReady(ctx, projectName); err != nil {
+		return brainapi.ProjectPocketBaseStatus{}, fmt.Errorf("wait for PocketBase readiness: %w", err)
+	}
 
 	credential, created, err := service.credentialStore.GetOrCreate(ctx, projectName, email, now)
 	if err != nil {
 		return brainapi.ProjectPocketBaseStatus{}, err
 	}
-	if err := service.runtime.UpsertProjectPocketBaseSuperuser(ctx, projectName, credential.Email, credential.Password); err != nil {
+	if err := service.upsertSuperuserWithRetry(ctx, projectName, credential); err != nil {
 		if created {
 			_ = service.credentialStore.Delete(ctx, projectName)
 		}
@@ -226,6 +234,35 @@ func (service managedProjectPocketBaseService) Init(ctx context.Context, project
 	}
 	status.AppSecretsRevisionID = appSecretsRevisionID
 	return status, nil
+}
+
+func (service managedProjectPocketBaseService) upsertSuperuserWithRetry(ctx context.Context, projectName string, credential projectPocketBaseCredential) error {
+	var lastErr error
+	for attempt := 1; attempt <= projectPocketBaseUpsertAttempts; attempt++ {
+		err := service.runtime.UpsertProjectPocketBaseSuperuser(ctx, projectName, credential.Email, credential.Password)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isRetryablePocketBaseUpsertError(err) || attempt == projectPocketBaseUpsertAttempts {
+			return err
+		}
+		if waitErr := sleepForPocketBaseUpsertRetry(ctx, projectPocketBaseUpsertRetryDelay); waitErr != nil {
+			return fmt.Errorf("%w after retryable PocketBase superuser upsert error: %v", waitErr, lastErr)
+		}
+	}
+
+	return lastErr
+}
+
+func isRetryablePocketBaseUpsertError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "sqlite_busy") ||
+		strings.Contains(message, "exit code 137")
 }
 
 func (service managedProjectPocketBaseService) Proxy(w http.ResponseWriter, r *http.Request, projectName string) error {

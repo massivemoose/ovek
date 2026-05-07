@@ -12,7 +12,7 @@ import (
 	"github.com/massivemoose/ovek/internal/cli/config"
 )
 
-func TestPocketBaseInitSendsRequestAndPrintsStatus(t *testing.T) {
+func TestDatabaseInitSendsRequestAndPrintsStatus(t *testing.T) {
 	var gotRequest brainapi.InitProjectPocketBaseRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/projects/demo-app/pocketbase/init" {
@@ -48,7 +48,7 @@ func TestPocketBaseInitSendsRequestAndPrintsStatus(t *testing.T) {
 
 	var stdout strings.Builder
 	var stderr strings.Builder
-	exitCode := runWithStore(context.Background(), []string{"pb", "init", "demo-app", "--email", "admin@example.com", "--app-secrets"}, &stdout, &stderr, store)
+	exitCode := runWithStore(context.Background(), []string{"db", "init", "demo-app", "--email", "admin@example.com", "--app-secrets"}, &stdout, &stderr, store)
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d with stderr %q", exitCode, stderr.String())
 	}
@@ -57,7 +57,9 @@ func TestPocketBaseInitSendsRequestAndPrintsStatus(t *testing.T) {
 	}
 	output := stdout.String()
 	for _, fragment := range []string{
-		"PocketBase initialized.",
+		"Database initialized.",
+		"Database",
+		"Provider",
 		"PocketBase",
 		"demo-app",
 		"ovek-demo-app-pb",
@@ -72,7 +74,7 @@ func TestPocketBaseInitSendsRequestAndPrintsStatus(t *testing.T) {
 	}
 }
 
-func TestPocketBaseStatusPrintsStatusWithoutSecrets(t *testing.T) {
+func TestDatabaseStatusPrintsStatusWithoutSecrets(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/projects/demo-app/pocketbase" {
 			http.NotFound(w, r)
@@ -97,12 +99,12 @@ func TestPocketBaseStatusPrintsStatusWithoutSecrets(t *testing.T) {
 
 	var stdout strings.Builder
 	var stderr strings.Builder
-	exitCode := runWithStore(context.Background(), []string{"pb", "status", "demo-app"}, &stdout, &stderr, store)
+	exitCode := runWithStore(context.Background(), []string{"db", "status", "demo-app"}, &stdout, &stderr, store)
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d with stderr %q", exitCode, stderr.String())
 	}
 	output := stdout.String()
-	for _, fragment := range []string{"PocketBase", "admin@demo-app.ovek.local", "App Secrets", "no"} {
+	for _, fragment := range []string{"Database", "Provider", "PocketBase", "admin@demo-app.ovek.local", "App Secrets", "no"} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("expected output to contain %q, got %q", fragment, output)
 		}
@@ -112,7 +114,7 @@ func TestPocketBaseStatusPrintsStatusWithoutSecrets(t *testing.T) {
 	}
 }
 
-func TestPocketBaseInitRetriesAfterProdReauthRequired(t *testing.T) {
+func TestDatabaseInitRetriesAfterProdReauthRequired(t *testing.T) {
 	initCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -158,7 +160,7 @@ func TestPocketBaseInitRetriesAfterProdReauthRequired(t *testing.T) {
 
 	var stdout strings.Builder
 	var stderr strings.Builder
-	exitCode := runWithStoreAndInput(context.Background(), []string{"pb", "init", "demo-app"}, "secret-pass\n", &stdout, &stderr, store)
+	exitCode := runWithStoreAndInput(context.Background(), []string{"db", "init", "demo-app"}, "secret-pass\n", &stdout, &stderr, store)
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d with stderr %q", exitCode, stderr.String())
 	}
@@ -170,7 +172,7 @@ func TestPocketBaseInitRetriesAfterProdReauthRequired(t *testing.T) {
 	}
 }
 
-func TestPocketBaseTunnelRejectsNonLoopbackListenAddress(t *testing.T) {
+func TestDatabaseTunnelRejectsNonLoopbackListenAddress(t *testing.T) {
 	store := config.NewStore(t.TempDir())
 	if err := store.SaveProfile("default", config.Profile{Host: "http://127.0.0.1:1", APIKey: "test-key"}, true); err != nil {
 		t.Fatalf("expected config save to succeed, got error: %v", err)
@@ -178,7 +180,7 @@ func TestPocketBaseTunnelRejectsNonLoopbackListenAddress(t *testing.T) {
 
 	var stdout strings.Builder
 	var stderr strings.Builder
-	exitCode := runWithStore(context.Background(), []string{"pb", "tunnel", "demo-app", "--listen", "0.0.0.0:8090"}, &stdout, &stderr, store)
+	exitCode := runWithStore(context.Background(), []string{"db", "tunnel", "demo-app", "--listen", "0.0.0.0:8090"}, &stdout, &stderr, store)
 	if exitCode == 0 {
 		t.Fatalf("expected tunnel validation to fail, got stdout %q", stdout.String())
 	}

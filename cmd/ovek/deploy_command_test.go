@@ -239,8 +239,8 @@ func TestDeployReportsActiveDeploymentConflict(t *testing.T) {
 	if exitCode != 1 {
 		t.Fatalf("expected exit code 1, got %d", exitCode)
 	}
-	if stdout.String() != "" {
-		t.Fatalf("expected no stdout, got %q", stdout.String())
+	if !strings.Contains(stdout.String(), "Deprecated: ovek deploy is the legacy source-build path") {
+		t.Fatalf("expected deprecation notice on stdout, got %q", stdout.String())
 	}
 	for _, fragment := range []string{
 		"already has an active deployment job",

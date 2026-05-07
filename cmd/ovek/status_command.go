@@ -118,7 +118,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	output.WriteSection(cmd.stdout, "Project")
 	output.WriteKeyValues(cmd.stdout, [][2]string{
 		{"Name", project.Name},
-		{"Status", project.Status},
+		{"Status", projectDisplayStatus(project.Status, runtimeView, hasRuntime)},
 		{"Current Deployment", stringOrDash(project.CurrentDeploymentID)},
 		{"Created", project.CreatedAt},
 	})
@@ -131,7 +131,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 		runtimePairs := [][2]string{
 			{"Deployment", stringOrDash(runtimeView.CurrentDeploymentID)},
 			{"App", runtimeAppSummary(runtimeView.App)},
-			{"PocketBase", runtimeContainerSummary(runtimeView.PocketBase)},
+			{"Database", runtimeContainerSummary(runtimeView.PocketBase)},
 			{"Network", runtimeNetworkSummary(runtimeView.Network)},
 		}
 		output.WriteKeyValues(cmd.stdout, runtimePairs)
@@ -235,6 +235,13 @@ func runtimeNetworkSummary(network *brainapi.ProjectRuntimeNetwork) string {
 		return "-"
 	}
 	return network.Name
+}
+
+func projectDisplayStatus(status string, runtimeView brainapi.ProjectRuntime, hasRuntime bool) string {
+	if hasRuntime && runtimeView.App != nil && !runtimeView.App.Running {
+		return "stopped"
+	}
+	return status
 }
 
 func deploymentSource(deployment brainapi.Deployment) string {

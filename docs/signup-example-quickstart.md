@@ -58,10 +58,10 @@ From the machine running Ovek:
 
 Expected: the active profile points at `http://brain.localhost`.
 
-## Initialize PocketBase
+## Initialize Database
 
-1. `./bin/ovek pb init signup-demo --app-secrets`
-2. `./bin/ovek pb status signup-demo`
+1. `./bin/ovek db init signup-demo --app-secrets`
+2. `./bin/ovek db status signup-demo`
 
 Expected: PocketBase is running, initialized is `yes`, and app secrets are configured. Ovek stores the generated PocketBase app credentials as project env/secrets for the next capsule run.
 
@@ -81,7 +81,7 @@ For same-machine browser testing:
 
 Expected: the signup form loads. Submit an email address and confirm the app redirects to `/success`.
 
-## Inspect PocketBase
+## Inspect Database
 
 Ovek currently generates and stores the app-facing PocketBase credentials without a reveal command. For dashboard inspection during local trials, create a separate dashboard superuser.
 
@@ -95,7 +95,7 @@ On Linux:
 
 Start a local PocketBase tunnel:
 
-1. `./bin/ovek pb tunnel signup-demo --listen 127.0.0.1:8091`
+1. `./bin/ovek db tunnel signup-demo --listen 127.0.0.1:8091`
 
 Open the PocketBase dashboard:
 
@@ -113,17 +113,21 @@ Expected: the `signups` collection exists after the app starts, and submitted em
 ## Useful Commands
 
 1. `./bin/ovek status signup-demo`
-2. `./bin/ovek pb status signup-demo`
+2. `./bin/ovek db status signup-demo`
 3. `./bin/ovek logs signup-demo`
 4. `./bin/ovek logs signup-demo --no-follow`
-5. `./pm ps -a`
-6. `./pm compose logs brain`
-7. `./pm logs ovek-signup-demo-pb`
-8. `./pm app signup-demo /`
+5. `./bin/ovek stop signup-demo`
+6. `./bin/ovek start signup-demo`
+7. `./bin/ovek restart signup-demo`
+8. `./bin/ovek rm signup-demo`
+9. `./pm ps -a`
+10. `./pm compose logs brain`
+11. `./pm logs ovek-signup-demo-pb`
+12. `./pm app signup-demo /`
 
-If `ovek pb tunnel` reports that port `8090` is already in use:
+If `ovek db tunnel` reports that port `8090` is already in use:
 
-1. `./bin/ovek pb tunnel signup-demo --listen 127.0.0.1:8091`
+1. `./bin/ovek db tunnel signup-demo --listen 127.0.0.1:8091`
 
 If a run appears stuck, rerun:
 

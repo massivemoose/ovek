@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -22,8 +25,12 @@ const (
 	pocketBaseDataDirName   = "pb_data"
 	pocketBaseDataMountPath = "/pb_data"
 	pocketBaseNetworkAlias  = "db"
+	pocketBaseRuntimePort   = "8090"
 	pocketBaseDataUID       = 100
 	pocketBaseDataGID       = 101
+
+	pocketBaseReadinessTimeout  = 15 * time.Second
+	pocketBaseReadinessInterval = 250 * time.Millisecond
 )
 
 type pocketBaseSpec struct {
@@ -213,6 +220,79 @@ func (runtime *dockerRuntime) RemoveProjectPocketBase(ctx context.Context, proje
 	}
 
 	return runtime.removeManagedContainer(ctx, containerName, container, "PocketBase container")
+}
+
+func (runtime *dockerRuntime) WaitForProjectPocketBaseReady(ctx context.Context, projectName string) error {
+	readyContext, cancel := context.WithTimeout(ctx, pocketBaseReadinessTimeout)
+	defer cancel()
+
+	address := ""
+	var lastErr error
+	for {
+		if err := runtime.requireRunningManagedPocketBase(readyContext, projectName); err != nil {
+			lastErr = err
+		} else if err := runtime.ensureControlPlaneProjectNetworkAttachment(readyContext, projectName); err != nil {
+			lastErr = err
+		} else {
+			target, err := runtime.resolveProjectPocketBaseReadinessTarget(readyContext, projectName)
+			if err == nil {
+				address = target
+				conn, err := runtime.dialContext(readyContext, "tcp", address)
+				if err == nil {
+					if closeErr := conn.Close(); closeErr != nil {
+						return fmt.Errorf("close PocketBase readiness probe connection: %w", closeErr)
+					}
+
+					return nil
+				}
+				lastErr = err
+			} else {
+				lastErr = err
+			}
+		}
+
+		if errors.Is(readyContext.Err(), context.DeadlineExceeded) {
+			break
+		}
+
+		if waitErr := runtime.sleep(readyContext, pocketBaseReadinessInterval); waitErr != nil {
+			if errors.Is(waitErr, context.DeadlineExceeded) || errors.Is(waitErr, context.Canceled) {
+				break
+			}
+
+			return fmt.Errorf("wait for next PocketBase readiness probe: %w", waitErr)
+		}
+	}
+
+	if lastErr == nil {
+		lastErr = readyContext.Err()
+	}
+
+	return fmt.Errorf("timed out waiting for PocketBase container %q to accept TCP connections on %s: %w", pocketBaseContainerName(projectName), address, lastErr)
+}
+
+func (runtime *dockerRuntime) resolveProjectPocketBaseReadinessTarget(ctx context.Context, projectName string) (string, error) {
+	containerName := pocketBaseContainerName(projectName)
+	container, err := runtime.client.ContainerInspect(ctx, containerName)
+	if err != nil {
+		return "", fmt.Errorf("inspect PocketBase container %q: %w", containerName, err)
+	}
+	if container.NetworkSettings == nil {
+		return "", fmt.Errorf("PocketBase container %q is missing network settings", containerName)
+	}
+
+	networkName := projectNetworkName(projectName)
+	endpoint := container.NetworkSettings.Networks[networkName]
+	if endpoint == nil {
+		return "", fmt.Errorf("PocketBase container %q is not attached to network %q", containerName, networkName)
+	}
+
+	ipAddress := strings.TrimSpace(endpoint.IPAddress)
+	if ipAddress == "" {
+		return "", fmt.Errorf("PocketBase container %q has no IP address on network %q", containerName, networkName)
+	}
+
+	return net.JoinHostPort(ipAddress, pocketBaseRuntimePort), nil
 }
 
 func (runtime *dockerRuntime) UpsertProjectPocketBaseSuperuser(ctx context.Context, projectName string, email string, password string) error {

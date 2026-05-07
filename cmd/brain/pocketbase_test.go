@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -511,6 +513,65 @@ func TestDockerRuntimeRemoveProjectPocketBaseIgnoresMissingContainer(t *testing.
 	}
 	if client.containerRemoveID != "" {
 		t.Fatalf("expected remove not to be called, got %q", client.containerRemoveID)
+	}
+}
+
+func TestDockerRuntimeWaitForProjectPocketBaseReadySucceedsAfterRetry(t *testing.T) {
+	projectName := "demo-app"
+	projectNetwork := projectNetworkName(projectName)
+	pocketBase := managedRunningPocketBaseInspectResponse(projectName, "pb-container-123")
+	pocketBase.NetworkSettings = &dockercontainer.NetworkSettings{
+		Networks: map[string]*dockernetwork.EndpointSettings{
+			projectNetwork: {
+				IPAddress: "10.89.0.7",
+			},
+		},
+	}
+	client := &fakeDockerClient{
+		containerInspectResponses: map[string]dockercontainer.InspectResponse{
+			pocketBaseContainerName(projectName): pocketBase,
+			"brain-container": {
+				ContainerJSONBase: &dockercontainer.ContainerJSONBase{ID: "brain-container"},
+				Config:            &dockercontainer.Config{},
+				NetworkSettings: &dockercontainer.NetworkSettings{
+					Networks: map[string]*dockernetwork.EndpointSettings{},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+	runtime.hostname = func() (string, error) { return "brain-container", nil }
+	var sleepDelays []time.Duration
+	runtime.sleep = func(_ context.Context, delay time.Duration) error {
+		sleepDelays = append(sleepDelays, delay)
+		return nil
+	}
+	dialAttempts := 0
+	runtime.dialContext = func(_ context.Context, network string, address string) (net.Conn, error) {
+		dialAttempts++
+		if network != "tcp" || address != "10.89.0.7:8090" {
+			t.Fatalf("expected readiness probe to dial tcp 10.89.0.7:8090, got network=%q address=%q", network, address)
+		}
+		if dialAttempts == 1 {
+			return nil, errors.New("connection refused")
+		}
+		left, right := net.Pipe()
+		_ = right.Close()
+		return left, nil
+	}
+
+	if err := runtime.WaitForProjectPocketBaseReady(context.Background(), projectName); err != nil {
+		t.Fatalf("expected PocketBase readiness wait to succeed, got error: %v", err)
+	}
+
+	if client.networkConnectNetwork != projectNetwork || client.networkConnectID != "brain-container" {
+		t.Fatalf("expected Brain to be attached to project network, got network=%q id=%q", client.networkConnectNetwork, client.networkConnectID)
+	}
+	if dialAttempts != 2 {
+		t.Fatalf("expected readiness dial retry, got %d attempts", dialAttempts)
+	}
+	if !reflect.DeepEqual(sleepDelays, []time.Duration{pocketBaseReadinessInterval}) {
+		t.Fatalf("expected one readiness sleep, got %#v", sleepDelays)
 	}
 }
 

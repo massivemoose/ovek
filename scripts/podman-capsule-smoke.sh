@@ -3,6 +3,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ovek_bin_explicit=0
+if [ -n "${OVEK_BIN:-}" ]; then
+	ovek_bin_explicit=1
+fi
 ovek_bin="${OVEK_BIN:-${repo_root}/bin/ovek}"
 brain_base_url="${OVEK_BASE_URL:-http://127.0.0.1}"
 brain_host="${OVEK_BRAIN_HOST:-brain.localhost}"
@@ -104,13 +108,20 @@ cleanup() {
 trap cleanup EXIT
 
 build_ovek() {
-	if [ -x "${ovek_bin}" ]; then
-		return
+	if [ "${ovek_bin_explicit}" = "1" ]; then
+		if [ ! -x "${ovek_bin}" ]; then
+			fail "OVEK_BIN=${ovek_bin} is not executable"
+		fi
+		log "Using Ovek CLI from OVEK_BIN=${ovek_bin}"
+	else
+		log "Building Ovek CLI at ${ovek_bin}"
+		mkdir -p "$(dirname "${ovek_bin}")"
+		(cd "${repo_root}" && go build -o "${ovek_bin}" ./cmd/ovek)
 	fi
 
-	log "Building Ovek CLI at ${ovek_bin}"
-	mkdir -p "$(dirname "${ovek_bin}")"
-	(cd "${repo_root}" && go build -o "${ovek_bin}" ./cmd/ovek)
+	if ! "${ovek_bin}" help 2>/dev/null | grep -Eq '^[[:space:]]+db[[:space:]]'; then
+		fail "Ovek CLI at ${ovek_bin} does not support 'ovek db'; rebuild it or unset OVEK_BIN"
+	fi
 }
 
 wait_for_ping() {
@@ -133,24 +144,24 @@ wait_for_ping() {
 
 ensure_pocketbase_app_secrets() {
 	status_output=""
-	if status_output="$(run_ovek pb status "${project_name}" 2>&1)"; then
+	if status_output="$(run_ovek db status "${project_name}" 2>&1)"; then
 		if printf '%s\n' "${status_output}" | grep -Eq '^Initialized[[:space:]]+yes' &&
 			printf '%s\n' "${status_output}" | grep -Eq '^App Secrets[[:space:]]+yes'; then
-			log "PocketBase app secrets already configured"
+			log "Database app secrets already configured"
 			return
 		fi
 
 		printf '%s\n' "${status_output}" >&2
-		fail "PocketBase exists for ${project_name}, but app secrets are not configured"
+		fail "Database exists for ${project_name}, but app secrets are not configured"
 	fi
 
-	log "Initializing PocketBase app secrets"
+	log "Initializing database app secrets"
 	cleanup_runtime_on_exit=1
-	if ! init_output="$(run_ovek pb init "${project_name}" --app-secrets 2>&1)"; then
+	if ! init_output="$(run_ovek db init "${project_name}" --app-secrets 2>&1)"; then
 		printf '%s\n' "${init_output}" >&2
-		fail "PocketBase initialization failed"
+		fail "Database initialization failed"
 	fi
-	require_contains "${init_output}" "PocketBase initialized."
+	require_contains "${init_output}" "Database initialized."
 	require_regex "${init_output}" '^App Secrets[[:space:]]+yes'
 }
 
@@ -262,11 +273,11 @@ runtime_logs="$(run_ovek logs "${project_name}" --no-follow)"
 log "Validating routed app"
 wait_for_app_http_200
 
-log "Validating PocketBase sidecar"
-pb_status="$(run_ovek pb status "${project_name}")"
-require_regex "${pb_status}" '^Running[[:space:]]+yes'
-require_regex "${pb_status}" '^Initialized[[:space:]]+yes'
-require_regex "${pb_status}" '^App Secrets[[:space:]]+yes'
+log "Validating database sidecar"
+db_status="$(run_ovek db status "${project_name}")"
+require_regex "${db_status}" '^Running[[:space:]]+yes'
+require_regex "${db_status}" '^Initialized[[:space:]]+yes'
+require_regex "${db_status}" '^App Secrets[[:space:]]+yes'
 
 log "Cleaning up project runtime"
 cleanup_project_runtime

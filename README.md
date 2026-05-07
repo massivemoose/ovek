@@ -11,10 +11,11 @@ Brain is the small control plane that runs on the VPS. It pulls capsule images t
 ## Capsule Runtime Flow
 
 1. Build and publish an OCI image from your laptop, CI, or a hosted builder.
-2. Initialize any project sidecars or secrets, such as `ovek pb init <project> --app-secrets`.
+2. Initialize any project sidecars or secrets, such as `ovek db init <project> --app-secrets`.
 3. Run the capsule with `ovek run <project> <capsule-ref>`.
 4. Ovek pulls the image, starts the app plus sidecars, waits for readiness, and routes `<project>.localhost` to the app.
-5. Use `ovek status`, `ovek logs`, and `ovek pb status` to inspect the running project.
+5. Use `ovek status`, `ovek logs`, and `ovek db status` to inspect the running project.
+6. Use `ovek stop`, `ovek start`, `ovek restart`, and `ovek rm` to manage the app runtime without deleting database data by default.
 
 Capsule v1 is intentionally simple:
 
@@ -51,7 +52,7 @@ Authenticate the CLI against the local Brain route:
 
 Run the canonical signup capsule:
 
-1. `./bin/ovek pb init signup-demo --app-secrets`
+1. `./bin/ovek db init signup-demo --app-secrets`
 2. `./bin/ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`
 3. `./bin/ovek status signup-demo`
 4. `./bin/ovek logs signup-demo --no-follow`
@@ -93,7 +94,7 @@ Useful entrypoints:
 - `./pm capsule-smoke`
 - `./pm down`
 
-The primary acceptance path is `scripts/podman-capsule-smoke.sh`. It runs the public signup capsule through `ovek run`, checks job logs, runtime logs, routed app reachability, PocketBase sidecar status, and cleanup.
+The primary acceptance path is `scripts/podman-capsule-smoke.sh`. It runs the public signup capsule through `ovek run`, checks job logs, runtime logs, routed app reachability, database sidecar status, and cleanup.
 
 Legacy source-build smoke runs only through the explicit builder stack.
 
@@ -105,6 +106,7 @@ See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM and Lin
 - [Project env and secrets](docs/project-env-secrets.md): project configuration captured by the next capsule run.
 - [Podman testing](docs/podman-testing.md): local VM and Linux acceptance workflows.
 - [Ubuntu VPS trial](docs/vps-trial.md): first real-server flow over an SSH tunnel.
+- [MVP release checklist](docs/mvp-release-checklist.md): final public-feedback readiness checks.
 
 ## Current MVP Shape
 

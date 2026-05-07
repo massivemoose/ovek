@@ -244,6 +244,74 @@ func (client *Client) GetProjectRuntime(ctx context.Context, projectName string)
 	return runtime, nil
 }
 
+func (client *Client) StartProjectRuntime(ctx context.Context, projectName string) (brainapi.ProjectRuntime, error) {
+	return client.postProjectRuntimeMutation(ctx, projectName, "start")
+}
+
+func (client *Client) StopProjectRuntime(ctx context.Context, projectName string) (brainapi.ProjectRuntime, error) {
+	return client.postProjectRuntimeMutation(ctx, projectName, "stop")
+}
+
+func (client *Client) RestartProjectRuntime(ctx context.Context, projectName string) (brainapi.ProjectRuntime, error) {
+	return client.postProjectRuntimeMutation(ctx, projectName, "restart")
+}
+
+func (client *Client) RemoveProjectRuntime(ctx context.Context, projectName string, removeDatabase bool, deleteDatabaseData bool) error {
+	requestPath := "/v1/projects/" + url.PathEscape(strings.TrimSpace(projectName)) + "/runtime/app"
+	query := url.Values{}
+	if removeDatabase {
+		query.Set("removeDatabase", "true")
+	}
+	if deleteDatabaseData {
+		query.Set("deleteDatabaseData", "true")
+	}
+	if encodedQuery := query.Encode(); encodedQuery != "" {
+		requestPath += "?" + encodedQuery
+	}
+
+	request, err := client.newRequest(ctx, http.MethodDelete, requestPath, nil)
+	if err != nil {
+		return err
+	}
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	return decodeAPIError(response)
+}
+
+func (client *Client) postProjectRuntimeMutation(ctx context.Context, projectName string, action string) (brainapi.ProjectRuntime, error) {
+	request, err := client.newRequest(
+		ctx,
+		http.MethodPost,
+		"/v1/projects/"+url.PathEscape(strings.TrimSpace(projectName))+"/runtime/"+url.PathEscape(strings.TrimSpace(action)),
+		nil,
+	)
+	if err != nil {
+		return brainapi.ProjectRuntime{}, err
+	}
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.ProjectRuntime{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.ProjectRuntime{}, err
+	}
+
+	var runtime brainapi.ProjectRuntime
+	if err := json.NewDecoder(response.Body).Decode(&runtime); err != nil {
+		return brainapi.ProjectRuntime{}, fmt.Errorf("decode runtime response: %w", err)
+	}
+
+	return runtime, nil
+}
+
 func (client *Client) GetProjectEnvironment(ctx context.Context, projectName string) ([]brainapi.ProjectEnvironmentEntry, error) {
 	responseBody, err := client.getJSON(ctx, "/v1/projects/"+url.PathEscape(strings.TrimSpace(projectName))+"/env")
 	if err != nil {

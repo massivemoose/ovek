@@ -30,7 +30,11 @@ func newDeployCommand(stdout io.Writer, store *config.Store, prompts prompter) c
 
 func (cmd *deployCommand) Name() string { return "deploy" }
 
-func (cmd *deployCommand) Summary() string { return "Create and follow deployments" }
+func (cmd *deployCommand) Summary() string {
+	return "Create and follow legacy source-build deployments"
+}
+
+func (cmd *deployCommand) Hidden() bool { return true }
 
 func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 	flagSet := flag.NewFlagSet("ovek deploy", flag.ContinueOnError)
@@ -47,6 +51,9 @@ func (cmd *deployCommand) Run(ctx context.Context, args []string) error {
 
 	projectName := flagSet.Arg(0)
 	repoURL := flagSet.Arg(1)
+
+	_, _ = fmt.Fprintln(cmd.stdout, "Deprecated: ovek deploy is the legacy source-build path. Use 'ovek run <project> <capsule-ref>' for capsule deployments.")
+	_, _ = fmt.Fprintln(cmd.stdout)
 
 	brainClient, _, err := loadConfiguredClient(cmd.config, "")
 	if err != nil {

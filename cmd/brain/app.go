@@ -233,6 +233,71 @@ func (runtime *dockerRuntime) RemoveProjectApp(ctx context.Context, deployment d
 	return runtime.removeManagedContainer(ctx, deployment.AppContainerName, container, "app container")
 }
 
+func (runtime *dockerRuntime) StartProjectApp(ctx context.Context, deployment deploymentRecord) error {
+	container, err := runtime.client.ContainerInspect(ctx, deployment.AppContainerName)
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return errProjectRuntimeNotFound
+		}
+		return fmt.Errorf("inspect app container %q: %w", deployment.AppContainerName, err)
+	}
+	if container.Config == nil {
+		return fmt.Errorf("app container %q is missing config", deployment.AppContainerName)
+	}
+	if err := validateManagedProjectAppContainer(deployment, container); err != nil {
+		return err
+	}
+	if container.State != nil && container.State.Running {
+		return nil
+	}
+
+	containerID := container.ID
+	if containerID == "" {
+		containerID = deployment.AppContainerName
+	}
+	if err := runtime.client.ContainerStart(ctx, containerID, dockercontainer.StartOptions{}); err != nil {
+		return fmt.Errorf("start app container %q: %w", deployment.AppContainerName, err)
+	}
+	return nil
+}
+
+func (runtime *podmanRuntime) StartProjectApp(ctx context.Context, deployment deploymentRecord) error {
+	return runtime.dockerRuntime.StartProjectApp(ctx, deployment)
+}
+
+func (runtime *dockerRuntime) StopProjectApp(ctx context.Context, deployment deploymentRecord) error {
+	container, err := runtime.client.ContainerInspect(ctx, deployment.AppContainerName)
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return errProjectRuntimeNotFound
+		}
+		return fmt.Errorf("inspect app container %q: %w", deployment.AppContainerName, err)
+	}
+	if container.Config == nil {
+		return fmt.Errorf("app container %q is missing config", deployment.AppContainerName)
+	}
+	if err := validateManagedProjectAppContainer(deployment, container); err != nil {
+		return err
+	}
+	if container.State == nil || !container.State.Running {
+		return nil
+	}
+
+	containerID := container.ID
+	if containerID == "" {
+		containerID = deployment.AppContainerName
+	}
+	timeout := appStopTimeoutSeconds
+	if err := runtime.client.ContainerStop(ctx, containerID, dockercontainer.StopOptions{Timeout: &timeout}); err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("stop app container %q: %w", deployment.AppContainerName, err)
+	}
+	return nil
+}
+
+func (runtime *podmanRuntime) StopProjectApp(ctx context.Context, deployment deploymentRecord) error {
+	return runtime.dockerRuntime.StopProjectApp(ctx, deployment)
+}
+
 func (runtime *dockerRuntime) ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options runtimeLogOptions) (io.ReadCloser, error) {
 	container, err := runtime.client.ContainerInspect(ctx, deployment.AppContainerName)
 	if err != nil {
