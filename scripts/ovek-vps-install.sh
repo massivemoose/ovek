@@ -18,6 +18,16 @@ fail() {
 	exit 1
 }
 
+fail_with_hints() {
+	message="$1"
+	shift
+	printf 'error: %s\n' "${message}" >&2
+	for hint in "$@"; do
+		printf 'hint: %s\n' "${hint}" >&2
+	done
+	exit 1
+}
+
 require_ubuntu() {
 	if [ ! -r /etc/os-release ]; then
 		fail "this installer expects Ubuntu and could not read /etc/os-release"
@@ -46,52 +56,104 @@ run_sudo() {
 }
 
 install_packages() {
+	log "Updating Ubuntu package metadata"
+	if ! run_sudo apt-get update; then
+		fail_with_hints \
+			"apt-get update failed" \
+			"retry: sudo apt-get update" \
+			"check network, DNS, and Ubuntu apt mirror availability"
+	fi
+
 	log "Installing Podman and compose dependencies"
-	run_sudo apt-get update
-	run_sudo apt-get install -y ca-certificates curl git make podman podman-compose
+	if ! run_sudo apt-get install -y ca-certificates curl git make podman podman-compose; then
+		fail_with_hints \
+			"package installation failed" \
+			"retry: sudo apt-get install -y ca-certificates curl git make podman podman-compose" \
+			"check the apt output above for the package or repository that failed"
+	fi
 }
 
 ensure_podman() {
 	log "Enabling podman.socket"
-	run_sudo systemctl enable --now podman.socket
+	if ! run_sudo systemctl enable --now podman.socket; then
+		fail_with_hints \
+			"could not enable and start podman.socket" \
+			"inspect: sudo systemctl status podman.socket" \
+			"logs: sudo journalctl -u podman.socket -n 100 --no-pager"
+	fi
 }
 
 compose_command() {
-	if command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
-		printf '%s\n' "$(command -v podman) compose"
-		return
+	printf '==> Detecting Podman compose provider\n' >&2
+
+	if command -v podman >/dev/null 2>&1; then
+		if compose_output="$(podman compose version 2>&1)"; then
+			printf '==> Using podman compose\n' >&2
+			printf '%s\n' "$(command -v podman) compose"
+			return
+		fi
+		printf 'note: podman compose is unavailable: %s\n' "${compose_output}" >&2
 	fi
 
 	if command -v podman-compose >/dev/null 2>&1; then
-		printf '%s\n' "$(command -v podman-compose)"
-		return
+		if compose_output="$(podman-compose --version 2>&1)"; then
+			printf '==> Using podman-compose\n' >&2
+			printf '%s\n' "$(command -v podman-compose)"
+			return
+		fi
+		printf 'note: podman-compose is unavailable: %s\n' "${compose_output}" >&2
 	fi
 
-	fail "no Podman compose provider found after package installation"
+	fail_with_hints \
+		"no Podman compose provider found after package installation" \
+		"inspect: podman compose version" \
+		"inspect: podman-compose --version" \
+		"retry install: sudo apt-get install -y podman-compose"
 }
 
 install_runtime_files() {
 	log "Installing runtime stack into ${install_dir}"
-	run_sudo mkdir -p "${install_dir}" "${config_dir}" "${data_dir}/projects" "${data_dir}/traefik/dynamic" "${data_dir}/job-logs"
-	run_sudo chmod 0755 "${install_dir}"
-	run_sudo chmod 0755 "${config_dir}"
-	run_sudo chmod 0750 "${data_dir}"
+	if run_sudo test -d "${data_dir}"; then
+		log "Preserving existing data directory ${data_dir}"
+	fi
 
-	tar -C "${repo_root}" -cf - Dockerfile.brain podman-compose.yml go.mod go.sum cmd/brain internal | run_sudo tar -C "${install_dir}" -xf -
+	if ! run_sudo mkdir -p "${install_dir}" "${config_dir}" "${data_dir}/projects" "${data_dir}/traefik/dynamic" "${data_dir}/job-logs"; then
+		fail_with_hints \
+			"could not create runtime directories" \
+			"inspect permissions for ${install_dir}, ${config_dir}, and ${data_dir}"
+	fi
+	if ! run_sudo chmod 0755 "${install_dir}"; then
+		fail "could not set permissions on ${install_dir}"
+	fi
+	if ! run_sudo chmod 0755 "${config_dir}"; then
+		fail "could not set permissions on ${config_dir}"
+	fi
+	if ! run_sudo chmod 0750 "${data_dir}"; then
+		fail "could not set permissions on ${data_dir}"
+	fi
+
+	if ! tar -C "${repo_root}" -cf - Dockerfile.brain podman-compose.yml go.mod go.sum cmd/brain internal | run_sudo tar -C "${install_dir}" -xf -; then
+		fail_with_hints \
+			"could not copy runtime files into ${install_dir}" \
+			"confirm the checkout contains Dockerfile.brain, podman-compose.yml, cmd/brain, and internal"
+	fi
 
 	if [ -L "${install_dir}/brain_data" ]; then
+		log "Keeping existing ${install_dir}/brain_data symlink"
 		return
 	fi
 	if [ -e "${install_dir}/brain_data" ]; then
 		log "${install_dir}/brain_data already exists; leaving it in place"
 		return
 	fi
-	run_sudo ln -s "${data_dir}" "${install_dir}/brain_data"
+	if ! run_sudo ln -s "${data_dir}" "${install_dir}/brain_data"; then
+		fail "could not link ${install_dir}/brain_data to ${data_dir}"
+	fi
 }
 
 write_env_file() {
 	if [ -f "${env_file}" ]; then
-		log "Keeping existing ${env_file}"
+		log "Preserving existing ${env_file}; secrets and runtime data are unchanged"
 		return
 	fi
 
@@ -105,7 +167,13 @@ RUNTIME_ENGINE=podman
 RUNTIME_HOST=unix:///run/podman/podman.sock
 POCKETBASE_IMAGE=docker.io/elestio/pocketbase:latest
 EOF
-	run_sudo install -m 0600 -o root -g root "${tmp_file}" "${env_file}"
+	if ! run_sudo install -m 0600 -o root -g root "${tmp_file}" "${env_file}"; then
+		rm -f "${tmp_file}"
+		fail_with_hints \
+			"could not write ${env_file}" \
+			"inspect: sudo ls -ld ${config_dir}" \
+			"retry after fixing permissions"
+	fi
 	rm -f "${tmp_file}"
 }
 
@@ -132,14 +200,38 @@ TimeoutStartSec=600
 [Install]
 WantedBy=multi-user.target
 EOF
-	run_sudo install -m 0644 -o root -g root "${tmp_file}" "${service_file}"
+	if ! run_sudo install -m 0644 -o root -g root "${tmp_file}" "${service_file}"; then
+		rm -f "${tmp_file}"
+		fail_with_hints \
+			"could not write ${service_file}" \
+			"inspect: sudo ls -ld $(dirname "${service_file}")"
+	fi
 	rm -f "${tmp_file}"
 }
 
 start_service() {
+	log "Reloading systemd"
+	if ! run_sudo systemctl daemon-reload; then
+		fail_with_hints \
+			"systemd daemon-reload failed" \
+			"inspect: sudo systemctl status ovek.service"
+	fi
+
 	log "Starting ovek.service"
-	run_sudo systemctl daemon-reload
-	run_sudo systemctl enable --now ovek.service
+	if ! run_sudo systemctl enable --now ovek.service; then
+		fail_with_hints \
+			"ovek.service failed to start" \
+			"inspect: sudo systemctl status ovek.service" \
+			"logs: sudo journalctl -u ovek.service -n 100 --no-pager" \
+			"containers: sudo podman ps -a"
+	fi
+
+	if ! run_sudo systemctl is-active --quiet ovek.service; then
+		fail_with_hints \
+			"ovek.service is not active after startup" \
+			"inspect: sudo systemctl status ovek.service" \
+			"logs: sudo journalctl -u ovek.service -n 100 --no-pager"
+	fi
 }
 
 main() {
