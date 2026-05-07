@@ -3,6 +3,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ovek_bin_explicit=0
+if [ -n "${OVEK_BIN:-}" ]; then
+	ovek_bin_explicit=1
+fi
 ovek_bin="${OVEK_BIN:-${repo_root}/bin/ovek}"
 brain_base_url="${OVEK_BASE_URL:-http://127.0.0.1}"
 brain_host="${OVEK_BRAIN_HOST:-brain.localhost}"
@@ -104,13 +108,20 @@ cleanup() {
 trap cleanup EXIT
 
 build_ovek() {
-	if [ -x "${ovek_bin}" ]; then
-		return
+	if [ "${ovek_bin_explicit}" = "1" ]; then
+		if [ ! -x "${ovek_bin}" ]; then
+			fail "OVEK_BIN=${ovek_bin} is not executable"
+		fi
+		log "Using Ovek CLI from OVEK_BIN=${ovek_bin}"
+	else
+		log "Building Ovek CLI at ${ovek_bin}"
+		mkdir -p "$(dirname "${ovek_bin}")"
+		(cd "${repo_root}" && go build -o "${ovek_bin}" ./cmd/ovek)
 	fi
 
-	log "Building Ovek CLI at ${ovek_bin}"
-	mkdir -p "$(dirname "${ovek_bin}")"
-	(cd "${repo_root}" && go build -o "${ovek_bin}" ./cmd/ovek)
+	if ! "${ovek_bin}" help 2>/dev/null | grep -Eq '^[[:space:]]+db[[:space:]]'; then
+		fail "Ovek CLI at ${ovek_bin} does not support 'ovek db'; rebuild it or unset OVEK_BIN"
+	fi
 }
 
 wait_for_ping() {
