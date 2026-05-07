@@ -106,6 +106,7 @@ See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM and Lin
 - [Project env and secrets](docs/project-env-secrets.md): project configuration captured by the next capsule run.
 - [Podman testing](docs/podman-testing.md): local VM and Linux acceptance workflows.
 - [Ubuntu VPS trial](docs/vps-trial.md): first real-server flow over an SSH tunnel.
+- [MVP release checklist](docs/mvp-release-checklist.md): final public-feedback readiness checks.
 
 ## Current MVP Shape
 
