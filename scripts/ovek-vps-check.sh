@@ -26,6 +26,17 @@ fail() {
 	printf 'fail: %s\n' "$*" >&2
 }
 
+suggest() {
+	printf 'suggest: %s\n' "$*" >&2
+}
+
+fail_with_suggestion() {
+	message="$1"
+	command="$2"
+	fail "${message}"
+	suggest "${command}"
+}
+
 run_priv() {
 	"${sudo_cmd[@]}" "$@"
 }
@@ -61,7 +72,7 @@ check_sudo() {
 
 	sudo_cmd=(sudo -n)
 	if ! sudo -n true >/dev/null 2>&1; then
-		fail "sudo is installed but cannot run non-interactively; run 'sudo -v' and retry"
+		fail_with_suggestion "sudo credentials are not cached for non-interactive checks" "sudo -v"
 		return
 	fi
 
@@ -71,13 +82,13 @@ check_sudo() {
 
 check_podman() {
 	if ! command -v podman >/dev/null 2>&1; then
-		fail "podman is not installed or not on PATH"
+		fail_with_suggestion "podman is not installed or not on PATH" "sudo apt-get install -y podman podman-compose"
 		return
 	fi
 
 	podman_version="$(podman --version 2>/dev/null || true)"
 	if [ -z "${podman_version}" ]; then
-		fail "podman is installed but did not report a version"
+		fail_with_suggestion "podman is installed but did not report a version" "podman --version"
 		return
 	fi
 
@@ -95,11 +106,12 @@ check_compose() {
 		return
 	fi
 
-	fail "no Podman compose provider found"
+	fail_with_suggestion "no Podman compose provider found" "podman-compose --version"
 }
 
 check_service() {
 	service_name="$1"
+	suggested_command="$2"
 
 	if ! command -v systemctl >/dev/null 2>&1; then
 		fail "systemctl is not available; cannot inspect ${service_name}"
@@ -111,54 +123,59 @@ check_service() {
 		return
 	fi
 
-	fail "${service_name} is not active"
+	if systemctl is-failed --quiet "${service_name}"; then
+		fail_with_suggestion "${service_name} is failed" "${suggested_command}"
+		return
+	fi
+
+	fail_with_suggestion "${service_name} is not active" "${suggested_command}"
 }
 
 check_env_file() {
 	if [ "${sudo_ready}" != "1" ]; then
-		fail "cannot inspect ${env_file} without non-interactive sudo"
+		fail_with_suggestion "cannot inspect ${env_file} without non-interactive sudo" "sudo -v"
 		return
 	fi
 
 	if ! env_content="$(run_priv cat "${env_file}" 2>/dev/null)"; then
-		fail "${env_file} is missing or not readable"
+		fail_with_suggestion "${env_file} is missing or not readable" "sudo cat ${env_file}"
 		return
 	fi
 
 	if printf '%s\n' "${env_content}" | grep -Eq '^RUNTIME_ENGINE=podman$'; then
 		ok "${env_file} sets RUNTIME_ENGINE=podman"
 	else
-		fail "${env_file} does not set RUNTIME_ENGINE=podman"
+		fail_with_suggestion "${env_file} does not set RUNTIME_ENGINE=podman" "sudo cat ${env_file}"
 	fi
 
 	if printf '%s\n' "${env_content}" | grep -Eq '^RUNTIME_HOST=unix:///run/podman/podman.sock$'; then
 		ok "${env_file} points Brain at the Podman socket"
 	else
-		fail "${env_file} does not set RUNTIME_HOST=unix:///run/podman/podman.sock"
+		fail_with_suggestion "${env_file} does not set RUNTIME_HOST=unix:///run/podman/podman.sock" "sudo cat ${env_file}"
 	fi
 }
 
 check_containers() {
 	if [ "${sudo_ready}" != "1" ]; then
-		fail "cannot inspect Podman containers without non-interactive sudo"
+		fail_with_suggestion "cannot inspect Podman containers without non-interactive sudo" "sudo -v"
 		return
 	fi
 
 	if ! container_names="$(run_priv podman ps --format '{{.Names}}' 2>/dev/null)"; then
-		fail "sudo podman ps failed"
+		fail_with_suggestion "sudo podman ps failed" "sudo podman ps -a"
 		return
 	fi
 
 	if printf '%s\n' "${container_names}" | grep -Fxq brain; then
 		ok "brain container is running"
 	else
-		fail "brain container is not running"
+		fail_with_suggestion "brain container is not running" "sudo podman ps -a"
 	fi
 
 	if printf '%s\n' "${container_names}" | grep -Fxq traefik; then
 		ok "traefik container is running"
 	else
-		fail "traefik container is not running"
+		fail_with_suggestion "traefik container is not running" "sudo podman ps -a"
 	fi
 }
 
@@ -168,12 +185,17 @@ check_brain() {
 		return
 	fi
 
-	if curl -fsS -H "Host: ${brain_host}" -H "X-API-Key: ${api_key}" "${brain_url}" >/dev/null 2>&1; then
+	if curl_output="$(curl -fsS -H "Host: ${brain_host}" -H "X-API-Key: ${api_key}" "${brain_url}" 2>&1 >/dev/null)"; then
 		ok "Brain is reachable at ${brain_url} with Host: ${brain_host}"
 		return
 	fi
 
-	fail "Brain did not respond at ${brain_url} with Host: ${brain_host}"
+	if [ -n "${curl_output}" ]; then
+		fail "Brain did not respond at ${brain_url} with Host: ${brain_host}: ${curl_output}"
+	else
+		fail "Brain did not respond at ${brain_url} with Host: ${brain_host}"
+	fi
+	suggest "sudo podman logs brain"
 }
 
 main() {
@@ -181,8 +203,8 @@ main() {
 	check_sudo
 	check_podman
 	check_compose
-	check_service podman.socket
-	check_service ovek.service
+	check_service podman.socket "sudo systemctl status podman.socket"
+	check_service ovek.service "sudo systemctl status ovek.service"
 	check_env_file
 	check_containers
 	check_brain
