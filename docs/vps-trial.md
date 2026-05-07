@@ -19,10 +19,16 @@ On a fresh Ubuntu VPS:
 
 Expected: `ovek.service` is enabled and running, the runtime-only stack starts Brain and Traefik, and the read-only preflight check passes. The default VPS stack does not start server-side builder services.
 
+On success, the installer prints the next preflight, SSH tunnel, and laptop auth bootstrap commands. Re-running the installer preserves existing `/etc/ovek/ovek.env` secrets and existing runtime data under `/var/lib/ovek`.
+
 If the preflight reports that sudo cannot run non-interactively:
 
 1. `sudo -v`
 2. `./scripts/ovek-vps-check.sh`
+
+For other preflight failures, follow the single `suggest:` command printed with the failure, then rerun:
+
+1. `./scripts/ovek-vps-check.sh`
 
 ## 2. Build The CLI On Your Laptop
 
@@ -173,3 +179,4 @@ To restart Ovek after pulling new repo changes on the VPS:
 
 1. `cd ovek`
 2. `./scripts/ovek-vps-install.sh`
+3. `./scripts/ovek-vps-check.sh`
