@@ -20,11 +20,20 @@ Use this checklist before asking public MVP users for feedback on Ovek's capsule
   `make podman-linux-down`
 - [ ] Confirm CI uses the capsule smoke path as the MVP acceptance signal.
 
+## Brain Runtime Image
+
+- [ ] Confirm the Brain image workflow published the current commit:
+  `ghcr.io/massivemoose/ovek-brain:<full-git-sha>`
+- [ ] Pull the Brain image anonymously from a clean host:
+  `podman pull ghcr.io/massivemoose/ovek-brain:<full-git-sha>`
+- [ ] Confirm the GHCR Brain package is public before asking friends to run the VPS installer.
+
 ## Fresh VPS Trial
 
 - [ ] Start from a fresh Ubuntu VPS.
 - [ ] Install Ovek:
   `./scripts/ovek-vps-install.sh`
+- [ ] Confirm the installer pulls the pinned Brain image and Traefik instead of building Brain locally.
 - [ ] Confirm the installer prints copy/pasteable preflight, SSH tunnel, and auth bootstrap next commands.
 - [ ] Run the read-only preflight and follow any printed `suggest:` command before retrying:
   `./scripts/ovek-vps-check.sh`
