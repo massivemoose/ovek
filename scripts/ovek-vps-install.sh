@@ -8,6 +8,10 @@ config_dir="${OVEK_CONFIG_DIR:-/etc/ovek}"
 data_dir="${OVEK_DATA_DIR:-/var/lib/ovek}"
 env_file="${OVEK_ENV_FILE:-${config_dir}/ovek.env}"
 service_file="${OVEK_SERVICE_FILE:-/etc/systemd/system/ovek.service}"
+brain_image=""
+brain_image_repo="ghcr.io/massivemoose/ovek-brain"
+vps_compose_file="podman-compose.vps.yml"
+traefik_image="traefik:v3.6"
 
 log() {
 	printf '==> %s\n' "$*"
@@ -73,6 +77,24 @@ install_packages() {
 	fi
 }
 
+resolve_brain_image() {
+	if [ -n "${OVEK_BRAIN_IMAGE:-}" ]; then
+		brain_image="${OVEK_BRAIN_IMAGE}"
+		log "Using Brain image from OVEK_BRAIN_IMAGE=${brain_image}"
+		return
+	fi
+
+	if ! source_revision="$(git -C "${repo_root}" rev-parse HEAD 2>/dev/null)"; then
+		fail_with_hints \
+			"could not determine the current git revision for the Brain image tag" \
+			"run the installer from a git checkout" \
+			"or set OVEK_BRAIN_IMAGE=${brain_image_repo}:<tag> explicitly"
+	fi
+
+	brain_image="${brain_image_repo}:${source_revision}"
+	log "Using Brain image ${brain_image}"
+}
+
 ensure_podman() {
 	log "Enabling podman.socket"
 	if ! run_sudo systemctl enable --now podman.socket; then
@@ -132,10 +154,10 @@ install_runtime_files() {
 		fail "could not set permissions on ${data_dir}"
 	fi
 
-	if ! tar -C "${repo_root}" -cf - Dockerfile.brain podman-compose.yml go.mod go.sum cmd/brain internal | run_sudo tar -C "${install_dir}" -xf -; then
+	if ! tar -C "${repo_root}" -cf - "${vps_compose_file}" | run_sudo tar -C "${install_dir}" -xf -; then
 		fail_with_hints \
 			"could not copy runtime files into ${install_dir}" \
-			"confirm the checkout contains Dockerfile.brain, podman-compose.yml, cmd/brain, and internal"
+			"confirm the checkout contains ${vps_compose_file}"
 	fi
 
 	if [ -L "${install_dir}/brain_data" ]; then
@@ -177,6 +199,25 @@ EOF
 	rm -f "${tmp_file}"
 }
 
+pull_runtime_images() {
+	log "Pulling Brain image ${brain_image}"
+	if ! run_sudo podman pull "${brain_image}"; then
+		fail_with_hints \
+			"could not pull Brain image ${brain_image}" \
+			"inspect: sudo podman pull ${brain_image}" \
+			"confirm the GHCR package is public and the image tag has been published" \
+			"override: OVEK_BRAIN_IMAGE=${brain_image_repo}:<tag> ./scripts/ovek-vps-install.sh"
+	fi
+
+	log "Pulling Traefik image ${traefik_image}"
+	if ! run_sudo podman pull "${traefik_image}"; then
+		fail_with_hints \
+			"could not pull Traefik image ${traefik_image}" \
+			"inspect: sudo podman pull ${traefik_image}" \
+			"check network, DNS, and registry availability"
+	fi
+}
+
 write_systemd_unit() {
 	log "Writing ${service_file}"
 	compose_cmd="$(compose_command)"
@@ -192,9 +233,12 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=${install_dir}
 EnvironmentFile=${env_file}
+Environment=OVEK_BRAIN_IMAGE=${brain_image}
 ExecStartPre=/usr/bin/mkdir -p ${data_dir}/projects ${data_dir}/traefik/dynamic ${data_dir}/job-logs
-ExecStart=/bin/sh -lc '${compose_cmd} -f podman-compose.yml up -d --build --force-recreate'
-ExecStop=/bin/sh -lc '${compose_cmd} -f podman-compose.yml down'
+ExecStartPre=/bin/sh -lc '/usr/bin/podman pull "\$OVEK_BRAIN_IMAGE"'
+ExecStartPre=/usr/bin/podman pull ${traefik_image}
+ExecStart=/bin/sh -lc '${compose_cmd} -f ${vps_compose_file} up -d --force-recreate'
+ExecStop=/bin/sh -lc '${compose_cmd} -f ${vps_compose_file} down'
 TimeoutStartSec=600
 
 [Install]
@@ -238,9 +282,11 @@ main() {
 	require_ubuntu
 	require_sudo
 	install_packages
+	resolve_brain_image
 	ensure_podman
 	install_runtime_files
 	write_env_file
+	pull_runtime_images
 	write_systemd_unit
 	start_service
 
