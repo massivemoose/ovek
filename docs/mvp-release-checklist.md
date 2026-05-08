@@ -25,7 +25,8 @@ Use this checklist before asking public MVP users for feedback on Ovek's capsule
 - [ ] Start from a fresh Ubuntu VPS.
 - [ ] Install Ovek:
   `./scripts/ovek-vps-install.sh`
-- [ ] Run the read-only preflight:
+- [ ] Confirm the installer prints copy/pasteable preflight, SSH tunnel, and auth bootstrap next commands.
+- [ ] Run the read-only preflight and follow any printed `suggest:` command before retrying:
   `./scripts/ovek-vps-check.sh`
 - [ ] Complete [vps-trial.md](vps-trial.md) over an SSH tunnel.
 - [ ] Confirm `ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest` succeeds.
