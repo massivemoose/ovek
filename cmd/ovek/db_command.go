@@ -40,6 +40,9 @@ func (cmd *dbCommand) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return command.ErrUsage
 	}
+	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		return command.ErrUsage
+	}
 
 	brainClient, _, err := loadConfiguredClient(cmd.config, "")
 	if err != nil {

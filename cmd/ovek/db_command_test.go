@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
 )
 
@@ -71,6 +73,16 @@ func TestDatabaseInitSendsRequestAndPrintsStatus(t *testing.T) {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("expected output to contain %q, got %q", fragment, output)
 		}
+	}
+}
+
+func TestDatabaseCommandHelpReturnsUsageWithoutConfig(t *testing.T) {
+	store := config.NewStore(t.TempDir())
+	cmd := newDBCommand(&strings.Builder{}, store, nil)
+
+	err := cmd.Run(context.Background(), []string{"--help"})
+	if !errors.Is(err, command.ErrUsage) {
+		t.Fatalf("expected ErrUsage, got %v", err)
 	}
 }
 
