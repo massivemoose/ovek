@@ -3,9 +3,8 @@
 set -euo pipefail
 
 env_file="${OVEK_ENV_FILE:-/etc/ovek/ovek.env}"
-brain_url="${OVEK_CHECK_BRAIN_URL:-http://127.0.0.1/v1/ping}"
+brain_url="${OVEK_CHECK_BRAIN_URL:-http://127.0.0.1/healthz}"
 brain_host="${OVEK_CHECK_BRAIN_HOST:-brain.localhost}"
-api_key="${OVEK_CHECK_API_KEY:-dev-brain-key}"
 
 failures=0
 warnings=0
@@ -185,7 +184,7 @@ check_brain() {
 		return
 	fi
 
-	if curl_output="$(curl -fsS -H "Host: ${brain_host}" -H "X-API-Key: ${api_key}" "${brain_url}" 2>&1 >/dev/null)"; then
+	if curl_output="$(curl -fsS -H "Host: ${brain_host}" "${brain_url}" 2>&1 >/dev/null)"; then
 		ok "Brain is reachable at ${brain_url} with Host: ${brain_host}"
 		return
 	fi

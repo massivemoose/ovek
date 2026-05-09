@@ -17,7 +17,7 @@ On a fresh Ubuntu VPS:
 3. `./scripts/ovek-vps-install.sh`
 4. `./scripts/ovek-vps-check.sh`
 
-Expected: `ovek.service` is enabled and running, the runtime-only stack pulls and starts Brain and Traefik, and the read-only preflight check passes. The default VPS stack does not build Brain locally or start server-side builder services.
+Expected: `ovek.service` is enabled and running, the runtime-only stack pulls and starts Brain and Traefik, and the read-only preflight check passes through Brain's public health endpoint. The default VPS stack does not build Brain locally or start server-side builder services.
 
 By default, the installer pulls `ghcr.io/massivemoose/ovek-brain:<current-git-sha>`. To test a different published Brain image, set `OVEK_BRAIN_IMAGE` when running the installer.
 
