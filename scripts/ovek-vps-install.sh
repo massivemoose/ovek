@@ -11,7 +11,7 @@ service_file="${OVEK_SERVICE_FILE:-/etc/systemd/system/ovek.service}"
 brain_image=""
 brain_image_repo="ghcr.io/massivemoose/ovek-brain"
 vps_compose_file="podman-compose.vps.yml"
-traefik_image="traefik:v3.6"
+traefik_image="docker.io/library/traefik:v3.6"
 
 log() {
 	printf '==> %s\n' "$*"

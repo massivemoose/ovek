@@ -1,7 +1,7 @@
 services:
   # --- Edge router for the control plane and deployed apps ---
   traefik:
-    image: traefik:v3.6
+    image: docker.io/library/traefik:v3.6
     container_name: traefik
     command:
       - "--log.level=INFO"
