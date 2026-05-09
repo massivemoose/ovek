@@ -167,6 +167,30 @@ func TestPodmanRuntimePullImageUsesNativePuller(t *testing.T) {
 	}
 }
 
+func TestPodmanRuntimePullImageUsesRegistryCredential(t *testing.T) {
+	puller := &fakePodmanImagePuller{}
+	runtime := &podmanRuntime{
+		dockerRuntime: newDockerRuntime(&fakeDockerClient{}),
+		puller:        puller,
+		registryCredentials: staticRegistryCredentialResolver{
+			credential: registryCredentialSecret{Host: "ghcr.io", Username: "octo", Password: "secret-token"},
+			found:      true,
+		},
+	}
+
+	err := runtime.PullImage(context.Background(), "ghcr.io/example/private:latest")
+	if err != nil {
+		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
+	}
+
+	if puller.credential == nil {
+		t.Fatal("expected podman runtime to pass matching registry credential")
+	}
+	if puller.credential.Username != "octo" || puller.credential.Password != "secret-token" {
+		t.Fatalf("expected registry credential to be passed through, got %#v", puller.credential)
+	}
+}
+
 func TestPodmanServiceImagePullerSetsTLSVerifyFalseForInsecureRegistries(t *testing.T) {
 	requests := make(chan *http.Request, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +205,7 @@ func TestPodmanServiceImagePullerSetsTLSVerifyFalseForInsecureRegistries(t *test
 		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
 	}
 
-	err = puller.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123", true)
+	err = puller.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123", true, nil)
 	if err != nil {
 		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
 	}
@@ -215,7 +239,7 @@ func TestPodmanServiceImagePullerOmitsTLSVerifyForSecureRegistries(t *testing.T)
 		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
 	}
 
-	err = puller.PullImage(context.Background(), "quay.io/podman/hello:latest", false)
+	err = puller.PullImage(context.Background(), "quay.io/podman/hello:latest", false, nil)
 	if err != nil {
 		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
 	}
@@ -237,7 +261,7 @@ func TestPodmanServiceImagePullerReturnsAPIError(t *testing.T) {
 		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
 	}
 
-	err = puller.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123", true)
+	err = puller.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123", true, nil)
 	if err == nil {
 		t.Fatal("expected podman image pull to fail")
 	}
@@ -259,12 +283,61 @@ func TestPodmanServiceImagePullerReturnsStreamedPullError(t *testing.T) {
 		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
 	}
 
-	err = puller.PullImage(context.Background(), "ghcr.io/example/demo:latest", false)
+	err = puller.PullImage(context.Background(), "ghcr.io/example/demo:latest", false, nil)
 	if err == nil {
 		t.Fatal("expected podman image pull to fail")
 	}
 	if !strings.Contains(err.Error(), "no image found in image index") {
 		t.Fatalf("expected podman pull error to include streamed error, got %v", err)
+	}
+}
+
+func TestPodmanServiceImagePullerSendsRegistryCredentials(t *testing.T) {
+	requests := make(chan *http.Request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	credential := &registryCredentialSecret{Username: "octo", Password: "secret-token"}
+	err = puller.PullImage(context.Background(), "ghcr.io/example/private:latest", false, credential)
+	if err != nil {
+		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
+	}
+
+	request := <-requests
+	if request.URL.Query().Get("credentials") != "octo:secret-token" {
+		t.Fatalf("expected credentials query to be set, got %q", request.URL.Query().Get("credentials"))
+	}
+}
+
+func TestPodmanServiceImagePullerRedactsRegistryCredentialsFromErrors(t *testing.T) {
+	puller := &podmanServiceImagePuller{
+		client: &http.Client{
+			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return nil, fmt.Errorf("failed request %s with secret-token", r.URL.String())
+			}),
+		},
+		baseURL: "http://podman.example",
+	}
+
+	credential := &registryCredentialSecret{Username: "octo", Password: "secret-token"}
+	err := puller.PullImage(context.Background(), "ghcr.io/example/private:latest", false, credential)
+	if err == nil {
+		t.Fatal("expected podman image pull to fail")
+	}
+	if strings.Contains(err.Error(), "secret-token") || strings.Contains(err.Error(), "octo:secret-token") {
+		t.Fatalf("expected registry credential to be redacted, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatalf("expected redacted marker in error, got %v", err)
 	}
 }
 
@@ -333,6 +406,7 @@ type fakeDockerClient struct {
 type fakePodmanImagePuller struct {
 	imageRef         string
 	registryInsecure bool
+	credential       *registryCredentialSecret
 	err              error
 }
 
@@ -471,8 +545,25 @@ func (client *fakeDockerClient) ContainerRemove(_ context.Context, containerID s
 	return client.containerRemoveErr
 }
 
-func (puller *fakePodmanImagePuller) PullImage(_ context.Context, imageRef string, registryInsecure bool) error {
+func (puller *fakePodmanImagePuller) PullImage(_ context.Context, imageRef string, registryInsecure bool, credential *registryCredentialSecret) error {
 	puller.imageRef = imageRef
 	puller.registryInsecure = registryInsecure
+	puller.credential = credential
 	return puller.err
+}
+
+type staticRegistryCredentialResolver struct {
+	credential registryCredentialSecret
+	found      bool
+	err        error
+}
+
+func (resolver staticRegistryCredentialResolver) ResolveForImage(context.Context, string) (registryCredentialSecret, bool, error) {
+	return resolver.credential, resolver.found, resolver.err
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return fn(r)
 }

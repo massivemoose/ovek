@@ -30,6 +30,18 @@ type ReauthResponse struct {
 	ExpiresAt   string `json:"expiresAt"`
 }
 
+type RegistryCredential struct {
+	Host      string `json:"host"`
+	Username  string `json:"username"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type UpsertRegistryCredentialRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 type ProjectSummary struct {
 	Name                string  `json:"name"`
 	Status              string  `json:"status"`

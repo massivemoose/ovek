@@ -258,10 +258,14 @@ func newProdTestHandler(t *testing.T) (http.Handler, *sql.DB) {
 		_ = db.Close()
 	})
 
-	handler := newHandler(config{
+	cipherBox, err := loadSecretCipher(dataDir)
+	if err != nil {
+		t.Fatalf("expected test secret cipher to load, got error: %v", err)
+	}
+	handler := newHandlerWithRegistryStore(config{
 		AuthMode: authModeProd,
 		DataDir:  dataDir,
-	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{})
+	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{}, newRegistryCredentialStore(db, cipherBox))
 
 	return handler, db
 }

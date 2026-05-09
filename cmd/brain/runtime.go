@@ -72,13 +72,18 @@ type dockerRuntime struct {
 }
 
 type podmanImagePuller interface {
-	PullImage(ctx context.Context, imageRef string, registryInsecure bool) error
+	PullImage(ctx context.Context, imageRef string, registryInsecure bool, credential *registryCredentialSecret) error
+}
+
+type registryCredentialResolver interface {
+	ResolveForImage(ctx context.Context, imageRef string) (registryCredentialSecret, bool, error)
 }
 
 type podmanRuntime struct {
 	*dockerRuntime
-	puller           podmanImagePuller
-	registryInsecure bool
+	puller              podmanImagePuller
+	registryInsecure    bool
+	registryCredentials registryCredentialResolver
 }
 
 type podmanServiceImagePuller struct {
@@ -86,16 +91,16 @@ type podmanServiceImagePuller struct {
 	baseURL string
 }
 
-func newRuntimeFromConfig(cfg config) (Runtime, error) {
+func newRuntimeFromConfig(cfg config, registryCredentials registryCredentialResolver) (Runtime, error) {
 	switch cfg.RuntimeEngine {
 	case runtimeEnginePodman:
-		return newPodmanRuntime(cfg.RuntimeHost, cfg.RegistryInsecure)
+		return newPodmanRuntime(cfg.RuntimeHost, cfg.RegistryInsecure, registryCredentials)
 	default:
 		return nil, fmt.Errorf("unsupported runtime engine %q", cfg.RuntimeEngine)
 	}
 }
 
-func newPodmanRuntime(runtimeHost string, registryInsecure bool) (*podmanRuntime, error) {
+func newPodmanRuntime(runtimeHost string, registryInsecure bool, registryCredentials registryCredentialResolver) (*podmanRuntime, error) {
 	client, err := newDockerCompatClient(runtimeHost)
 	if err != nil {
 		return nil, fmt.Errorf("create podman client: %w", err)
@@ -112,8 +117,9 @@ func newPodmanRuntime(runtimeHost string, registryInsecure bool) (*podmanRuntime
 			sleep:       sleepWithContext,
 			hostname:    os.Hostname,
 		},
-		puller:           puller,
-		registryInsecure: registryInsecure,
+		puller:              puller,
+		registryInsecure:    registryInsecure,
+		registryCredentials: registryCredentials,
 	}, nil
 }
 
@@ -154,7 +160,24 @@ func (runtime *dockerRuntime) PullImage(ctx context.Context, imageRef string) er
 }
 
 func (runtime *podmanRuntime) PullImage(ctx context.Context, imageRef string) error {
-	if err := runtime.puller.PullImage(ctx, imageRef, runtime.registryInsecure); err != nil {
+	var credential *registryCredentialSecret
+	credentialFound := false
+	if runtime.registryCredentials != nil {
+		resolved, found, err := runtime.registryCredentials.ResolveForImage(ctx, imageRef)
+		if err != nil {
+			return fmt.Errorf("resolve registry credentials for %q: %w", imageRef, err)
+		}
+		if found {
+			credential = &resolved
+			credentialFound = true
+		}
+	}
+
+	if err := runtime.puller.PullImage(ctx, imageRef, runtime.registryInsecure, credential); err != nil {
+		host, hasHost := registryHostFromImageRef(imageRef)
+		if hasHost && !credentialFound {
+			return fmt.Errorf("pull image %q: %w; if this is a private image, run: ovek registry login %s", imageRef, err, host)
+		}
 		return fmt.Errorf("pull image %q: %w", imageRef, err)
 	}
 
@@ -210,7 +233,7 @@ func newPodmanImagePuller(runtimeHost string) (podmanImagePuller, error) {
 	}
 }
 
-func (puller *podmanServiceImagePuller) PullImage(ctx context.Context, imageRef string, registryInsecure bool) error {
+func (puller *podmanServiceImagePuller) PullImage(ctx context.Context, imageRef string, registryInsecure bool, credential *registryCredentialSecret) error {
 	endpoint, err := url.Parse(puller.baseURL)
 	if err != nil {
 		return fmt.Errorf("parse podman service base URL %q: %w", puller.baseURL, err)
@@ -222,6 +245,9 @@ func (puller *podmanServiceImagePuller) PullImage(ctx context.Context, imageRef 
 	if registryInsecure {
 		query.Set("tlsVerify", "false")
 	}
+	if credential != nil {
+		query.Set("credentials", credential.Username+":"+credential.Password)
+	}
 	endpoint.RawQuery = query.Encode()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), nil)
@@ -231,7 +257,7 @@ func (puller *podmanServiceImagePuller) PullImage(ctx context.Context, imageRef 
 
 	response, err := puller.client.Do(request)
 	if err != nil {
-		return fmt.Errorf("call podman image pull API: %w", err)
+		return fmt.Errorf("call podman image pull API: %s", sanitizeRegistryCredentialMessage(err.Error(), credential))
 	}
 	defer response.Body.Close()
 
@@ -241,7 +267,7 @@ func (puller *podmanServiceImagePuller) PullImage(ctx context.Context, imageRef 
 	}
 
 	if response.StatusCode >= http.StatusBadRequest {
-		message := strings.TrimSpace(string(responseBody))
+		message := sanitizeRegistryCredentialMessage(strings.TrimSpace(string(responseBody)), credential)
 		if message == "" {
 			message = response.Status
 		}
@@ -249,10 +275,31 @@ func (puller *podmanServiceImagePuller) PullImage(ctx context.Context, imageRef 
 		return fmt.Errorf("podman image pull API returned %s: %s", response.Status, message)
 	}
 	if err := podmanPullResponseError(responseBody); err != nil {
-		return fmt.Errorf("podman image pull failed: %w", err)
+		return fmt.Errorf("podman image pull failed: %s", sanitizeRegistryCredentialMessage(err.Error(), credential))
 	}
 
 	return nil
+}
+
+func sanitizeRegistryCredentialMessage(message string, credential *registryCredentialSecret) string {
+	if credential == nil {
+		return message
+	}
+
+	replacements := []string{
+		credential.Username + ":" + credential.Password,
+		url.QueryEscape(credential.Username + ":" + credential.Password),
+		credential.Password,
+		url.QueryEscape(credential.Password),
+	}
+	for _, replacement := range replacements {
+		if replacement == "" {
+			continue
+		}
+		message = strings.ReplaceAll(message, replacement, "[redacted]")
+	}
+
+	return message
 }
 
 func podmanPullResponseError(responseBody []byte) error {
