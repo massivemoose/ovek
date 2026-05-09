@@ -205,8 +205,8 @@ pull_runtime_images() {
 		fail_with_hints \
 			"could not pull Brain image ${brain_image}" \
 			"inspect: sudo podman pull ${brain_image}" \
-			"confirm the GHCR package is public and the image tag has been published" \
-			"override: OVEK_BRAIN_IMAGE=${brain_image_repo}:<tag> ./scripts/ovek-vps-install.sh"
+			"confirm the GHCR package is public and the brain-image workflow published this git SHA" \
+			"temporary override: OVEK_BRAIN_IMAGE=${brain_image_repo}:main ./scripts/ovek-vps-install.sh"
 	fi
 
 	log "Pulling Traefik image ${traefik_image}"
