@@ -10,6 +10,7 @@ const (
 	projectStatusIdle      = "idle"
 	projectStatusDeploying = "deploying"
 	projectStatusRunning   = "running"
+	projectStatusStopped   = "stopped"
 	projectStatusFailed    = "failed"
 )
 
@@ -39,25 +40,16 @@ func syncProjectStatus(store projectStatusStore, projectName string) error {
 		return err
 	}
 
-	updateResult, err := store.Exec(
-		`UPDATE projects
-		 SET status = ?
-		 WHERE name = ?`,
-		status,
-		projectName,
-	)
-	if err != nil {
-		return fmt.Errorf("set project %q status to %q: %w", projectName, status, err)
-	}
-
-	return requireUpdatedRow(updateResult, "set project status")
+	return setProjectStatus(store, projectName, status)
 }
 
 func deriveProjectStatus(store projectStatusStore, projectName string) (string, error) {
+	var currentStatus string
 	var currentDeploymentID sql.NullString
 	var activeJobCount int
 	err := store.QueryRow(
-		`SELECT current_deployment_id,
+		`SELECT status,
+		        current_deployment_id,
 		        (
 		          SELECT COUNT(1)
 		          FROM jobs
@@ -68,7 +60,7 @@ func deriveProjectStatus(store projectStatusStore, projectName string) (string, 
 		jobStatusQueued,
 		jobStatusRunning,
 		projectName,
-	).Scan(&currentDeploymentID, &activeJobCount)
+	).Scan(&currentStatus, &currentDeploymentID, &activeJobCount)
 	if err != nil {
 		return "", fmt.Errorf("load project %q status inputs: %w", projectName, err)
 	}
@@ -89,6 +81,8 @@ func deriveProjectStatus(store projectStatusStore, projectName string) (string, 
 	switch {
 	case activeJobCount > 0:
 		return projectStatusDeploying, nil
+	case currentDeploymentID.Valid && currentStatus == projectStatusStopped:
+		return projectStatusStopped, nil
 	case currentDeploymentID.Valid:
 		return projectStatusRunning, nil
 	case latestJobStatus.Valid && latestJobStatus.String == jobStatusFailed:
@@ -96,4 +90,19 @@ func deriveProjectStatus(store projectStatusStore, projectName string) (string, 
 	default:
 		return projectStatusIdle, nil
 	}
+}
+
+func setProjectStatus(store projectStatusStore, projectName string, status string) error {
+	updateResult, err := store.Exec(
+		`UPDATE projects
+		 SET status = ?
+		 WHERE name = ?`,
+		status,
+		projectName,
+	)
+	if err != nil {
+		return fmt.Errorf("set project %q status to %q: %w", projectName, status, err)
+	}
+
+	return requireUpdatedRow(updateResult, "set project status")
 }

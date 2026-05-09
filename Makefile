@@ -1,0 +1,102 @@
+PODMAN_MACHINE ?= podman-machine-default
+OVEK_VM_DIR ?= /var/home/core/ovek
+PODMAN_VM_REPO ?= $(OVEK_VM_DIR)
+PODMAN_VM_COMPOSE := cd '$(PODMAN_VM_REPO)' && mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs
+PODMAN_VM_BUILDER_COMPOSE := cd '$(PODMAN_VM_REPO)' && mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs brain_data/buildkit brain_data/registry
+
+.PHONY: build-cli
+build-cli:
+	mkdir -p bin
+	go build -o ./bin/ovek ./cmd/ovek
+
+.PHONY: podman-machine-init
+podman-machine-init:
+	@if podman machine inspect '$(PODMAN_MACHINE)' >/dev/null 2>&1; then \
+		echo 'Podman machine $(PODMAN_MACHINE) already exists.'; \
+	else \
+		podman machine init '$(PODMAN_MACHINE)'; \
+	fi
+
+.PHONY: podman-machine-start
+podman-machine-start: podman-machine-init
+	@if [ "$$(podman machine inspect --format '{{.State}}' '$(PODMAN_MACHINE)')" = "running" ]; then \
+		echo 'Podman machine $(PODMAN_MACHINE) already running.'; \
+	else \
+		podman machine start '$(PODMAN_MACHINE)'; \
+	fi
+
+.PHONY: podman-machine-rootful
+podman-machine-rootful: podman-machine-init
+	PODMAN_MACHINE_NAME='$(PODMAN_MACHINE)' ./scripts/podman-machine-ensure-rootful.sh
+
+.PHONY: podman-machine-sync
+podman-machine-sync: podman-machine-rootful
+	PODMAN_MACHINE_NAME='$(PODMAN_MACHINE)' OVEK_VM_DIR='$(OVEK_VM_DIR)' ./scripts/podman-machine-sync.sh
+
+.PHONY: podman-vm-bootstrap-compose
+podman-vm-bootstrap-compose: podman-machine-sync
+	podman machine ssh '$(PODMAN_MACHINE)' "cd '$(PODMAN_VM_REPO)' && ./scripts/podman-machine-install-compose.sh"
+
+.PHONY: podman-vm-check
+podman-vm-check: podman-machine-sync
+	podman machine ssh '$(PODMAN_MACHINE)' "cd '$(PODMAN_VM_REPO)' && if ! ./scripts/podman-machine-compose-check.sh >/dev/null 2>&1; then echo 'No compose provider is available inside the Podman machine. Run make podman-vm-bootstrap-compose and retry.' >&2; exit 1; fi"
+
+.PHONY: podman-vm-up
+podman-vm-up: podman-vm-check
+	podman machine ssh '$(PODMAN_MACHINE)' "$(PODMAN_VM_COMPOSE) && ./scripts/podman-machine-compose.sh up -d --build --force-recreate"
+
+.PHONY: podman-vm-smoke
+podman-vm-smoke: podman-vm-builder-smoke
+
+.PHONY: podman-vm-builder-up
+podman-vm-builder-up: podman-vm-check
+	podman machine ssh '$(PODMAN_MACHINE)' "$(PODMAN_VM_BUILDER_COMPOSE) && PODMAN_COMPOSE_FILE=podman-compose.builder.yml ./scripts/podman-machine-compose.sh up -d --build --force-recreate"
+
+.PHONY: podman-vm-builder-smoke
+podman-vm-builder-smoke: podman-vm-builder-up
+	podman machine ssh '$(PODMAN_MACHINE)' "cd '$(PODMAN_VM_REPO)' && COMPOSE_CMD='PODMAN_COMPOSE_FILE=podman-compose.builder.yml ./scripts/podman-machine-compose.sh' ./scripts/podman-smoke.sh"
+
+.PHONY: podman-vm-capsule-smoke
+podman-vm-capsule-smoke: build-cli podman-vm-up
+	./scripts/podman-capsule-smoke.sh
+
+.PHONY: podman-vm-down
+podman-vm-down: podman-machine-rootful
+	podman machine ssh '$(PODMAN_MACHINE)' "cd '$(PODMAN_VM_REPO)' && ./scripts/podman-machine-compose.sh down -v --remove-orphans"
+
+.PHONY: podman-vm-builder-down
+podman-vm-builder-down: podman-machine-rootful
+	podman machine ssh '$(PODMAN_MACHINE)' "cd '$(PODMAN_VM_REPO)' && PODMAN_COMPOSE_FILE=podman-compose.builder.yml ./scripts/podman-machine-compose.sh down -v --remove-orphans"
+
+.PHONY: podman-vm-shell
+podman-vm-shell: podman-machine-sync
+	podman machine ssh '$(PODMAN_MACHINE)' "cd '$(PODMAN_VM_REPO)' && bash -l"
+
+.PHONY: podman-linux-up
+podman-linux-up:
+	mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs
+	sudo podman compose -f podman-compose.yml up -d --build --force-recreate
+
+.PHONY: podman-linux-smoke
+podman-linux-smoke: podman-linux-builder-smoke
+
+.PHONY: podman-linux-builder-up
+podman-linux-builder-up:
+	mkdir -p brain_data/projects brain_data/traefik/dynamic brain_data/job-logs brain_data/buildkit brain_data/registry
+	sudo podman compose -f podman-compose.builder.yml up -d --build --force-recreate
+
+.PHONY: podman-linux-builder-smoke
+podman-linux-builder-smoke:
+	COMPOSE_CMD='sudo podman compose -f podman-compose.builder.yml' ./scripts/podman-smoke.sh
+
+.PHONY: podman-linux-capsule-smoke
+podman-linux-capsule-smoke: build-cli
+	./scripts/podman-capsule-smoke.sh
+
+.PHONY: podman-linux-down
+podman-linux-down:
+	sudo podman compose -f podman-compose.yml down -v --remove-orphans
+
+.PHONY: podman-linux-builder-down
+podman-linux-builder-down:
+	sudo podman compose -f podman-compose.builder.yml down -v --remove-orphans

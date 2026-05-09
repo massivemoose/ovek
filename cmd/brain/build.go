@@ -25,6 +25,7 @@ type buildProcessor struct {
 	railpackFrontendImage    string
 	registryInsecure         bool
 	runner                   commandRunner
+	configStore              projectConfigStore
 }
 
 type commandSpec struct {
@@ -49,9 +50,14 @@ func newBuildProcessor(
 	railpackFrontendImage string,
 	registryInsecure bool,
 	runner commandRunner,
+	stores ...projectConfigStore,
 ) buildProcessor {
 	if runner == nil {
 		runner = systemCommandRunner{}
+	}
+	var configStore projectConfigStore
+	if len(stores) > 0 {
+		configStore = stores[0]
 	}
 
 	return buildProcessor{
@@ -62,6 +68,7 @@ func newBuildProcessor(
 		railpackFrontendImage:    railpackFrontendImage,
 		registryInsecure:         registryInsecure,
 		runner:                   runner,
+		configStore:              configStore,
 	}
 }
 
@@ -76,24 +83,37 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 		return deploymentResult{}, fmt.Errorf("create build log file: %w", err)
 	}
 	defer logFile.Close()
+	scrubber, err := processor.configStore.SecretScrubberForJob(ctx, job)
+	if err != nil {
+		return result, fmt.Errorf("load project config for log redaction: %w", err)
+	}
+	logWriter := scrubber.Writer(logFile)
+	defer logWriter.Flush()
+	result.LogScrubber = scrubber
 
-	workspace, err := os.MkdirTemp("", "alces-build-"+job.ID+"-")
+	workspace, err := os.MkdirTemp("", "ovek-build-"+job.ID+"-")
 	if err != nil {
 		return result, fmt.Errorf("create build workspace: %w", err)
 	}
 	defer os.RemoveAll(workspace)
 
+	if err := writeBuildLifecycleLine(logWriter, "cloning source"); err != nil {
+		return result, err
+	}
 	if err := processor.runCommand(
 		ctx,
 		commandSpec{
 			Name:   "git",
 			Args:   []string{"clone", "--depth", "1", job.RepoURL, workspace},
 			Env:    nil,
-			Stdout: logFile,
-			Stderr: logFile,
+			Stdout: logWriter,
+			Stderr: logWriter,
 		},
 	); err != nil {
 		return result, fmt.Errorf("git clone: %w", err)
+	}
+	if err := writeBuildLifecycleLine(logWriter, "source cloned"); err != nil {
+		return result, err
 	}
 
 	planDir := filepath.Join(workspace, railpackPlanDirName)
@@ -103,30 +123,42 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 
 	planPath := filepath.Join(planDir, railpackPlanFileName)
 	infoPath := filepath.Join(planDir, railpackInfoFileName)
+	if err := writeBuildLifecycleLine(logWriter, "planning build with Railpack"); err != nil {
+		return result, err
+	}
 	if err := processor.runCommand(
 		ctx,
 		commandSpec{
 			Name:   "railpack",
 			Args:   []string{"prepare", workspace, "--plan-out", planPath, "--info-out", infoPath, "--hide-pretty-plan"},
 			Env:    processor.commandEnv(),
-			Stdout: logFile,
-			Stderr: logFile,
+			Stdout: logWriter,
+			Stderr: logWriter,
 		},
 	); err != nil {
 		return result, fmt.Errorf("railpack prepare: %w", err)
 	}
+	if err := writeBuildLifecycleLine(logWriter, "build plan prepared"); err != nil {
+		return result, err
+	}
 
+	if err := writeBuildLifecycleLine(logWriter, "building image with BuildKit; first runs may pull large base images"); err != nil {
+		return result, err
+	}
 	if err := processor.runCommand(
 		ctx,
 		commandSpec{
 			Name:   "buildctl",
 			Args:   processor.buildctlBuildArgs(workspace, planDir, job),
 			Env:    nil,
-			Stdout: logFile,
-			Stderr: logFile,
+			Stdout: logWriter,
+			Stderr: logWriter,
 		},
 	); err != nil {
 		return result, fmt.Errorf("buildctl build: %w", err)
+	}
+	if err := writeBuildLifecycleLine(logWriter, "image built and pushed"); err != nil {
+		return result, err
 	}
 
 	return result, nil
@@ -146,6 +178,14 @@ func (processor buildProcessor) runCommand(ctx context.Context, command commandS
 	}
 
 	return processor.runner.Run(ctx, command)
+}
+
+func writeBuildLifecycleLine(writer io.Writer, message string) error {
+	if _, err := fmt.Fprintf(writer, "lifecycle: %s\n", message); err != nil {
+		return fmt.Errorf("write build lifecycle log: %w", err)
+	}
+
+	return nil
 }
 
 func (systemCommandRunner) Run(ctx context.Context, command commandSpec) error {
@@ -192,7 +232,7 @@ func (processor buildProcessor) buildctlBuildArgs(workspace string, planDir stri
 }
 
 func jobImageName(job job) string {
-	return "alces-" + job.ProjectName + ":" + job.ID
+	return "ovek-" + job.ProjectName + ":" + job.ID
 }
 
 func jobImageRef(job job, registryHost string) string {

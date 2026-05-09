@@ -10,12 +10,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 var errProjectNotFound = errors.New("project not found")
 
+const (
+	cleanupRuntimeTeardownAttempts          = 5
+	cleanupRuntimeTeardownInitialRetryDelay = 150 * time.Millisecond
+	cleanupRuntimeTeardownMaxRetryDelay     = 600 * time.Millisecond
+)
+
 type projectCleanupService interface {
 	Cleanup(ctx context.Context, projectName string) error
+	RemoveRuntime(ctx context.Context, projectName string, options projectRuntimeRemovalOptions) error
 }
 
 type projectCleanupRuntime interface {
@@ -26,10 +36,17 @@ type projectCleanupRuntime interface {
 }
 
 type managedProjectCleaner struct {
-	dataDir         string
-	db              *sql.DB
-	runtime         projectCleanupRuntime
-	artifactCleaner registryArtifactCleaner
+	dataDir             string
+	projectsHostDataDir string
+	db                  *sql.DB
+	runtime             projectCleanupRuntime
+	artifactCleaner     registryArtifactCleaner
+	ingress             projectIngressManager
+}
+
+type projectRuntimeRemovalOptions struct {
+	RemoveDatabase     bool
+	DeleteDatabaseData bool
 }
 
 func newManagedProjectCleaner(db *sql.DB, runtime projectCleanupRuntime, dataDir string, artifactCleaners ...registryArtifactCleaner) managedProjectCleaner {
@@ -43,10 +60,11 @@ func newManagedProjectCleaner(db *sql.DB, runtime projectCleanupRuntime, dataDir
 	}
 
 	return managedProjectCleaner{
-		dataDir:         dataDir,
-		db:              db,
-		runtime:         runtime,
-		artifactCleaner: artifactCleaner,
+		dataDir:             dataDir,
+		projectsHostDataDir: defaultProjectsHostDataDir,
+		db:                  db,
+		runtime:             runtime,
+		artifactCleaner:     artifactCleaner,
 	}
 }
 
@@ -73,24 +91,143 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 		return fmt.Errorf("list project apps: %w", err)
 	}
 	for _, app := range apps {
-		if err := cleaner.runtime.RemoveProjectApp(ctx, app.deploymentRecord()); err != nil {
+		if err := retryRuntimeTeardown(ctx, "remove project app "+app.AppContainerName, func(ctx context.Context) error {
+			return cleaner.runtime.RemoveProjectApp(ctx, app.deploymentRecord())
+		}); err != nil {
 			return fmt.Errorf("remove project app %q: %w", app.AppContainerName, err)
 		}
 	}
 
-	if err := cleaner.runtime.RemoveProjectPocketBase(ctx, projectName); err != nil {
+	if err := retryRuntimeTeardown(ctx, "remove PocketBase for project "+projectName, func(ctx context.Context) error {
+		return cleaner.runtime.RemoveProjectPocketBase(ctx, projectName)
+	}); err != nil {
 		return fmt.Errorf("remove PocketBase: %w", err)
 	}
-	if err := cleaner.runtime.RemoveProjectNetwork(ctx, projectName); err != nil {
+	if err := retryRuntimeTeardown(ctx, "remove network for project "+projectName, func(ctx context.Context) error {
+		return cleaner.runtime.RemoveProjectNetwork(ctx, projectName)
+	}); err != nil {
 		return fmt.Errorf("remove project network: %w", err)
 	}
 	if err := clearProjectRuntimeState(cleaner.db, projectName); err != nil {
 		return err
 	}
+	if cleaner.ingress != nil {
+		if err := cleaner.ingress.RemoveProject(projectName); err != nil {
+			log.Printf("warning: failed to remove ingress for project %q during cleanup: %v", projectName, err)
+		}
+	}
 	cleaner.cleanupProjectImages(ctx, projectName, imageRefs)
 	cleaner.cleanupProjectLogFiles(projectName, logPaths)
 
 	return nil
+}
+
+func (cleaner managedProjectCleaner) RemoveRuntime(ctx context.Context, projectName string, options projectRuntimeRemovalOptions) error {
+	if options.DeleteDatabaseData && !options.RemoveDatabase {
+		return errors.New("delete database data requires database removal")
+	}
+	exists, err := projectExists(cleaner.db, projectName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errProjectNotFound
+	}
+
+	apps, err := cleaner.runtime.ListProjectApps(ctx, projectName)
+	if err != nil {
+		return fmt.Errorf("list project apps: %w", err)
+	}
+	for _, app := range apps {
+		if err := retryRuntimeTeardown(ctx, "remove project app "+app.AppContainerName, func(ctx context.Context) error {
+			return cleaner.runtime.RemoveProjectApp(ctx, app.deploymentRecord())
+		}); err != nil {
+			return fmt.Errorf("remove project app %q: %w", app.AppContainerName, err)
+		}
+	}
+	if cleaner.ingress != nil {
+		if err := cleaner.ingress.RemoveProject(projectName); err != nil {
+			return err
+		}
+	}
+	if err := clearProjectRuntimeState(cleaner.db, projectName); err != nil {
+		return err
+	}
+
+	if !options.RemoveDatabase {
+		return nil
+	}
+	if err := retryRuntimeTeardown(ctx, "remove database for project "+projectName, func(ctx context.Context) error {
+		return cleaner.runtime.RemoveProjectPocketBase(ctx, projectName)
+	}); err != nil {
+		return fmt.Errorf("remove database: %w", err)
+	}
+	if options.DeleteDatabaseData {
+		if err := os.RemoveAll(pocketBaseDataDir(cleaner.projectsHostDataDir, projectName)); err != nil {
+			return fmt.Errorf("delete database data: %w", err)
+		}
+	}
+	if err := retryRuntimeTeardown(ctx, "remove network for project "+projectName, func(ctx context.Context) error {
+		return cleaner.runtime.RemoveProjectNetwork(ctx, projectName)
+	}); err != nil {
+		return fmt.Errorf("remove project network: %w", err)
+	}
+
+	return nil
+}
+
+func retryRuntimeTeardown(ctx context.Context, description string, teardown func(context.Context) error) error {
+	var lastErr error
+	for attempt := 1; attempt <= cleanupRuntimeTeardownAttempts; attempt++ {
+		err := teardown(ctx)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		if !isRetryableRuntimeTeardownError(err) || attempt == cleanupRuntimeTeardownAttempts {
+			return err
+		}
+
+		delay := cleanupRuntimeTeardownRetryDelay(attempt)
+		log.Printf("warning: transient runtime cleanup failure while trying to %s; retrying in %s (%d/%d): %v", description, delay, attempt, cleanupRuntimeTeardownAttempts, err)
+		if err := sleepForRuntimeTeardownRetry(ctx, delay); err != nil {
+			return fmt.Errorf("%w after retryable cleanup error: %v", err, lastErr)
+		}
+	}
+
+	return lastErr
+}
+
+func isRetryableRuntimeTeardownError(err error) bool {
+	return cerrdefs.IsConflict(err) ||
+		cerrdefs.IsInternal(err) ||
+		cerrdefs.IsUnknown(err) ||
+		cerrdefs.IsUnavailable(err)
+}
+
+func cleanupRuntimeTeardownRetryDelay(attempt int) time.Duration {
+	delay := cleanupRuntimeTeardownInitialRetryDelay
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if delay >= cleanupRuntimeTeardownMaxRetryDelay {
+			return cleanupRuntimeTeardownMaxRetryDelay
+		}
+	}
+
+	return delay
+}
+
+var sleepForRuntimeTeardownRetry = func(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (cleaner managedProjectCleaner) cleanupProjectImages(ctx context.Context, projectName string, imageRefs []string) {
@@ -163,6 +300,44 @@ func handleDeleteProjectRuntime(cleaner projectCleanupService) http.HandlerFunc 
 
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func handleDeleteProjectAppRuntime(cleaner projectCleanupService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		options, err := parseProjectRuntimeRemovalOptions(r)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidRequestBody, err.Error())
+			return
+		}
+
+		if err := cleaner.RemoveRuntime(r.Context(), projectName, options); errors.Is(err, errProjectNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+			return
+		} else if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeProjectCleanupFailed, "failed to remove project runtime")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func parseProjectRuntimeRemovalOptions(r *http.Request) (projectRuntimeRemovalOptions, error) {
+	query := r.URL.Query()
+	options := projectRuntimeRemovalOptions{
+		RemoveDatabase:     query.Get("removeDatabase") == "true",
+		DeleteDatabaseData: query.Get("deleteDatabaseData") == "true",
+	}
+	if options.DeleteDatabaseData && !options.RemoveDatabase {
+		return projectRuntimeRemovalOptions{}, errors.New("deleteDatabaseData requires removeDatabase")
+	}
+	return options, nil
 }
 
 func projectExists(db *sql.DB, projectName string) (bool, error) {

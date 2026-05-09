@@ -43,8 +43,8 @@ func TestBuildProcessorRunsGitCloneAndBuildctl(t *testing.T) {
 	if result.LogPath != filepath.Join(dataDir, jobLogsDirName, "job-123.log") {
 		t.Fatalf("expected log path %q, got %q", filepath.Join(dataDir, jobLogsDirName, "job-123.log"), result.LogPath)
 	}
-	if result.ImageRef != "localhost:5001/alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-123", result.ImageRef)
+	if result.ImageRef != "localhost:5001/ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:job-123", result.ImageRef)
 	}
 
 	if len(runner.commands) != 3 {
@@ -90,7 +90,7 @@ func TestBuildProcessorRunsGitCloneAndBuildctl(t *testing.T) {
 		"--local dockerfile=" + planDir,
 		"--frontend=gateway.v0",
 		"--opt source=ghcr.io/railwayapp/railpack-frontend",
-		"--output type=image,name=host.docker.internal:5001/alces-demo-app:job-123,push=true,registry.insecure=true",
+		"--output type=image,name=host.docker.internal:5001/ovek-demo-app:job-123,push=true,registry.insecure=true",
 	} {
 		if !strings.Contains(buildArgs, want) {
 			t.Fatalf("expected buildctl args to contain %q, got %q", want, buildArgs)
@@ -116,6 +116,18 @@ func TestBuildProcessorRunsGitCloneAndBuildctl(t *testing.T) {
 	}
 	if !strings.Contains(string(logContents), "$ buildctl --addr docker-container://buildkit build --progress=plain") {
 		t.Fatalf("expected buildctl command in log, got %q", string(logContents))
+	}
+	for _, fragment := range []string{
+		"lifecycle: cloning source",
+		"lifecycle: source cloned",
+		"lifecycle: planning build with Railpack",
+		"lifecycle: build plan prepared",
+		"lifecycle: building image with BuildKit; first runs may pull large base images",
+		"lifecycle: image built and pushed",
+	} {
+		if !strings.Contains(string(logContents), fragment) {
+			t.Fatalf("expected build lifecycle log to contain %q, got %q", fragment, string(logContents))
+		}
 	}
 }
 
@@ -197,11 +209,63 @@ func TestBuildProcessorReturnsMetadataOnBuildctlFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "buildctl build: buildctl failed") {
 		t.Fatalf("expected buildctl failure, got %v", err)
 	}
-	if result.ImageRef != "localhost:5001/alces-demo-app:job-789" {
-		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-789", result.ImageRef)
+	if result.ImageRef != "localhost:5001/ovek-demo-app:job-789" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:job-789", result.ImageRef)
 	}
 	if result.LogPath != filepath.Join(dataDir, jobLogsDirName, "job-789.log") {
 		t.Fatalf("expected log path %q, got %q", filepath.Join(dataDir, jobLogsDirName, "job-789.log"), result.LogPath)
+	}
+}
+
+func TestBuildProcessorRedactsConfiguredSecretsFromBuildLogs(t *testing.T) {
+	db := newTestDB(t)
+	configStore := newTestProjectConfigStore(t, db)
+	secretMutation, err := configStore.SetEnvironmentEntry(context.Background(), "demo-app", "PB_SUPERUSER_PASSWORD", "secret-pass", true, "dev")
+	if err != nil {
+		t.Fatalf("expected secret set to succeed, got error: %v", err)
+	}
+	dataDir := t.TempDir()
+	runner := &recordingCommandRunner{
+		runFunc: func(command commandSpec) error {
+			_, _ = command.Stdout.Write([]byte("using secret-pa"))
+			_, _ = command.Stdout.Write([]byte("ss during command\n"))
+			if command.Name == "railpack" && len(command.Args) > 0 && command.Args[0] == "prepare" {
+				return os.WriteFile(command.Args[3], []byte("{}"), 0o644)
+			}
+			return nil
+		},
+	}
+	processor := newBuildProcessor(
+		dataDir,
+		defaultBuildKitHost,
+		defaultBuildRegistryPublishHost,
+		defaultRuntimeRegistryHost,
+		defaultRailpackFrontendImage,
+		defaultRegistryInsecure,
+		runner,
+		configStore,
+	)
+
+	result, err := processor.Process(context.Background(), job{
+		ID:               "job-redact",
+		ProjectName:      "demo-app",
+		RepoURL:          "https://example.com/demo.git",
+		ConfigRevisionID: secretMutation.RevisionID,
+	})
+	if err != nil {
+		t.Fatalf("expected build to succeed, got error: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(result.LogPath)
+	if err != nil {
+		t.Fatalf("expected log read to succeed, got error: %v", err)
+	}
+	logs := string(logBytes)
+	if strings.Contains(logs, "secret-pass") {
+		t.Fatal("expected logs to redact secret")
+	}
+	if !strings.Contains(logs, "[redacted]") {
+		t.Fatalf("expected logs to contain redaction marker, got %q", logs)
 	}
 }
 
@@ -211,11 +275,11 @@ func TestJobImageRefUsesOptionalRegistryHost(t *testing.T) {
 		ProjectName: "demo-app",
 	}
 
-	if got := jobImageRef(currentJob, ""); got != "alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:job-123", got)
+	if got := jobImageRef(currentJob, ""); got != "ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:job-123", got)
 	}
-	if got := jobImageRef(currentJob, "localhost:5001"); got != "localhost:5001/alces-demo-app:job-123" {
-		t.Fatalf("expected image ref %q, got %q", "localhost:5001/alces-demo-app:job-123", got)
+	if got := jobImageRef(currentJob, "localhost:5001"); got != "localhost:5001/ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:job-123", got)
 	}
 }
 

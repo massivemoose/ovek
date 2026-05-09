@@ -7,19 +7,27 @@ import (
 	"strings"
 )
 
-const defaultDataDir = "/var/lib/alces"
+const defaultDataDir = "/var/lib/ovek"
 const defaultBuildKitHost = "docker-container://buildkit"
-const defaultProjectsHostDataDir = "/var/lib/alces/projects"
-const defaultPocketBaseImage = "elestio/pocketbase:latest"
+const defaultProjectsHostDataDir = "/var/lib/ovek/projects"
+const defaultPocketBaseImage = "docker.io/elestio/pocketbase:latest"
 const defaultBuildRegistryPublishHost = "host.docker.internal:5001"
 const defaultRuntimeRegistryHost = "localhost:5001"
 const defaultRegistryAPIBaseURL = "http://registry:5000"
 const defaultRailpackFrontendImage = "ghcr.io/railwayapp/railpack-frontend"
 const defaultRegistryInsecure = true
+const defaultAuthMode = authModeDev
+const defaultRuntimeEngine = runtimeEnginePodman
+const defaultTraefikDynamicConfigDir = "/var/lib/ovek/traefik/dynamic"
+const defaultTraefikBrainServiceURL = "http://brain:8081"
+const defaultPodmanRuntimeHost = "unix:///run/podman/podman.sock"
 
 type config struct {
+	AuthMode                 string
 	BrainAPIKey              string
 	DataDir                  string
+	RuntimeEngine            string
+	RuntimeHost              string
 	BuildKitHost             string
 	BuildRegistryPublishHost string
 	RuntimeRegistryHost      string
@@ -28,12 +36,35 @@ type config struct {
 	RegistryInsecure         bool
 	ProjectsHostDataDir      string
 	PocketBaseImage          string
+	TraefikDynamicConfigDir  string
+	TraefikBrainServiceURL   string
 }
 
 func loadConfig() (config, error) {
+	authMode := strings.TrimSpace(os.Getenv("OVEK_AUTH_MODE"))
+	if authMode == "" {
+		authMode = defaultAuthMode
+	}
+	if authMode != authModeDev && authMode != authModeProd {
+		return config{}, errors.New("OVEK_AUTH_MODE must be dev or prod")
+	}
+
 	apiKey := strings.TrimSpace(os.Getenv("BRAIN_API_KEY"))
-	if apiKey == "" {
-		return config{}, errors.New("BRAIN_API_KEY is required")
+	if authMode == authModeDev && apiKey == "" {
+		return config{}, errors.New("BRAIN_API_KEY is required in dev auth mode")
+	}
+
+	runtimeEngine := strings.TrimSpace(os.Getenv("RUNTIME_ENGINE"))
+	if runtimeEngine == "" {
+		runtimeEngine = defaultRuntimeEngine
+	}
+	if runtimeEngine != runtimeEnginePodman && runtimeEngine != runtimeEngineDocker {
+		return config{}, errors.New("RUNTIME_ENGINE must be podman or docker")
+	}
+
+	runtimeHost := strings.TrimSpace(os.Getenv("RUNTIME_HOST"))
+	if runtimeHost == "" && runtimeEngine == runtimeEnginePodman {
+		runtimeHost = defaultPodmanRuntimeHost
 	}
 
 	buildKitHost := strings.TrimSpace(os.Getenv("BUILDKIT_HOST"))
@@ -80,9 +111,22 @@ func loadConfig() (config, error) {
 		pocketBaseImage = defaultPocketBaseImage
 	}
 
+	traefikDynamicConfigDir := strings.TrimSpace(os.Getenv("TRAEFIK_DYNAMIC_CONFIG_DIR"))
+	if traefikDynamicConfigDir == "" {
+		traefikDynamicConfigDir = defaultTraefikDynamicConfigDir
+	}
+
+	traefikBrainServiceURL := strings.TrimSpace(os.Getenv("TRAEFIK_BRAIN_SERVICE_URL"))
+	if traefikBrainServiceURL == "" {
+		traefikBrainServiceURL = defaultTraefikBrainServiceURL
+	}
+
 	return config{
+		AuthMode:                 authMode,
 		BrainAPIKey:              apiKey,
 		DataDir:                  defaultDataDir,
+		RuntimeEngine:            runtimeEngine,
+		RuntimeHost:              runtimeHost,
 		BuildKitHost:             buildKitHost,
 		BuildRegistryPublishHost: buildRegistryPublishHost,
 		RuntimeRegistryHost:      runtimeRegistryHost,
@@ -91,5 +135,7 @@ func loadConfig() (config, error) {
 		RegistryInsecure:         registryInsecure,
 		ProjectsHostDataDir:      projectsHostDataDir,
 		PocketBaseImage:          pocketBaseImage,
+		TraefikDynamicConfigDir:  traefikDynamicConfigDir,
+		TraefikBrainServiceURL:   traefikBrainServiceURL,
 	}, nil
 }

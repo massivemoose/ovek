@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -15,10 +19,26 @@ import (
 )
 
 func TestPocketBaseDataDir(t *testing.T) {
-	got := pocketBaseDataDir("/srv/alces/projects", "demo-app")
-	want := filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName)
+	got := pocketBaseDataDir("/srv/ovek/projects", "demo-app")
+	want := filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName)
 	if got != want {
 		t.Fatalf("expected PocketBase data dir %q, got %q", want, got)
+	}
+}
+
+func TestEnsurePocketBaseDataDirAllowsImageUserWrites(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "demo-app", pocketBaseDataDirName)
+
+	if err := ensurePocketBaseDataDir(dataDir); err != nil {
+		t.Fatalf("expected PocketBase data dir creation to succeed, got error: %v", err)
+	}
+
+	info, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatalf("expected PocketBase data dir to exist, got error: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o770 {
+		t.Fatalf("expected PocketBase data dir permissions %o, got %o", 0o770, got)
 	}
 }
 
@@ -26,18 +46,18 @@ func TestNewPocketBaseContainerSpec(t *testing.T) {
 	spec := newPocketBaseContainerSpec(pocketBaseSpec{
 		ProjectName:         "demo-app",
 		Image:               defaultPocketBaseImage,
-		ProjectsHostDataDir: "/srv/alces/projects",
+		ProjectsHostDataDir: "/srv/ovek/projects",
 		Network: projectNetwork{
 			ID:   "network-123",
 			Name: "demo-app-net",
 		},
 	})
 
-	if spec.Name != "alces-demo-app-pb" {
-		t.Fatalf("expected container name %q, got %q", "alces-demo-app-pb", spec.Name)
+	if spec.Name != "ovek-demo-app-pb" {
+		t.Fatalf("expected container name %q, got %q", "ovek-demo-app-pb", spec.Name)
 	}
-	if spec.HostDataDir != filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName) {
-		t.Fatalf("expected host data dir %q, got %q", filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName), spec.HostDataDir)
+	if spec.HostDataDir != filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName) {
+		t.Fatalf("expected host data dir %q, got %q", filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName), spec.HostDataDir)
 	}
 	if spec.Config.Image != defaultPocketBaseImage {
 		t.Fatalf("expected image %q, got %q", defaultPocketBaseImage, spec.Config.Image)
@@ -61,7 +81,7 @@ func TestNewPocketBaseContainerSpec(t *testing.T) {
 	wantMounts := []dockermount.Mount{
 		{
 			Type:   dockermount.TypeBind,
-			Source: filepath.Join("/srv/alces/projects", "demo-app", pocketBaseDataDirName),
+			Source: filepath.Join("/srv/ovek/projects", "demo-app", pocketBaseDataDirName),
 			Target: pocketBaseDataMountPath,
 		},
 	}
@@ -103,11 +123,14 @@ func TestDockerRuntimeEnsureProjectPocketBaseCreatesAndStartsManagedContainer(t 
 	if client.networkCreateName != "demo-app-net" {
 		t.Fatalf("expected project network name %q, got %q", "demo-app-net", client.networkCreateName)
 	}
-	if client.containerInspectName != "alces-demo-app-pb" {
-		t.Fatalf("expected PocketBase inspect name %q, got %q", "alces-demo-app-pb", client.containerInspectName)
+	if client.containerInspectName != "ovek-demo-app-pb" {
+		t.Fatalf("expected PocketBase inspect name %q, got %q", "ovek-demo-app-pb", client.containerInspectName)
 	}
-	if client.containerCreateName != "alces-demo-app-pb" {
-		t.Fatalf("expected PocketBase create name %q, got %q", "alces-demo-app-pb", client.containerCreateName)
+	if client.containerCreateName != "ovek-demo-app-pb" {
+		t.Fatalf("expected PocketBase create name %q, got %q", "ovek-demo-app-pb", client.containerCreateName)
+	}
+	if client.imagePullRef != defaultPocketBaseImage {
+		t.Fatalf("expected PocketBase image pull ref %q, got %q", defaultPocketBaseImage, client.imagePullRef)
 	}
 	if client.containerCreateConfig == nil || client.containerCreateConfig.Image != defaultPocketBaseImage {
 		t.Fatalf("expected create image %q, got %#v", defaultPocketBaseImage, client.containerCreateConfig)
@@ -117,6 +140,49 @@ func TestDockerRuntimeEnsureProjectPocketBaseCreatesAndStartsManagedContainer(t 
 	}
 	if client.containerStartID != "container-123" {
 		t.Fatalf("expected started container ID %q, got %q", "container-123", client.containerStartID)
+	}
+}
+
+func TestPodmanRuntimeEnsureProjectPocketBaseUsesPodmanPuller(t *testing.T) {
+	projectsHostDataDir := t.TempDir()
+	client := &fakeDockerClient{
+		networkInspectResponse: dockernetwork.Inspect{
+			ID:   "network-123",
+			Name: "demo-app-net",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRoleProjectNetwork,
+			},
+		},
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		containerCreateResponse: dockercontainer.CreateResponse{
+			ID: "container-123",
+		},
+	}
+	puller := &fakePodmanImagePuller{}
+	runtime := &podmanRuntime{
+		dockerRuntime:    newDockerRuntime(client),
+		puller:           puller,
+		registryInsecure: true,
+	}
+
+	containerID, err := runtime.EnsureProjectPocketBase(context.Background(), "demo-app", defaultPocketBaseImage, projectsHostDataDir)
+	if err != nil {
+		t.Fatalf("expected podman PocketBase provisioning to succeed, got error: %v", err)
+	}
+
+	if containerID != "container-123" {
+		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
+	}
+	if client.imagePullRef != "" {
+		t.Fatalf("expected docker image pull not to be used, got %q", client.imagePullRef)
+	}
+	if puller.imageRef != defaultPocketBaseImage {
+		t.Fatalf("expected podman puller image ref %q, got %q", defaultPocketBaseImage, puller.imageRef)
+	}
+	if !puller.registryInsecure {
+		t.Fatal("expected podman puller to receive registryInsecure=true")
 	}
 }
 
@@ -171,6 +237,9 @@ func TestDockerRuntimeEnsureProjectPocketBaseReusesRunningManagedContainer(t *te
 
 	if containerID != "container-123" {
 		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
+	}
+	if client.imagePullRef != "" {
+		t.Fatalf("expected image pull not to be called for an existing container, got %q", client.imagePullRef)
 	}
 	if client.containerCreateName != "" {
 		t.Fatalf("expected create not to be called, got %q", client.containerCreateName)
@@ -232,8 +301,113 @@ func TestDockerRuntimeEnsureProjectPocketBaseStartsStoppedManagedContainer(t *te
 	if containerID != "container-123" {
 		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
 	}
+	if client.imagePullRef != "" {
+		t.Fatalf("expected image pull not to be called for an existing container, got %q", client.imagePullRef)
+	}
 	if client.containerStartID != "container-123" {
 		t.Fatalf("expected container start ID %q, got %q", "container-123", client.containerStartID)
+	}
+}
+
+func TestDockerRuntimeEnsureProjectPocketBasePullsImageBeforeCreate(t *testing.T) {
+	projectsHostDataDir := t.TempDir()
+	client := &fakeDockerClient{
+		networkInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		networkCreateResponse: dockernetwork.CreateResponse{
+			ID: "network-123",
+		},
+		containerInspectErr: fmt.Errorf("missing: %w", cerrdefs.ErrNotFound),
+		imagePullErr:        fmt.Errorf("pull failed"),
+	}
+	runtime := newDockerRuntime(client)
+
+	_, err := runtime.EnsureProjectPocketBase(context.Background(), "demo-app", defaultPocketBaseImage, projectsHostDataDir)
+	if err == nil {
+		t.Fatal("expected PocketBase provisioning to fail when image pull fails")
+	}
+	if !strings.Contains(err.Error(), "pull image") {
+		t.Fatalf("expected pull image error, got %v", err)
+	}
+	if client.containerCreateName != "" {
+		t.Fatalf("expected container create not to be called after pull failure, got %q", client.containerCreateName)
+	}
+}
+
+func TestValidateExistingPocketBaseContainerAcceptsCanonicalizedImageRef(t *testing.T) {
+	spec := newPocketBaseContainerSpec(pocketBaseSpec{
+		ProjectName:         "demo-app",
+		Image:               "elestio/pocketbase:latest",
+		ProjectsHostDataDir: "/srv/ovek/projects",
+		Network: projectNetwork{
+			ID:   "network-123",
+			Name: "demo-app-net",
+		},
+	})
+
+	container := dockercontainer.InspectResponse{
+		Config: &dockercontainer.Config{
+			Image: "docker.io/elestio/pocketbase:latest",
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: "demo-app",
+				roleLabelKey:    resourceRolePocketBase,
+			},
+		},
+		Mounts: []dockercontainer.MountPoint{
+			{
+				Source:      spec.HostDataDir,
+				Destination: pocketBaseDataMountPath,
+			},
+		},
+		NetworkSettings: &dockercontainer.NetworkSettings{
+			Networks: map[string]*dockernetwork.EndpointSettings{
+				"demo-app-net": {
+					Aliases: []string{pocketBaseNetworkAlias},
+				},
+			},
+		},
+	}
+
+	if err := validateExistingPocketBaseContainer(container, spec); err != nil {
+		t.Fatalf("expected canonicalized image refs to be accepted, got %v", err)
+	}
+}
+
+func TestCanonicalContainerImageRef(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantRef string
+	}{
+		{
+			name:    "docker hub explicit tag",
+			input:   "elestio/pocketbase:latest",
+			wantRef: "docker.io/elestio/pocketbase:latest",
+		},
+		{
+			name:    "docker hub explicit host",
+			input:   "docker.io/elestio/pocketbase:latest",
+			wantRef: "docker.io/elestio/pocketbase:latest",
+		},
+		{
+			name:    "docker hub library latest default",
+			input:   "busybox",
+			wantRef: "docker.io/library/busybox:latest",
+		},
+		{
+			name:    "custom registry keeps host",
+			input:   "registry:5000/ovek-demo-app:job-123",
+			wantRef: "registry:5000/ovek-demo-app:job-123",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := canonicalContainerImageRef(test.input)
+			if got != test.wantRef {
+				t.Fatalf("expected canonical ref %q, got %q", test.wantRef, got)
+			}
+		})
 	}
 }
 
@@ -281,7 +455,7 @@ func TestDockerRuntimeEnsureProjectPocketBaseRejectsUnmanagedContainer(t *testin
 	if err == nil {
 		t.Fatal("expected unmanaged PocketBase container to be rejected")
 	}
-	if !strings.Contains(err.Error(), "already exists but is not managed by alces") {
+	if !strings.Contains(err.Error(), "already exists but is not managed by ovek") {
 		t.Fatalf("expected unmanaged container error, got %v", err)
 	}
 	if client.containerStartID != "" {
@@ -313,8 +487,8 @@ func TestDockerRuntimeRemoveProjectPocketBaseStopsAndRemovesRunningManagedContai
 	if err != nil {
 		t.Fatalf("expected PocketBase removal to succeed, got error: %v", err)
 	}
-	if client.containerInspectName != "alces-demo-app-pb" {
-		t.Fatalf("expected inspect name %q, got %q", "alces-demo-app-pb", client.containerInspectName)
+	if client.containerInspectName != "ovek-demo-app-pb" {
+		t.Fatalf("expected inspect name %q, got %q", "ovek-demo-app-pb", client.containerInspectName)
 	}
 	if client.containerStopID != "container-123" {
 		t.Fatalf("expected stop ID %q, got %q", "container-123", client.containerStopID)
@@ -339,5 +513,189 @@ func TestDockerRuntimeRemoveProjectPocketBaseIgnoresMissingContainer(t *testing.
 	}
 	if client.containerRemoveID != "" {
 		t.Fatalf("expected remove not to be called, got %q", client.containerRemoveID)
+	}
+}
+
+func TestDockerRuntimeWaitForProjectPocketBaseReadySucceedsAfterRetry(t *testing.T) {
+	projectName := "demo-app"
+	projectNetwork := projectNetworkName(projectName)
+	pocketBase := managedRunningPocketBaseInspectResponse(projectName, "pb-container-123")
+	pocketBase.NetworkSettings = &dockercontainer.NetworkSettings{
+		Networks: map[string]*dockernetwork.EndpointSettings{
+			projectNetwork: {
+				IPAddress: "10.89.0.7",
+			},
+		},
+	}
+	client := &fakeDockerClient{
+		containerInspectResponses: map[string]dockercontainer.InspectResponse{
+			pocketBaseContainerName(projectName): pocketBase,
+			"brain-container": {
+				ContainerJSONBase: &dockercontainer.ContainerJSONBase{ID: "brain-container"},
+				Config:            &dockercontainer.Config{},
+				NetworkSettings: &dockercontainer.NetworkSettings{
+					Networks: map[string]*dockernetwork.EndpointSettings{},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+	runtime.hostname = func() (string, error) { return "brain-container", nil }
+	var sleepDelays []time.Duration
+	runtime.sleep = func(_ context.Context, delay time.Duration) error {
+		sleepDelays = append(sleepDelays, delay)
+		return nil
+	}
+	dialAttempts := 0
+	runtime.dialContext = func(_ context.Context, network string, address string) (net.Conn, error) {
+		dialAttempts++
+		if network != "tcp" || address != "10.89.0.7:8090" {
+			t.Fatalf("expected readiness probe to dial tcp 10.89.0.7:8090, got network=%q address=%q", network, address)
+		}
+		if dialAttempts == 1 {
+			return nil, errors.New("connection refused")
+		}
+		left, right := net.Pipe()
+		_ = right.Close()
+		return left, nil
+	}
+
+	if err := runtime.WaitForProjectPocketBaseReady(context.Background(), projectName); err != nil {
+		t.Fatalf("expected PocketBase readiness wait to succeed, got error: %v", err)
+	}
+
+	if client.networkConnectNetwork != projectNetwork || client.networkConnectID != "brain-container" {
+		t.Fatalf("expected Brain to be attached to project network, got network=%q id=%q", client.networkConnectNetwork, client.networkConnectID)
+	}
+	if dialAttempts != 2 {
+		t.Fatalf("expected readiness dial retry, got %d attempts", dialAttempts)
+	}
+	if !reflect.DeepEqual(sleepDelays, []time.Duration{pocketBaseReadinessInterval}) {
+		t.Fatalf("expected one readiness sleep, got %#v", sleepDelays)
+	}
+}
+
+func TestDockerRuntimeUpsertProjectPocketBaseSuperuserExecsPocketBaseCommand(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: managedRunningPocketBaseInspectResponse("demo-app", "container-123"),
+		containerExecInspectResponse: dockercontainer.ExecInspect{
+			ExitCode: 0,
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.UpsertProjectPocketBaseSuperuser(context.Background(), "demo-app", "admin@demo-app.ovek.local", "super-secret-password")
+	if err != nil {
+		t.Fatalf("expected superuser upsert to succeed, got error: %v", err)
+	}
+
+	if client.containerExecCreateContainer != "ovek-demo-app-pb" {
+		t.Fatalf("expected exec container %q, got %q", "ovek-demo-app-pb", client.containerExecCreateContainer)
+	}
+	wantCommand := []string{
+		"pocketbase",
+		"--dir=/pb_data",
+		"superuser",
+		"upsert",
+		"admin@demo-app.ovek.local",
+		"super-secret-password",
+	}
+	if !reflect.DeepEqual(client.containerExecCreateOptions.Cmd, wantCommand) {
+		t.Fatalf("expected exec command %#v, got %#v", wantCommand, client.containerExecCreateOptions.Cmd)
+	}
+	if !client.containerExecCreateOptions.AttachStdout || !client.containerExecCreateOptions.AttachStderr {
+		t.Fatalf("expected stdout/stderr attachment, got %#v", client.containerExecCreateOptions)
+	}
+}
+
+func TestDockerRuntimeUpsertProjectPocketBaseSuperuserRedactsPasswordFromErrors(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponse: managedRunningPocketBaseInspectResponse("demo-app", "container-123"),
+		containerExecCreateErr:   errors.New("cannot exec with super-secret-password"),
+	}
+	runtime := newDockerRuntime(client)
+
+	err := runtime.UpsertProjectPocketBaseSuperuser(context.Background(), "demo-app", "admin@demo-app.ovek.local", "super-secret-password")
+	if err == nil {
+		t.Fatal("expected superuser upsert to fail")
+	}
+	if strings.Contains(err.Error(), "super-secret-password") {
+		t.Fatalf("expected password to be redacted from error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatalf("expected redacted placeholder in error, got %v", err)
+	}
+}
+
+func TestDockerRuntimeProjectPocketBaseProxyTargetConnectsBrainToProjectNetwork(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponses: map[string]dockercontainer.InspectResponse{
+			"ovek-demo-app-pb": managedRunningPocketBaseInspectResponse("demo-app", "pb-container-123"),
+			"brain-container": {
+				ContainerJSONBase: &dockercontainer.ContainerJSONBase{ID: "brain-container"},
+				Config:            &dockercontainer.Config{},
+				NetworkSettings: &dockercontainer.NetworkSettings{
+					Networks: map[string]*dockernetwork.EndpointSettings{},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+	runtime.hostname = func() (string, error) { return "brain-container", nil }
+
+	target, err := runtime.ProjectPocketBaseProxyTarget(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected proxy target to resolve, got error: %v", err)
+	}
+	if target != "http://ovek-demo-app-pb:8090" {
+		t.Fatalf("expected proxy target %q, got %q", "http://ovek-demo-app-pb:8090", target)
+	}
+	if client.networkConnectNetwork != "demo-app-net" || client.networkConnectID != "brain-container" {
+		t.Fatalf("expected Brain container network connect, got network=%q id=%q", client.networkConnectNetwork, client.networkConnectID)
+	}
+}
+
+func TestDockerRuntimeProjectPocketBaseProxyTargetSkipsExistingNetworkAttachment(t *testing.T) {
+	client := &fakeDockerClient{
+		containerInspectResponses: map[string]dockercontainer.InspectResponse{
+			"ovek-demo-app-pb": managedRunningPocketBaseInspectResponse("demo-app", "pb-container-123"),
+			"brain-container": {
+				ContainerJSONBase: &dockercontainer.ContainerJSONBase{ID: "brain-container"},
+				Config:            &dockercontainer.Config{},
+				NetworkSettings: &dockercontainer.NetworkSettings{
+					Networks: map[string]*dockernetwork.EndpointSettings{
+						"demo-app-net": {},
+					},
+				},
+			},
+		},
+	}
+	runtime := newDockerRuntime(client)
+	runtime.hostname = func() (string, error) { return "brain-container", nil }
+
+	_, err := runtime.ProjectPocketBaseProxyTarget(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected proxy target to resolve, got error: %v", err)
+	}
+	if client.networkConnectNetwork != "" || client.networkConnectID != "" {
+		t.Fatalf("expected existing network attachment to be reused, got network=%q id=%q", client.networkConnectNetwork, client.networkConnectID)
+	}
+}
+
+func managedRunningPocketBaseInspectResponse(projectName string, id string) dockercontainer.InspectResponse {
+	return dockercontainer.InspectResponse{
+		ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+			ID: id,
+			State: &dockercontainer.State{
+				Running: true,
+			},
+		},
+		Config: &dockercontainer.Config{
+			Labels: map[string]string{
+				managedLabelKey: managedLabelValue,
+				projectLabelKey: projectName,
+				roleLabelKey:    resourceRolePocketBase,
+			},
+		},
 	}
 }

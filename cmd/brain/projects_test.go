@@ -14,10 +14,10 @@ func TestListProjectsReturnsProjectSummaries(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-alpha",
 		ProjectName:             "alpha-app",
-		ImageRef:                "alces-alpha-app:dep-alpha",
-		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
@@ -124,10 +124,10 @@ func TestGetProjectReturnsProjectSummary(t *testing.T) {
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-alpha",
 		ProjectName:             "alpha-app",
-		ImageRef:                "alces-alpha-app:dep-alpha",
-		AppContainerName:        "alces-alpha-app-app-dep-alpha",
+		ImageRef:                "ovek-alpha-app:dep-alpha",
+		AppContainerName:        "ovek-alpha-app-app-dep-alpha",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})

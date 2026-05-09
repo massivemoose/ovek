@@ -28,17 +28,7 @@ type deploymentResult struct {
 	NetworkName             string
 	PocketBaseContainerName string
 	SupersededDeploymentID  string
-}
-
-type deploymentRecord struct {
-	ID                      string `json:"id"`
-	ProjectName             string `json:"projectName"`
-	ImageRef                string `json:"imageRef"`
-	AppContainerName        string `json:"appContainerName"`
-	NetworkName             string `json:"networkName"`
-	PocketBaseContainerName string `json:"pocketBaseContainerName"`
-	Status                  string `json:"status"`
-	CreatedAt               string `json:"createdAt"`
+	LogScrubber             secretScrubber
 }
 
 type deploymentProcessor interface {
@@ -49,6 +39,7 @@ type jobManager struct {
 	db              *sql.DB
 	processor       deploymentProcessor
 	artifactCleaner registryArtifactCleaner
+	ingress         projectIngressManager
 	queue           chan string
 }
 
@@ -132,7 +123,18 @@ func (manager *jobManager) processJob(ctx context.Context, jobID string) {
 	finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := markJobSucceeded(manager.db, job, finishedAt, result); err != nil {
 		log.Printf("failed to mark job %s as succeeded: %v", jobID, err)
+		promotionErr := "promotion state update failed: " + err.Error()
+		appendJobLogError(result.LogPath, promotionErr, result.LogScrubber)
+		if updateErr := markJobFailed(manager.db, jobID, finishedAt, promotionErr, result); updateErr != nil {
+			log.Printf("failed to mark job %s as failed after promotion update error: %v", jobID, updateErr)
+		}
 		return
+	}
+	appendJobLogLine(result.LogPath, "lifecycle: deployment promoted", result.LogScrubber)
+	if manager.ingress != nil {
+		if err := manager.ingress.SyncProject(ctx, job.ProjectName); err != nil {
+			log.Printf("warning: failed to sync ingress for project %q after job %s: %v", job.ProjectName, jobID, err)
+		}
 	}
 
 	manager.cleanupSupersededDeploymentImage(ctx, job.ProjectName, result.SupersededDeploymentID)
@@ -195,9 +197,10 @@ func recoverInterruptedJobs(db *sql.DB) error {
 func claimQueuedJob(db *sql.DB, jobID string, startedAt string) (bool, error) {
 	result, err := db.Exec(
 		`UPDATE jobs
-		 SET status = ?, started_at = ?, error_message = NULL
+		 SET status = ?, phase = ?, started_at = ?, error_message = NULL
 		 WHERE id = ? AND status = ?`,
 		jobStatusRunning,
+		jobPhaseStarting,
 		startedAt,
 		jobID,
 		jobStatusQueued,
@@ -220,6 +223,8 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 		return fmt.Errorf("begin failed job transaction: %w", err)
 	}
 
+	errorMessage = normalizeJobFailureMessage(errorMessage)
+
 	projectName, err := getJobProjectName(tx, jobID)
 	if err != nil {
 		_ = tx.Rollback()
@@ -228,7 +233,7 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 
 	updateResult, err := tx.Exec(
 		`UPDATE jobs
-		 SET status = ?, finished_at = ?, error_message = ?, log_path = ?, image_ref = ?
+		 SET status = ?, phase = NULL, finished_at = ?, error_message = ?, log_path = ?, image_ref = ?
 		 WHERE id = ? AND status = ?`,
 		jobStatusFailed,
 		finishedAt,
@@ -257,6 +262,55 @@ func markJobFailed(db *sql.DB, jobID string, finishedAt string, errorMessage str
 	return nil
 }
 
+func normalizeJobFailureMessage(errorMessage string) string {
+	errorMessage = strings.TrimSpace(errorMessage)
+	if errorMessage == "" {
+		return ""
+	}
+
+	switch {
+	case errorMessage == interruptedJobErrorMessage:
+		return errorMessage
+	case strings.HasPrefix(errorMessage, "source fetch failed:"),
+		strings.HasPrefix(errorMessage, "build planning failed:"),
+		strings.HasPrefix(errorMessage, "image build failed:"),
+		strings.HasPrefix(errorMessage, "PocketBase provisioning failed:"),
+		strings.HasPrefix(errorMessage, "app container provisioning failed:"),
+		strings.HasPrefix(errorMessage, "app readiness failed:"),
+		strings.HasPrefix(errorMessage, "promotion state load failed:"),
+		strings.HasPrefix(errorMessage, "promotion state update failed:"),
+		strings.HasPrefix(errorMessage, "promotion cleanup failed:"),
+		strings.HasPrefix(errorMessage, "job state load failed:"):
+		return errorMessage
+	case strings.HasPrefix(errorMessage, "git clone:"):
+		return "source fetch failed: " + trimFailurePrefix(errorMessage, "git clone:")
+	case strings.HasPrefix(errorMessage, "railpack prepare:"):
+		return "build planning failed: " + trimFailurePrefix(errorMessage, "railpack prepare:")
+	case strings.HasPrefix(errorMessage, "buildctl build:"):
+		return "image build failed: " + trimFailurePrefix(errorMessage, "buildctl build:")
+	case strings.HasPrefix(errorMessage, "ensure PocketBase:"):
+		return "PocketBase provisioning failed: " + trimFailurePrefix(errorMessage, "ensure PocketBase:")
+	case strings.HasPrefix(errorMessage, "ensure app container:"):
+		return "app container provisioning failed: " + trimFailurePrefix(errorMessage, "ensure app container:")
+	case strings.HasPrefix(errorMessage, "wait for app readiness:"):
+		return "app readiness failed: " + trimFailurePrefix(errorMessage, "wait for app readiness:")
+	case strings.HasPrefix(errorMessage, "load current deployment:"):
+		return "promotion state load failed: " + trimFailurePrefix(errorMessage, "load current deployment:")
+	case strings.HasPrefix(errorMessage, "promotion state update failed:"):
+		return errorMessage
+	case strings.HasPrefix(errorMessage, "remove superseded app container"):
+		return "promotion cleanup failed: " + errorMessage
+	case errorMessage == "failed to load claimed job":
+		return "job state load failed"
+	default:
+		return errorMessage
+	}
+}
+
+func trimFailurePrefix(errorMessage string, prefix string) string {
+	return strings.TrimSpace(strings.TrimPrefix(errorMessage, prefix))
+}
+
 func markJobSucceeded(db *sql.DB, currentJob job, finishedAt string, result deploymentResult) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -265,7 +319,7 @@ func markJobSucceeded(db *sql.DB, currentJob job, finishedAt string, result depl
 
 	updateResult, err := tx.Exec(
 		`UPDATE jobs
-		 SET status = ?, finished_at = ?, error_message = NULL, log_path = ?, image_ref = ?
+		 SET status = ?, phase = NULL, finished_at = ?, error_message = NULL, log_path = ?, image_ref = ?
 		 WHERE id = ? AND status = ?`,
 		jobStatusSucceeded,
 		finishedAt,
@@ -312,20 +366,26 @@ func insertSucceededDeployment(tx *sql.Tx, currentJob job, result deploymentResu
 			id,
 			project_name,
 			image_ref,
+			source_type,
+			source_ref,
 			app_container_name,
 			network_name,
 			pb_container_name,
 			status,
-			created_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at,
+			config_revision_id
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		currentJob.ID,
 		currentJob.ProjectName,
 		result.ImageRef,
+		currentJob.SourceType,
+		currentJob.SourceRef,
 		result.AppContainerName,
 		result.NetworkName,
 		result.PocketBaseContainerName,
 		deploymentStatusSucceeded,
 		currentJob.CreatedAt,
+		nullableString(currentJob.ConfigRevisionID),
 	)
 	if err != nil {
 		return fmt.Errorf("insert deployment %q: %w", currentJob.ID, err)
@@ -404,10 +464,29 @@ func requireDeploymentMetadata(result deploymentResult) error {
 	return nil
 }
 
+func updateJobPhase(db *sql.DB, jobID string, phase string) error {
+	_, err := db.Exec(
+		`UPDATE jobs
+		 SET phase = ?
+		 WHERE id = ? AND status = ?`,
+		strings.TrimSpace(phase),
+		jobID,
+		jobStatusRunning,
+	)
+	if err != nil {
+		return fmt.Errorf("update job phase: %w", err)
+	}
+
+	return nil
+}
+
 func getProjectCurrentDeployment(db *sql.DB, projectName string) (deploymentRecord, bool, error) {
 	var deployment deploymentRecord
+	var sourceType sql.NullString
+	var sourceRef sql.NullString
+	var configRevisionID sql.NullString
 	err := db.QueryRow(
-		`SELECT d.id, d.project_name, d.image_ref, d.app_container_name, d.network_name, d.pb_container_name, d.status, d.created_at
+		`SELECT d.id, d.project_name, d.image_ref, d.source_type, d.source_ref, d.app_container_name, d.network_name, d.pb_container_name, d.status, d.created_at, d.config_revision_id
 		 FROM projects p
 		 JOIN deployments d ON d.id = p.current_deployment_id
 		 WHERE p.name = ?`,
@@ -416,17 +495,29 @@ func getProjectCurrentDeployment(db *sql.DB, projectName string) (deploymentReco
 		&deployment.ID,
 		&deployment.ProjectName,
 		&deployment.ImageRef,
+		&sourceType,
+		&sourceRef,
 		&deployment.AppContainerName,
 		&deployment.NetworkName,
 		&deployment.PocketBaseContainerName,
 		&deployment.Status,
 		&deployment.CreatedAt,
+		&configRevisionID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return deploymentRecord{}, false, nil
 	}
 	if err != nil {
 		return deploymentRecord{}, false, fmt.Errorf("get current deployment for project %q: %w", projectName, err)
+	}
+	if sourceType.Valid {
+		deployment.SourceType = sourceType.String
+	}
+	if sourceRef.Valid {
+		deployment.SourceRef = sourceRef.String
+	}
+	if configRevisionID.Valid {
+		deployment.ConfigRevisionID = configRevisionID.String
 	}
 
 	return deployment, true, nil
@@ -457,7 +548,7 @@ func (manager *jobManager) cleanupSupersededDeploymentImage(ctx context.Context,
 		return
 	}
 
-	imageRef, found, err := getDeploymentImageRef(manager.db, projectName, deploymentID)
+	imageRef, managed, found, err := getDeploymentManagedImageRef(manager.db, projectName, deploymentID)
 	if err != nil {
 		log.Printf("warning: failed to load superseded deployment %q image for project %q cleanup: %v", deploymentID, projectName, err)
 		return
@@ -466,26 +557,30 @@ func (manager *jobManager) cleanupSupersededDeploymentImage(ctx context.Context,
 		log.Printf("warning: superseded deployment %q image for project %q was missing during cleanup", deploymentID, projectName)
 		return
 	}
+	if !managed {
+		return
+	}
 	if err := manager.artifactCleaner.CleanupImage(ctx, imageRef); err != nil {
 		log.Printf("warning: failed to clean up superseded deployment %q image %q: %v", deploymentID, imageRef, err)
 	}
 }
 
-func getDeploymentImageRef(db *sql.DB, projectName string, deploymentID string) (string, bool, error) {
+func getDeploymentManagedImageRef(db *sql.DB, projectName string, deploymentID string) (string, bool, bool, error) {
 	var imageRef string
+	var sourceType sql.NullString
 	err := db.QueryRow(
-		`SELECT image_ref
+		`SELECT image_ref, source_type
 		 FROM deployments
 		 WHERE id = ? AND project_name = ?`,
 		deploymentID,
 		projectName,
-	).Scan(&imageRef)
+	).Scan(&imageRef, &sourceType)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return "", false, false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("get deployment %q image ref for project %q: %w", deploymentID, projectName, err)
+		return "", false, false, fmt.Errorf("get deployment %q image ref for project %q: %w", deploymentID, projectName, err)
 	}
 
-	return imageRef, true, nil
+	return imageRef, !sourceType.Valid || sourceType.String == jobSourceTypeRepo, true, nil
 }

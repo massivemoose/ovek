@@ -11,13 +11,6 @@ import (
 
 const defaultListLimit = 20
 
-type projectSummary struct {
-	Name                string  `json:"name"`
-	Status              string  `json:"status"`
-	CurrentDeploymentID *string `json:"currentDeploymentId"`
-	CreatedAt           string  `json:"createdAt"`
-}
-
 func handleListProjects(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit, err := parseListLimit(r, defaultListLimit)

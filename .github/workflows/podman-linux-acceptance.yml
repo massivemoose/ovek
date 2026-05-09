@@ -1,0 +1,79 @@
+name: podman-linux-acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/podman-linux-acceptance.yml"
+      - "Makefile"
+      - "Dockerfile.brain"
+      - "README.md"
+      - "cmd/**"
+      - "internal/**"
+      - "podman-compose.yml"
+      - "scripts/**"
+      - ".llms/test-plan.md"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+jobs:
+  podman-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Podman prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl make podman podman-compose
+
+      - name: Start rootful Podman socket
+        run: |
+          sudo systemctl start podman.socket
+          sudo podman info
+          sudo podman compose version
+
+      - name: Start canonical Podman stack
+        run: make podman-linux-up
+
+      - name: Check public capsule image
+        id: capsule_image
+        run: |
+          if sudo podman pull ghcr.io/massivemoose/ovek-signup-example:latest; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Public signup example capsule is unavailable; skipping capsule smoke."
+          fi
+
+      - name: Check managed PocketBase image
+        if: steps.capsule_image.outputs.available == 'true'
+        run: sudo podman pull docker.io/elestio/pocketbase:latest
+
+      - name: Set up Go for capsule smoke
+        if: steps.capsule_image.outputs.available == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Configure capsule smoke hostnames
+        if: steps.capsule_image.outputs.available == 'true'
+        run: echo '127.0.0.1 brain.localhost signup-demo.localhost' | sudo tee -a /etc/hosts
+
+      - name: Run capsule smoke suite
+        if: steps.capsule_image.outputs.available == 'true'
+        run: make podman-linux-capsule-smoke
+
+      - name: Print Podman stack logs on failure
+        if: failure()
+        run: sudo podman compose -f podman-compose.yml logs --no-color
+
+      - name: Tear down canonical Podman stack
+        if: always()
+        run: make podman-linux-down

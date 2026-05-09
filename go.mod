@@ -1,4 +1,4 @@
-module github.com/massivemoose/alces
+module github.com/massivemoose/ovek
 
 go 1.25.5
 

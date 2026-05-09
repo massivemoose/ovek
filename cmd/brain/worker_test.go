@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -22,7 +24,7 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			ImageRef:                "ovek-demo-app:" + currentJob.ID,
 			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 			NetworkName:             projectNetworkName(currentJob.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
@@ -44,8 +46,8 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	if job.LogPath != "/tmp/build.log" {
 		t.Fatalf("expected log path %q, got %q", "/tmp/build.log", job.LogPath)
 	}
-	if job.ImageRef != "alces-demo-app:"+job.ID {
-		t.Fatalf("expected image ref %q, got %q", "alces-demo-app:"+job.ID, job.ImageRef)
+	if job.ImageRef != "ovek-demo-app:"+job.ID {
+		t.Fatalf("expected image ref %q, got %q", "ovek-demo-app:"+job.ID, job.ImageRef)
 	}
 	if job.StartedAt == "" {
 		t.Fatal("expected startedAt to be set")
@@ -57,6 +59,137 @@ func TestJobManagerMarksFailedJobWhenProcessorReturnsError(t *testing.T) {
 	assertCurrentDeploymentUnset(t, db, createdJob.ProjectName)
 	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusFailed {
 		t.Fatalf("expected project status %q, got %q", projectStatusFailed, got)
+	}
+}
+
+func TestJobManagerMarksFailedJobWhenPromotionStateUpdateFails(t *testing.T) {
+	db := newTestDB(t)
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "job.log")
+	if err := os.WriteFile(logPath, []byte("build output\n"), 0o644); err != nil {
+		t.Fatalf("expected log file seed to succeed, got error: %v", err)
+	}
+
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:  logPath,
+			ImageRef: "ovek-demo-app:" + currentJob.ID,
+		}, nil
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+
+	job := waitForJobStatus(t, db, createdJob.ID, jobStatusFailed)
+	if !strings.HasPrefix(job.ErrorMessage, "promotion state update failed: deployment result is missing app container name") {
+		t.Fatalf("expected promotion update error, got %q", job.ErrorMessage)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("expected log file read to succeed, got error: %v", err)
+	}
+	if !strings.Contains(string(logBytes), "error: "+job.ErrorMessage) {
+		t.Fatalf("expected job logs to contain promotion error %q, got %q", job.ErrorMessage, string(logBytes))
+	}
+	assertDeploymentMissing(t, db, createdJob.ID)
+	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusFailed {
+		t.Fatalf("expected project status %q, got %q", projectStatusFailed, got)
+	}
+}
+
+func TestNormalizeJobFailureMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		errorMessage string
+		want         string
+	}{
+		{
+			name:         "source fetch",
+			errorMessage: "git clone: repository not found",
+			want:         "source fetch failed: repository not found",
+		},
+		{
+			name:         "build planning",
+			errorMessage: "railpack prepare: no provider detected",
+			want:         "build planning failed: no provider detected",
+		},
+		{
+			name:         "image build",
+			errorMessage: "buildctl build: build exited 1",
+			want:         "image build failed: build exited 1",
+		},
+		{
+			name:         "pocketbase provisioning",
+			errorMessage: "ensure PocketBase: container start failed",
+			want:         "PocketBase provisioning failed: container start failed",
+		},
+		{
+			name:         "app provisioning",
+			errorMessage: "ensure app container: image pull failed",
+			want:         "app container provisioning failed: image pull failed",
+		},
+		{
+			name:         "app readiness",
+			errorMessage: "wait for app readiness: timed out waiting for port",
+			want:         "app readiness failed: timed out waiting for port",
+		},
+		{
+			name:         "promotion state",
+			errorMessage: "load current deployment: database is locked",
+			want:         "promotion state load failed: database is locked",
+		},
+		{
+			name:         "promotion state update",
+			errorMessage: "promotion state update failed: deployment result is missing app container name",
+			want:         "promotion state update failed: deployment result is missing app container name",
+		},
+		{
+			name:         "promotion cleanup",
+			errorMessage: `remove superseded app container "ovek-demo-app-app-dep-old": stop failed`,
+			want:         `promotion cleanup failed: remove superseded app container "ovek-demo-app-app-dep-old": stop failed`,
+		},
+		{
+			name:         "job state load",
+			errorMessage: "failed to load claimed job",
+			want:         "job state load failed",
+		},
+		{
+			name:         "interrupted restart",
+			errorMessage: interruptedJobErrorMessage,
+			want:         interruptedJobErrorMessage,
+		},
+		{
+			name:         "already normalized",
+			errorMessage: "source fetch failed: repository not found",
+			want:         "source fetch failed: repository not found",
+		},
+		{
+			name:         "unknown message",
+			errorMessage: "something unexpected happened",
+			want:         "something unexpected happened",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := normalizeJobFailureMessage(test.errorMessage)
+			if got != test.want {
+				t.Fatalf("expected normalized error %q, got %q", test.want, got)
+			}
+		})
 	}
 }
 
@@ -120,12 +253,12 @@ func TestJobManagerProcessesJobsSequentially(t *testing.T) {
 	close(releaseFirstJob)
 
 	firstFinishedJob := waitForJobStatus(t, db, firstJob.ID, jobStatusSucceeded)
-	if firstFinishedJob.ImageRef != "alces-demo-app:"+firstJob.ID {
-		t.Fatalf("expected first image ref %q, got %q", "alces-demo-app:"+firstJob.ID, firstFinishedJob.ImageRef)
+	if firstFinishedJob.ImageRef != "ovek-demo-app:"+firstJob.ID {
+		t.Fatalf("expected first image ref %q, got %q", "ovek-demo-app:"+firstJob.ID, firstFinishedJob.ImageRef)
 	}
 	secondFinishedJob := waitForJobStatus(t, db, secondJob.ID, jobStatusSucceeded)
-	if secondFinishedJob.ImageRef != "alces-demo-app:"+secondJob.ID {
-		t.Fatalf("expected second image ref %q, got %q", "alces-demo-app:"+secondJob.ID, secondFinishedJob.ImageRef)
+	if secondFinishedJob.ImageRef != "ovek-demo-app:"+secondJob.ID {
+		t.Fatalf("expected second image ref %q, got %q", "ovek-demo-app:"+secondJob.ID, secondFinishedJob.ImageRef)
 	}
 
 	firstDeployment := getDeploymentRecord(t, db, firstJob.ID)
@@ -160,7 +293,7 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                 "/tmp/requeued.log",
-			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			ImageRef:                "ovek-demo-app:" + currentJob.ID,
 			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 			NetworkName:             projectNetworkName(currentJob.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
@@ -188,11 +321,75 @@ func TestJobManagerRequeuesQueuedJobsOnStart(t *testing.T) {
 	if deployment.Status != deploymentStatusSucceeded {
 		t.Fatalf("expected deployment status %q, got %q", deploymentStatusSucceeded, deployment.Status)
 	}
+	if deployment.SourceType != jobSourceTypeRepo {
+		t.Fatalf("expected deployment source type %q, got %q", jobSourceTypeRepo, deployment.SourceType)
+	}
+	if deployment.SourceRef != "https://example.com/demo.git" {
+		t.Fatalf("expected deployment source ref %q, got %q", "https://example.com/demo.git", deployment.SourceRef)
+	}
 	if got := getProjectCurrentDeploymentID(t, db, createdJob.ProjectName); got != createdJob.ID {
 		t.Fatalf("expected current deployment ID %q, got %q", createdJob.ID, got)
 	}
 	if got := getProjectStatus(t, db, createdJob.ProjectName); got != projectStatusRunning {
 		t.Fatalf("expected project status %q, got %q", projectStatusRunning, got)
+	}
+}
+
+func TestJobManagerPromotesImageSourceJob(t *testing.T) {
+	db := newTestDB(t)
+	createdJob, err := createQueuedJobWithSource(db, "demo-app", jobSourceTypeImage, "ghcr.io/example/demo:2026.05.01", false)
+	if err != nil {
+		t.Fatalf("expected image job creation to succeed, got error: %v", err)
+	}
+
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		if currentJob.SourceType != jobSourceTypeImage {
+			t.Fatalf("expected source type %q, got %q", jobSourceTypeImage, currentJob.SourceType)
+		}
+		if currentJob.SourceRef != "ghcr.io/example/demo:2026.05.01" {
+			t.Fatalf("expected source ref %q, got %q", "ghcr.io/example/demo:2026.05.01", currentJob.SourceRef)
+		}
+		if currentJob.RepoURL != "" {
+			t.Fatalf("expected image job repo URL to be empty, got %q", currentJob.RepoURL)
+		}
+
+		return deploymentResult{
+			LogPath:                 "/tmp/image-run.log",
+			ImageRef:                currentJob.SourceRef,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
+		}, nil
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+
+	finishedJob := waitForJobStatus(t, db, createdJob.ID, jobStatusSucceeded)
+	if finishedJob.ImageRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected finished job image ref %q, got %q", "ghcr.io/example/demo:2026.05.01", finishedJob.ImageRef)
+	}
+	if finishedJob.SourceType != jobSourceTypeImage {
+		t.Fatalf("expected finished job source type %q, got %q", jobSourceTypeImage, finishedJob.SourceType)
+	}
+
+	deployment := getDeploymentRecord(t, db, createdJob.ID)
+	if deployment.ImageRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected deployment image ref %q, got %q", "ghcr.io/example/demo:2026.05.01", deployment.ImageRef)
+	}
+	if deployment.SourceType != jobSourceTypeImage {
+		t.Fatalf("expected deployment source type %q, got %q", jobSourceTypeImage, deployment.SourceType)
+	}
+	if deployment.SourceRef != "ghcr.io/example/demo:2026.05.01" {
+		t.Fatalf("expected deployment source ref %q, got %q", "ghcr.io/example/demo:2026.05.01", deployment.SourceRef)
+	}
+	if got := getProjectCurrentDeploymentID(t, db, createdJob.ProjectName); got != createdJob.ID {
+		t.Fatalf("expected current deployment ID %q, got %q", createdJob.ID, got)
 	}
 }
 
@@ -246,10 +443,10 @@ func TestJobManagerKeepsProjectRunningWhenRecoveringInterruptedJobOverExistingRu
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -296,10 +493,10 @@ func TestJobManagerKeepsProjectRunningWhenNewDeploymentFailsOverExistingRuntime(
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -311,7 +508,7 @@ func TestJobManagerKeepsProjectRunningWhenNewDeploymentFailsOverExistingRuntime(
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "alces-demo-app:" + currentJob.ID,
+			ImageRef:                "ovek-demo-app:" + currentJob.ID,
 			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 			NetworkName:             projectNetworkName(currentJob.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
@@ -353,7 +550,7 @@ func TestJobManagerCleansUpSupersededDeploymentImageAfterSuccessfulPromotion(t *
 	manager := newJobManager(db, processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		result := deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "localhost:5001/alces-demo-app:" + job.ID,
+			ImageRef:                "localhost:5001/ovek-demo-app:" + job.ID,
 			AppContainerName:        appContainerName(job.ProjectName, job.ID),
 			NetworkName:             projectNetworkName(job.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(job.ProjectName),
@@ -378,7 +575,7 @@ func TestJobManagerCleansUpSupersededDeploymentImageAfterSuccessfulPromotion(t *
 	waitForJobStatus(t, db, secondJob.ID, jobStatusSucceeded)
 	waitForArtifactCleanup(t, artifactCleaner, 1)
 
-	wantImageRefs := []string{"localhost:5001/alces-demo-app:" + firstJob.ID}
+	wantImageRefs := []string{"localhost:5001/ovek-demo-app:" + firstJob.ID}
 	if !reflect.DeepEqual(artifactCleaner.cleanedRefs, wantImageRefs) {
 		t.Fatalf("expected cleaned refs %#v, got %#v", wantImageRefs, artifactCleaner.cleanedRefs)
 	}
@@ -399,7 +596,7 @@ func TestJobManagerLogsArtifactCleanupFailuresButKeepsSuccessfulJobState(t *test
 	manager := newJobManager(db, processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
 		result := deploymentResult{
 			LogPath:                 "/tmp/build.log",
-			ImageRef:                "localhost:5001/alces-demo-app:" + job.ID,
+			ImageRef:                "localhost:5001/ovek-demo-app:" + job.ID,
 			AppContainerName:        appContainerName(job.ProjectName, job.ID),
 			NetworkName:             projectNetworkName(job.ProjectName),
 			PocketBaseContainerName: pocketBaseContainerName(job.ProjectName),
@@ -436,15 +633,63 @@ func TestJobManagerLogsArtifactCleanupFailuresButKeepsSuccessfulJobState(t *test
 	}
 }
 
+func TestJobManagerSkipsArtifactCleanupForSupersededImageDeployment(t *testing.T) {
+	db := newTestDB(t)
+	firstJob, err := createQueuedJobWithSource(db, "demo-app", jobSourceTypeImage, "ghcr.io/example/demo:first", false)
+	if err != nil {
+		t.Fatalf("expected first image job creation to succeed, got error: %v", err)
+	}
+	secondJob, err := createQueuedJob(db, "demo-app", "https://example.com/second.git")
+	if err != nil {
+		t.Fatalf("expected second job creation to succeed, got error: %v", err)
+	}
+
+	artifactCleaner := &fakeRegistryArtifactCleaner{}
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		imageRef := "localhost:5001/ovek-demo-app:" + currentJob.ID
+		if currentJob.SourceType == jobSourceTypeImage {
+			imageRef = currentJob.SourceRef
+		}
+		result := deploymentResult{
+			LogPath:                 "/tmp/build.log",
+			ImageRef:                imageRef,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
+		}
+		if currentJob.ID == secondJob.ID {
+			result.SupersededDeploymentID = firstJob.ID
+		}
+
+		return result, nil
+	}), artifactCleaner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(firstJob.ID)
+	manager.Enqueue(secondJob.ID)
+
+	waitForJobStatus(t, db, firstJob.ID, jobStatusSucceeded)
+	waitForJobStatus(t, db, secondJob.ID, jobStatusSucceeded)
+
+	if len(artifactCleaner.cleanedRefs) != 0 {
+		t.Fatalf("expected no artifact cleanup for superseded image deployment, got %#v", artifactCleaner.cleanedRefs)
+	}
+}
+
 func TestJobManagerDoesNotCleanUpArtifactsForFailedJobs(t *testing.T) {
 	db := newTestDB(t)
 	seedCurrentDeployment(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "demo-app",
-		ImageRef:                "localhost:5001/alces-demo-app:dep-current",
-		AppContainerName:        "alces-demo-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-demo-app:dep-current",
+		AppContainerName:        "ovek-demo-app-app-dep-current",
 		NetworkName:             "demo-app-net",
-		PocketBaseContainerName: "alces-demo-app-pb",
+		PocketBaseContainerName: "ovek-demo-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -457,7 +702,7 @@ func TestJobManagerDoesNotCleanUpArtifactsForFailedJobs(t *testing.T) {
 	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
 		return deploymentResult{
 			LogPath:                "/tmp/build.log",
-			ImageRef:               "localhost:5001/alces-demo-app:" + currentJob.ID,
+			ImageRef:               "localhost:5001/ovek-demo-app:" + currentJob.ID,
 			SupersededDeploymentID: "dep-current",
 		}, errors.New("build failed")
 	}), artifactCleaner)
@@ -473,6 +718,39 @@ func TestJobManagerDoesNotCleanUpArtifactsForFailedJobs(t *testing.T) {
 
 	if len(artifactCleaner.cleanedRefs) != 0 {
 		t.Fatalf("expected no artifact cleanup on failure, got %#v", artifactCleaner.cleanedRefs)
+	}
+}
+
+func TestJobManagerSyncsIngressAfterSuccessfulJob(t *testing.T) {
+	db := newTestDB(t)
+	createdJob, err := createQueuedJob(db, "demo-app", "https://example.com/demo.git")
+	if err != nil {
+		t.Fatalf("expected job creation to succeed, got error: %v", err)
+	}
+
+	ingress := &recordingProjectIngressManager{}
+	manager := newJobManager(db, processorFunc(func(_ context.Context, currentJob job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:                 "/tmp/build.log",
+			ImageRef:                "localhost:5001/ovek-demo-app:" + currentJob.ID,
+			AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
+			NetworkName:             projectNetworkName(currentJob.ProjectName),
+			PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
+		}, nil
+	}))
+	manager.ingress = ingress
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("expected manager to start, got error: %v", err)
+	}
+
+	manager.Enqueue(createdJob.ID)
+	waitForJobStatus(t, db, createdJob.ID, jobStatusSucceeded)
+
+	if !reflect.DeepEqual(ingress.syncedProjects, []string{"demo-app"}) {
+		t.Fatalf("expected synced projects %#v, got %#v", []string{"demo-app"}, ingress.syncedProjects)
 	}
 }
 
@@ -521,7 +799,7 @@ func waitForJobStatus(t *testing.T, db *sql.DB, jobID string, wantStatus string)
 
 func successfulDeploymentResult(currentJob job) deploymentResult {
 	return deploymentResult{
-		ImageRef:                "alces-" + currentJob.ProjectName + ":" + currentJob.ID,
+		ImageRef:                "ovek-" + currentJob.ProjectName + ":" + currentJob.ID,
 		AppContainerName:        appContainerName(currentJob.ProjectName, currentJob.ID),
 		NetworkName:             projectNetworkName(currentJob.ProjectName),
 		PocketBaseContainerName: pocketBaseContainerName(currentJob.ProjectName),
@@ -532,8 +810,11 @@ func getDeploymentRecord(t *testing.T, db *sql.DB, deploymentID string) deployme
 	t.Helper()
 
 	var record deploymentRecord
+	var sourceType sql.NullString
+	var sourceRef sql.NullString
+	var configRevisionID sql.NullString
 	err := db.QueryRow(
-		`SELECT id, project_name, image_ref, app_container_name, network_name, pb_container_name, status, created_at
+		`SELECT id, project_name, image_ref, source_type, source_ref, app_container_name, network_name, pb_container_name, status, created_at, config_revision_id
 		 FROM deployments
 		 WHERE id = ?`,
 		deploymentID,
@@ -541,14 +822,26 @@ func getDeploymentRecord(t *testing.T, db *sql.DB, deploymentID string) deployme
 		&record.ID,
 		&record.ProjectName,
 		&record.ImageRef,
+		&sourceType,
+		&sourceRef,
 		&record.AppContainerName,
 		&record.NetworkName,
 		&record.PocketBaseContainerName,
 		&record.Status,
 		&record.CreatedAt,
+		&configRevisionID,
 	)
 	if err != nil {
 		t.Fatalf("expected deployment %q lookup to succeed, got error: %v", deploymentID, err)
+	}
+	if sourceType.Valid {
+		record.SourceType = sourceType.String
+	}
+	if sourceRef.Valid {
+		record.SourceRef = sourceRef.String
+	}
+	if configRevisionID.Valid {
+		record.ConfigRevisionID = configRevisionID.String
 	}
 
 	return record

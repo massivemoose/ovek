@@ -1,51 +1,52 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/massivemoose/ovek/internal/brainapi"
 )
 
 const (
-	jobStatusQueued   = "queued"
-	jobTypeDeployment = "deployment"
+	jobStatusQueued    = "queued"
+	jobTypeDeployment  = "deployment"
+	jobSourceTypeRepo  = brainapi.JobSourceTypeRepo
+	jobSourceTypeImage = brainapi.JobSourceTypeImage
+
+	jobPhaseQueued              = "queued"
+	jobPhaseStarting            = "starting"
+	jobPhaseBuildingImage       = "building image"
+	jobPhasePreparingImage      = "preparing image"
+	jobPhaseProvisioningPB      = "provisioning PocketBase"
+	jobPhaseStartingApp         = "starting app"
+	jobPhaseWaitingForReadiness = "waiting for readiness"
+	jobPhasePromoting           = "promoting"
 )
 
 var projectNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
-type jobLinks struct {
-	Self       string `json:"self"`
-	Logs       string `json:"logs"`
-	LogsStream string `json:"logsStream"`
-}
-
-type job struct {
-	ID           string   `json:"id"`
-	Type         string   `json:"type"`
-	ProjectName  string   `json:"projectName"`
-	RepoURL      string   `json:"repoUrl"`
-	Status       string   `json:"status"`
-	LogPath      string   `json:"logPath,omitempty"`
-	ImageRef     string   `json:"imageRef,omitempty"`
-	ErrorMessage string   `json:"errorMessage,omitempty"`
-	CreatedAt    string   `json:"createdAt"`
-	StartedAt    string   `json:"startedAt,omitempty"`
-	FinishedAt   string   `json:"finishedAt,omitempty"`
-	Links        jobLinks `json:"links"`
-}
-
-type createDeploymentRequest struct {
-	RepoURL string `json:"repoUrl"`
-}
+const maxCapsuleRefLength = 512
 
 type deploymentEnqueuer interface {
 	Enqueue(jobID string)
+}
+
+type activeDeploymentJobError struct {
+	job job
+}
+
+func (err activeDeploymentJobError) Error() string {
+	return fmt.Sprintf("project %q already has active deployment job %q", err.job.ProjectName, err.job.ID)
 }
 
 func handleListProjectJobs(db *sql.DB) http.HandlerFunc {
@@ -104,6 +105,28 @@ func handleCreateDeployment(db *sql.DB, enqueuer deploymentEnqueuer) http.Handle
 	}
 }
 
+func handleCreateRun(db *sql.DB, enqueuer deploymentEnqueuer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		var request createRunRequest
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidRequestBody, "invalid request body")
+			return
+		}
+
+		createRunJob(w, db, enqueuer, projectName, request.CapsuleRef)
+	}
+}
+
 func handleGetJob(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := strings.TrimSpace(r.PathValue("jobID"))
@@ -133,8 +156,13 @@ func createDeploymentJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentE
 		return
 	}
 
-	job, err := createQueuedJob(db, projectName, repoURL)
+	job, err := createQueuedDeploymentJob(db, projectName, repoURL)
 	if err != nil {
+		var activeErr activeDeploymentJobError
+		if errors.As(err, &activeErr) {
+			writeJSONError(w, http.StatusConflict, errorCodeActiveDeploymentExists, activeDeploymentJobMessage(activeErr.job))
+			return
+		}
 		writeJSONError(w, http.StatusInternalServerError, errorCodeCreateJobFailed, "failed to create deployment job")
 		return
 	}
@@ -147,10 +175,76 @@ func createDeploymentJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentE
 	writeJSON(w, http.StatusAccepted, job)
 }
 
+func createRunJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentEnqueuer, projectName string, capsuleRef string) {
+	capsuleRef, ok := validateCapsuleRef(w, capsuleRef)
+	if !ok {
+		return
+	}
+
+	job, err := createQueuedRunJob(db, projectName, capsuleRef)
+	if err != nil {
+		var activeErr activeDeploymentJobError
+		if errors.As(err, &activeErr) {
+			writeJSONError(w, http.StatusConflict, errorCodeActiveDeploymentExists, activeDeploymentJobMessage(activeErr.job))
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, errorCodeCreateJobFailed, "failed to create deployment job")
+		return
+	}
+
+	if enqueuer != nil {
+		enqueuer.Enqueue(job.ID)
+	}
+
+	w.Header().Set("Location", jobPath(job.ID))
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func validateCapsuleRef(w http.ResponseWriter, capsuleRef string) (string, bool) {
+	if strings.TrimSpace(capsuleRef) == "" {
+		writeJSONError(w, http.StatusBadRequest, errorCodeCapsuleRefRequired, "capsuleRef is required")
+		return "", false
+	}
+	if len(capsuleRef) > maxCapsuleRefLength {
+		writeJSONError(w, http.StatusBadRequest, errorCodeInvalidCapsuleRef, fmt.Sprintf("capsuleRef must be at most %d characters", maxCapsuleRefLength))
+		return "", false
+	}
+	for _, value := range capsuleRef {
+		if unicode.IsSpace(value) || unicode.IsControl(value) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidCapsuleRef, "capsuleRef must not contain whitespace or control characters")
+			return "", false
+		}
+	}
+
+	return capsuleRef, true
+}
+
 func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error) {
+	return createQueuedJobWithActiveCheck(db, projectName, repoURL, false)
+}
+
+func createQueuedDeploymentJob(db *sql.DB, projectName string, repoURL string) (job, error) {
+	return createQueuedJobWithActiveCheck(db, projectName, repoURL, true)
+}
+
+func createQueuedRunJob(db *sql.DB, projectName string, capsuleRef string) (job, error) {
+	return createQueuedJobWithSource(db, projectName, jobSourceTypeImage, capsuleRef, true)
+}
+
+func createQueuedJobWithActiveCheck(db *sql.DB, projectName string, repoURL string, rejectActive bool) (job, error) {
+	return createQueuedJobWithSource(db, projectName, jobSourceTypeRepo, repoURL, rejectActive)
+}
+
+func createQueuedJobWithSource(db *sql.DB, projectName string, sourceType string, sourceRef string, rejectActive bool) (job, error) {
 	jobID, err := newID()
 	if err != nil {
 		return job{}, err
+	}
+	sourceType = strings.TrimSpace(sourceType)
+	sourceRef = strings.TrimSpace(sourceRef)
+	repoURL := ""
+	if sourceType == jobSourceTypeRepo {
+		repoURL = sourceRef
 	}
 
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
@@ -169,13 +263,35 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 		return job{}, err
 	}
 
+	if rejectActive {
+		activeJob, found, err := findActiveDeploymentJob(context.Background(), tx, projectName)
+		if err != nil {
+			_ = tx.Rollback()
+			return job{}, err
+		}
+		if found {
+			_ = tx.Rollback()
+			return job{}, activeDeploymentJobError{job: activeJob}
+		}
+	}
+
+	configRevisionID, configRevisionFound, err := latestProjectConfigRevisionID(context.Background(), tx, projectName)
+	if err != nil {
+		_ = tx.Rollback()
+		return job{}, err
+	}
+
 	if _, err := tx.Exec(
-		"INSERT INTO jobs(id, project_name, repo_url, status, created_at) VALUES(?, ?, ?, ?, ?)",
+		"INSERT INTO jobs(id, project_name, repo_url, source_type, source_ref, status, phase, created_at, config_revision_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		jobID,
 		projectName,
 		repoURL,
+		sourceType,
+		sourceRef,
 		jobStatusQueued,
+		jobPhaseQueued,
 		createdAt,
+		nullableString(configRevisionID),
 	); err != nil {
 		_ = tx.Rollback()
 		return job{}, err
@@ -190,17 +306,49 @@ func createQueuedJob(db *sql.DB, projectName string, repoURL string) (job, error
 	}
 
 	return decorateJob(job{
-		ID:          jobID,
-		ProjectName: projectName,
-		RepoURL:     repoURL,
-		Status:      jobStatusQueued,
-		CreatedAt:   createdAt,
+		ID:               jobID,
+		ProjectName:      projectName,
+		RepoURL:          repoURL,
+		SourceType:       sourceType,
+		SourceRef:        sourceRef,
+		Status:           jobStatusQueued,
+		CreatedAt:        createdAt,
+		ConfigRevisionID: optionalRevisionID(configRevisionID, configRevisionFound),
 	}), nil
+}
+
+func findActiveDeploymentJob(ctx context.Context, tx *sql.Tx, projectName string) (job, bool, error) {
+	activeJob, err := scanJob(
+		tx.QueryRowContext(
+			ctx,
+			`SELECT id, project_name, repo_url, source_type, source_ref, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
+			 FROM jobs
+			 WHERE project_name = ?
+			   AND status IN (?, ?)
+			 ORDER BY created_at ASC
+			 LIMIT 1`,
+			projectName,
+			jobStatusQueued,
+			jobStatusRunning,
+		),
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return job{}, false, nil
+	}
+	if err != nil {
+		return job{}, false, err
+	}
+
+	return decorateJob(activeJob), true, nil
+}
+
+func activeDeploymentJobMessage(job job) string {
+	return fmt.Sprintf("project %q already has an active deployment job %q with status %q; wait for it to finish before starting another deploy", job.ProjectName, job.ID, job.Status)
 }
 
 func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 	rows, err := db.Query(
-		`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at
+		`SELECT id, project_name, repo_url, source_type, source_ref, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 		 FROM jobs
 		 WHERE project_name = ?
 		 ORDER BY created_at DESC
@@ -232,7 +380,7 @@ func listProjectJobs(db *sql.DB, projectName string, limit int) ([]job, error) {
 func getJob(db *sql.DB, jobID string) (job, error) {
 	job, err := scanJob(
 		db.QueryRow(
-			`SELECT id, project_name, repo_url, status, log_path, image_ref, error_message, created_at, started_at, finished_at
+			`SELECT id, project_name, repo_url, source_type, source_ref, status, phase, log_path, image_ref, error_message, created_at, started_at, finished_at, config_revision_id
 			 FROM jobs
 			 WHERE id = ?`,
 			jobID,
@@ -251,30 +399,47 @@ type jobScanner interface {
 
 func scanJob(scanner jobScanner) (job, error) {
 	var job job
+	var sourceType sql.NullString
+	var sourceRef sql.NullString
+	var phase sql.NullString
 	var logPath sql.NullString
 	var imageRef sql.NullString
 	var errorMessage sql.NullString
 	var startedAt sql.NullString
 	var finishedAt sql.NullString
+	var configRevisionID sql.NullString
 
 	err := scanner.Scan(
 		&job.ID,
 		&job.ProjectName,
 		&job.RepoURL,
+		&sourceType,
+		&sourceRef,
 		&job.Status,
+		&phase,
 		&logPath,
 		&imageRef,
 		&errorMessage,
 		&job.CreatedAt,
 		&startedAt,
 		&finishedAt,
+		&configRevisionID,
 	)
 	if err != nil {
 		return job, err
 	}
 
+	if sourceType.Valid {
+		job.SourceType = sourceType.String
+	}
+	if sourceRef.Valid {
+		job.SourceRef = sourceRef.String
+	}
 	if logPath.Valid {
 		job.LogPath = logPath.String
+	}
+	if phase.Valid {
+		job.Phase = phase.String
 	}
 	if imageRef.Valid {
 		job.ImageRef = imageRef.String
@@ -288,8 +453,18 @@ func scanJob(scanner jobScanner) (job, error) {
 	if finishedAt.Valid {
 		job.FinishedAt = finishedAt.String
 	}
+	if configRevisionID.Valid {
+		job.ConfigRevisionID = configRevisionID.String
+	}
 
 	return job, nil
+}
+
+func optionalRevisionID(revisionID string, found bool) string {
+	if !found {
+		return ""
+	}
+	return revisionID
 }
 
 func isValidProjectName(name string) bool {
@@ -306,24 +481,30 @@ func newID() (string, error) {
 }
 
 func decorateJob(job job) job {
-	job.Type = jobTypeDeployment
+	job.Type = brainapi.JobTypeDeployment
+	if job.SourceType == "" {
+		job.SourceType = jobSourceTypeRepo
+	}
+	if job.SourceRef == "" && job.RepoURL != "" {
+		job.SourceRef = job.RepoURL
+	}
 	job.Links = jobLinks{
-		Self:       jobPath(job.ID),
-		Logs:       jobLogsPath(job.ID),
-		LogsStream: jobLogsStreamPath(job.ID),
+		Self:       brainapi.JobPath(job.ID),
+		Logs:       brainapi.JobLogsPath(job.ID),
+		LogsStream: brainapi.JobLogsStreamPath(job.ID),
 	}
 
 	return job
 }
 
 func jobPath(jobID string) string {
-	return "/v1/jobs/" + jobID
+	return brainapi.JobPath(jobID)
 }
 
 func jobLogsPath(jobID string) string {
-	return jobPath(jobID) + "/logs"
+	return brainapi.JobLogsPath(jobID)
 }
 
 func jobLogsStreamPath(jobID string) string {
-	return jobLogsPath(jobID) + "/stream"
+	return brainapi.JobLogsStreamPath(jobID)
 }

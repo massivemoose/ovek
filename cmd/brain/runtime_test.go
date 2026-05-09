@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
+	dockertypes "github.com/docker/docker/api/types"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerimage "github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
@@ -21,11 +26,11 @@ func TestProjectResourceNames(t *testing.T) {
 	if got := projectNetworkName(projectName); got != "demo-app-net" {
 		t.Fatalf("expected network name %q, got %q", "demo-app-net", got)
 	}
-	if got := pocketBaseContainerName(projectName); got != "alces-demo-app-pb" {
-		t.Fatalf("expected PocketBase container name %q, got %q", "alces-demo-app-pb", got)
+	if got := pocketBaseContainerName(projectName); got != "ovek-demo-app-pb" {
+		t.Fatalf("expected PocketBase container name %q, got %q", "ovek-demo-app-pb", got)
 	}
-	if got := appContainerName(projectName, "dep-123"); got != "alces-demo-app-app-dep-123" {
-		t.Fatalf("expected app container name %q, got %q", "alces-demo-app-app-dep-123", got)
+	if got := appContainerName(projectName, "dep-123"); got != "ovek-demo-app-app-dep-123" {
+		t.Fatalf("expected app container name %q, got %q", "ovek-demo-app-app-dep-123", got)
 	}
 }
 
@@ -133,11 +138,133 @@ func TestDockerRuntimeEnsureProjectNetworkRejectsUnmanagedExistingNetwork(t *tes
 	if err == nil {
 		t.Fatal("expected unmanaged network to be rejected")
 	}
-	if !strings.Contains(err.Error(), "already exists but is not managed by alces") {
+	if !strings.Contains(err.Error(), "already exists but is not managed by ovek") {
 		t.Fatalf("expected unmanaged network error, got %v", err)
 	}
 	if client.networkCreateCalls != 0 {
 		t.Fatalf("expected create not to be called, got %d calls", client.networkCreateCalls)
+	}
+}
+
+func TestPodmanRuntimePullImageUsesNativePuller(t *testing.T) {
+	puller := &fakePodmanImagePuller{}
+	runtime := &podmanRuntime{
+		dockerRuntime:    newDockerRuntime(&fakeDockerClient{}),
+		puller:           puller,
+		registryInsecure: true,
+	}
+
+	err := runtime.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123")
+	if err != nil {
+		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
+	}
+
+	if puller.imageRef != "localhost:5001/ovek-demo-app:job-123" {
+		t.Fatalf("expected image ref %q, got %q", "localhost:5001/ovek-demo-app:job-123", puller.imageRef)
+	}
+	if !puller.registryInsecure {
+		t.Fatal("expected podman runtime to pass through registryInsecure=true")
+	}
+}
+
+func TestPodmanServiceImagePullerSetsTLSVerifyFalseForInsecureRegistries(t *testing.T) {
+	requests := make(chan *http.Request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	err = puller.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123", true)
+	if err != nil {
+		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
+	}
+
+	request := <-requests
+	if request.Method != http.MethodPost {
+		t.Fatalf("expected request method %q, got %q", http.MethodPost, request.Method)
+	}
+	if request.URL.Path != "/v1.0.0/libpod/images/pull" {
+		t.Fatalf("expected request path %q, got %q", "/v1.0.0/libpod/images/pull", request.URL.Path)
+	}
+	if request.URL.Query().Get("reference") != "localhost:5001/ovek-demo-app:job-123" {
+		t.Fatalf("expected image reference query %q, got %q", "localhost:5001/ovek-demo-app:job-123", request.URL.Query().Get("reference"))
+	}
+	if request.URL.Query().Get("tlsVerify") != "false" {
+		t.Fatalf("expected tlsVerify query %q, got %q", "false", request.URL.Query().Get("tlsVerify"))
+	}
+}
+
+func TestPodmanServiceImagePullerOmitsTLSVerifyForSecureRegistries(t *testing.T) {
+	requests := make(chan *http.Request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	err = puller.PullImage(context.Background(), "quay.io/podman/hello:latest", false)
+	if err != nil {
+		t.Fatalf("expected podman image pull to succeed, got error: %v", err)
+	}
+
+	request := <-requests
+	if request.URL.Query().Get("tlsVerify") != "" {
+		t.Fatalf("expected tlsVerify query to be omitted, got %q", request.URL.Query().Get("tlsVerify"))
+	}
+}
+
+func TestPodmanServiceImagePullerReturnsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "http: server gave HTTP response to HTTPS client", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	err = puller.PullImage(context.Background(), "localhost:5001/ovek-demo-app:job-123", true)
+	if err == nil {
+		t.Fatal("expected podman image pull to fail")
+	}
+	if !strings.Contains(err.Error(), "http: server gave HTTP response to HTTPS client") {
+		t.Fatalf("expected podman pull error to include API response body, got %v", err)
+	}
+}
+
+func TestPodmanServiceImagePullerReturnsStreamedPullError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"stream":"Trying to pull image"}` + "\n"))
+		_, _ = w.Write([]byte(`{"error":"no image found in image index for architecture \"arm64\", variant \"v8\", OS \"linux\""}` + "\n"))
+	}))
+	defer server.Close()
+
+	puller, err := newPodmanImagePuller(server.URL)
+	if err != nil {
+		t.Fatalf("expected podman image puller creation to succeed, got error: %v", err)
+	}
+
+	err = puller.PullImage(context.Background(), "ghcr.io/example/demo:latest", false)
+	if err == nil {
+		t.Fatal("expected podman image pull to fail")
+	}
+	if !strings.Contains(err.Error(), "no image found in image index") {
+		t.Fatalf("expected podman pull error to include streamed error, got %v", err)
 	}
 }
 
@@ -164,10 +291,23 @@ type fakeDockerClient struct {
 	containerInspectCalls           int
 	containerInspectResponse        dockercontainer.InspectResponse
 	containerInspectErr             error
+	containerInspectResponses       map[string]dockercontainer.InspectResponse
+	containerInspectErrs            map[string]error
 	containerLogsName               string
 	containerLogsOptions            dockercontainer.LogsOptions
 	containerLogsResponse           io.ReadCloser
 	containerLogsErr                error
+	containerExecCreateID           string
+	containerExecCreateContainer    string
+	containerExecCreateOptions      dockercontainer.ExecOptions
+	containerExecCreateErr          error
+	containerExecAttachID           string
+	containerExecAttachOptions      dockercontainer.ExecAttachOptions
+	containerExecAttachOutput       string
+	containerExecAttachErr          error
+	containerExecInspectID          string
+	containerExecInspectResponse    dockercontainer.ExecInspect
+	containerExecInspectErr         error
 	imagePullRef                    string
 	imagePullOptions                dockerimage.PullOptions
 	imagePullResponse               io.ReadCloser
@@ -188,6 +328,12 @@ type fakeDockerClient struct {
 	containerRemoveID               string
 	containerRemoveOptions          dockercontainer.RemoveOptions
 	containerRemoveErr              error
+}
+
+type fakePodmanImagePuller struct {
+	imageRef         string
+	registryInsecure bool
+	err              error
 }
 
 func (client *fakeDockerClient) NetworkInspect(_ context.Context, networkID string, _ dockernetwork.InspectOptions) (dockernetwork.Inspect, error) {
@@ -222,6 +368,16 @@ func (client *fakeDockerClient) ContainerList(_ context.Context, options dockerc
 func (client *fakeDockerClient) ContainerInspect(_ context.Context, containerID string) (dockercontainer.InspectResponse, error) {
 	client.containerInspectName = containerID
 	client.containerInspectCalls++
+	if client.containerInspectErrs != nil {
+		if err, ok := client.containerInspectErrs[containerID]; ok {
+			return dockercontainer.InspectResponse{}, err
+		}
+	}
+	if client.containerInspectResponses != nil {
+		if response, ok := client.containerInspectResponses[containerID]; ok {
+			return response, nil
+		}
+	}
 	return client.containerInspectResponse, client.containerInspectErr
 }
 
@@ -236,6 +392,43 @@ func (client *fakeDockerClient) ContainerLogs(_ context.Context, container strin
 	}
 
 	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (client *fakeDockerClient) ContainerExecCreate(_ context.Context, containerID string, options dockercontainer.ExecOptions) (dockercontainer.ExecCreateResponse, error) {
+	client.containerExecCreateContainer = containerID
+	client.containerExecCreateOptions = options
+	if client.containerExecCreateErr != nil {
+		return dockercontainer.ExecCreateResponse{}, client.containerExecCreateErr
+	}
+	execID := client.containerExecCreateID
+	if execID == "" {
+		execID = "exec-123"
+	}
+	return dockercontainer.ExecCreateResponse{ID: execID}, nil
+}
+
+func (client *fakeDockerClient) ContainerExecAttach(_ context.Context, execID string, options dockercontainer.ExecAttachOptions) (dockertypes.HijackedResponse, error) {
+	client.containerExecAttachID = execID
+	client.containerExecAttachOptions = options
+	if client.containerExecAttachErr != nil {
+		return dockertypes.HijackedResponse{}, client.containerExecAttachErr
+	}
+
+	writer, reader := net.Pipe()
+	go func() {
+		_, _ = io.WriteString(writer, client.containerExecAttachOutput)
+		_ = writer.Close()
+	}()
+
+	return dockertypes.HijackedResponse{
+		Conn:   reader,
+		Reader: bufio.NewReader(reader),
+	}, nil
+}
+
+func (client *fakeDockerClient) ContainerExecInspect(_ context.Context, execID string) (dockercontainer.ExecInspect, error) {
+	client.containerExecInspectID = execID
+	return client.containerExecInspectResponse, client.containerExecInspectErr
 }
 
 func (client *fakeDockerClient) ImagePull(_ context.Context, refStr string, options dockerimage.PullOptions) (io.ReadCloser, error) {
@@ -276,4 +469,10 @@ func (client *fakeDockerClient) ContainerRemove(_ context.Context, containerID s
 	client.containerRemoveID = containerID
 	client.containerRemoveOptions = options
 	return client.containerRemoveErr
+}
+
+func (puller *fakePodmanImagePuller) PullImage(_ context.Context, imageRef string, registryInsecure bool) error {
+	puller.imageRef = imageRef
+	puller.registryInsecure = registryInsecure
+	return puller.err
 }

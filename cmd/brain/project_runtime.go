@@ -13,51 +13,40 @@ import (
 	dockernetwork "github.com/docker/docker/api/types/network"
 )
 
-type projectRuntimeApp struct {
-	ContainerName string `json:"containerName"`
-	ImageRef      string `json:"imageRef"`
-	Running       bool   `json:"running"`
-}
-
-type projectRuntimeContainer struct {
-	ContainerName string `json:"containerName"`
-	Running       bool   `json:"running"`
-}
-
-type projectRuntimeNetwork struct {
-	Name string `json:"name"`
-}
-
-type projectRuntimeView struct {
-	ProjectName         string                   `json:"projectName"`
-	CurrentDeploymentID *string                  `json:"currentDeploymentId"`
-	App                 *projectRuntimeApp       `json:"app"`
-	PocketBase          *projectRuntimeContainer `json:"pocketBase"`
-	Network             *projectRuntimeNetwork   `json:"network"`
-}
-
 type projectRuntimeService interface {
 	GetRuntime(ctx context.Context, projectName string) (projectRuntimeView, error)
 	ReadRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error)
 	StreamRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error)
+	StartRuntime(ctx context.Context, projectName string) (projectRuntimeView, error)
+	StopRuntime(ctx context.Context, projectName string) (projectRuntimeView, error)
+	RestartRuntime(ctx context.Context, projectName string) (projectRuntimeView, error)
 }
 
 type projectRuntimeReader interface {
 	ListProjectApps(ctx context.Context, projectName string) ([]projectAppRuntime, error)
 	GetProjectPocketBaseRuntime(ctx context.Context, projectName string) (projectRuntimeContainer, bool, error)
 	GetProjectNetworkRuntime(ctx context.Context, projectName string) (projectRuntimeNetwork, bool, error)
-	ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options projectAppLogsOptions) (io.ReadCloser, error)
+	ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options runtimeLogOptions) (io.ReadCloser, error)
+	StartProjectApp(ctx context.Context, deployment deploymentRecord) error
+	StopProjectApp(ctx context.Context, deployment deploymentRecord) error
+	WaitForProjectAppReady(ctx context.Context, job job) error
 }
 
 type managedProjectRuntimeService struct {
 	db      *sql.DB
 	runtime projectRuntimeReader
+	ingress projectIngressManager
 }
 
-func newManagedProjectRuntimeService(db *sql.DB, runtime projectRuntimeReader) managedProjectRuntimeService {
+func newManagedProjectRuntimeService(db *sql.DB, runtime projectRuntimeReader, ingressManagers ...projectIngressManager) managedProjectRuntimeService {
+	var ingress projectIngressManager
+	if len(ingressManagers) > 0 {
+		ingress = ingressManagers[0]
+	}
 	return managedProjectRuntimeService{
 		db:      db,
 		runtime: runtime,
+		ingress: ingress,
 	}
 }
 
@@ -153,6 +142,50 @@ func handleGetProjectRuntimeLogsStream(service projectRuntimeService) http.Handl
 	}
 }
 
+func handleStopProjectRuntime(service projectRuntimeService) http.HandlerFunc {
+	return handleProjectRuntimeMutation(service, func(ctx context.Context, projectName string) (projectRuntimeView, error) {
+		return service.StopRuntime(ctx, projectName)
+	})
+}
+
+func handleStartProjectRuntime(service projectRuntimeService) http.HandlerFunc {
+	return handleProjectRuntimeMutation(service, func(ctx context.Context, projectName string) (projectRuntimeView, error) {
+		return service.StartRuntime(ctx, projectName)
+	})
+}
+
+func handleRestartProjectRuntime(service projectRuntimeService) http.HandlerFunc {
+	return handleProjectRuntimeMutation(service, func(ctx context.Context, projectName string) (projectRuntimeView, error) {
+		return service.RestartRuntime(ctx, projectName)
+	})
+}
+
+func handleProjectRuntimeMutation(service projectRuntimeService, mutate func(context.Context, string) (projectRuntimeView, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := strings.TrimSpace(r.PathValue("projectName"))
+		if !isValidProjectName(projectName) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidProjectName, "invalid project name")
+			return
+		}
+
+		runtimeView, err := mutate(r.Context(), projectName)
+		if errors.Is(err, errProjectNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+			return
+		}
+		if errors.Is(err, errProjectRuntimeNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorCodeProjectRuntimeNotFound, "project runtime not found")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeProjectRuntimeFailed, "failed to update project runtime")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, runtimeView)
+	}
+}
+
 func (service managedProjectRuntimeService) GetRuntime(ctx context.Context, projectName string) (projectRuntimeView, error) {
 	project, err := getProject(service.db, projectName)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -213,15 +246,105 @@ func (service managedProjectRuntimeService) GetRuntime(ctx context.Context, proj
 
 var errProjectRuntimeNotFound = errors.New("project runtime not found")
 
+func (service managedProjectRuntimeService) StopRuntime(ctx context.Context, projectName string) (projectRuntimeView, error) {
+	deployment, err := service.currentDeployment(projectName)
+	if err != nil {
+		return projectRuntimeView{}, err
+	}
+	if err := service.runtime.StopProjectApp(ctx, deployment); err != nil {
+		return projectRuntimeView{}, err
+	}
+	if service.ingress != nil {
+		if err := service.ingress.RemoveProject(projectName); err != nil {
+			return projectRuntimeView{}, err
+		}
+	}
+	if err := setProjectStatus(service.db, projectName, projectStatusStopped); err != nil {
+		return projectRuntimeView{}, err
+	}
+	return service.GetRuntime(ctx, projectName)
+}
+
+func (service managedProjectRuntimeService) StartRuntime(ctx context.Context, projectName string) (projectRuntimeView, error) {
+	deployment, err := service.currentDeployment(projectName)
+	if err != nil {
+		return projectRuntimeView{}, err
+	}
+	if err := service.runtime.StartProjectApp(ctx, deployment); err != nil {
+		return projectRuntimeView{}, err
+	}
+	if err := service.runtime.WaitForProjectAppReady(ctx, job{ID: deployment.ID, ProjectName: projectName}); err != nil {
+		return projectRuntimeView{}, err
+	}
+	if service.ingress != nil {
+		if err := service.ingress.SyncProject(ctx, projectName); err != nil {
+			return projectRuntimeView{}, err
+		}
+	}
+	if err := setProjectStatus(service.db, projectName, projectStatusRunning); err != nil {
+		return projectRuntimeView{}, err
+	}
+	return service.GetRuntime(ctx, projectName)
+}
+
+func (service managedProjectRuntimeService) RestartRuntime(ctx context.Context, projectName string) (projectRuntimeView, error) {
+	deployment, err := service.currentDeployment(projectName)
+	if err != nil {
+		return projectRuntimeView{}, err
+	}
+	if err := service.runtime.StopProjectApp(ctx, deployment); err != nil {
+		return projectRuntimeView{}, err
+	}
+	if service.ingress != nil {
+		if err := service.ingress.RemoveProject(projectName); err != nil {
+			return projectRuntimeView{}, err
+		}
+	}
+	if err := service.runtime.StartProjectApp(ctx, deployment); err != nil {
+		return projectRuntimeView{}, err
+	}
+	if err := service.runtime.WaitForProjectAppReady(ctx, job{ID: deployment.ID, ProjectName: projectName}); err != nil {
+		return projectRuntimeView{}, err
+	}
+	if service.ingress != nil {
+		if err := service.ingress.SyncProject(ctx, projectName); err != nil {
+			return projectRuntimeView{}, err
+		}
+	}
+	if err := setProjectStatus(service.db, projectName, projectStatusRunning); err != nil {
+		return projectRuntimeView{}, err
+	}
+	return service.GetRuntime(ctx, projectName)
+}
+
+func (service managedProjectRuntimeService) currentDeployment(projectName string) (deploymentRecord, error) {
+	exists, err := projectExists(service.db, projectName)
+	if err != nil {
+		return deploymentRecord{}, err
+	}
+	if !exists {
+		return deploymentRecord{}, errProjectNotFound
+	}
+
+	deployment, found, err := getProjectCurrentDeployment(service.db, projectName)
+	if err != nil {
+		return deploymentRecord{}, err
+	}
+	if !found {
+		return deploymentRecord{}, errProjectRuntimeNotFound
+	}
+	return deployment, nil
+}
+
 func (service managedProjectRuntimeService) ReadRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error) {
-	return service.openRuntimeLogs(ctx, projectName, projectAppLogsOptions{})
+	return service.openRuntimeLogs(ctx, projectName, runtimeLogOptions{})
 }
 
 func (service managedProjectRuntimeService) StreamRuntimeLogs(ctx context.Context, projectName string) (io.ReadCloser, error) {
-	return service.openRuntimeLogs(ctx, projectName, projectAppLogsOptions{Follow: true})
+	return service.openRuntimeLogs(ctx, projectName, runtimeLogOptions{Follow: true})
 }
 
-func (service managedProjectRuntimeService) openRuntimeLogs(ctx context.Context, projectName string, options projectAppLogsOptions) (io.ReadCloser, error) {
+func (service managedProjectRuntimeService) openRuntimeLogs(ctx context.Context, projectName string, options runtimeLogOptions) (io.ReadCloser, error) {
 	project, err := getProject(service.db, projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errProjectNotFound

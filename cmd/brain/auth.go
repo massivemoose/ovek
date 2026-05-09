@@ -7,7 +7,7 @@ import (
 
 func apiKeyMiddleware(expectedAPIKey string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		providedAPIKey := r.Header.Get("X-API-Key")
+		providedAPIKey := r.Header.Get(headerAPIKey)
 		if subtle.ConstantTimeCompare([]byte(providedAPIKey), []byte(expectedAPIKey)) != 1 {
 			writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
 			return

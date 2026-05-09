@@ -13,10 +13,10 @@ func TestGetProjectDeploymentReturnsCurrentDeployment(t *testing.T) {
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "alpha-app",
-		ImageRef:                "localhost:5001/alces-alpha-app:dep-current",
-		AppContainerName:        "alces-alpha-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-alpha-app:dep-current",
+		AppContainerName:        "ovek-alpha-app-app-dep-current",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
@@ -50,10 +50,10 @@ func TestGetProjectDeploymentReturnsSupersededDeployment(t *testing.T) {
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "alpha-app",
-		ImageRef:                "localhost:5001/alces-alpha-app:dep-old",
-		AppContainerName:        "alces-alpha-app-app-dep-old",
+		ImageRef:                "localhost:5001/ovek-alpha-app:dep-old",
+		AppContainerName:        "ovek-alpha-app-app-dep-old",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSuperseded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
@@ -87,30 +87,30 @@ func TestListProjectDeploymentsReturnsNewestFirst(t *testing.T) {
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "alpha-app",
-		ImageRef:                "localhost:5001/alces-alpha-app:dep-old",
-		AppContainerName:        "alces-alpha-app-app-dep-old",
+		ImageRef:                "localhost:5001/ovek-alpha-app:dep-old",
+		AppContainerName:        "ovek-alpha-app-app-dep-old",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSuperseded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "alpha-app",
-		ImageRef:                "localhost:5001/alces-alpha-app:dep-current",
-		AppContainerName:        "alces-alpha-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-alpha-app:dep-current",
+		AppContainerName:        "ovek-alpha-app-app-dep-current",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-other",
 		ProjectName:             "beta-app",
-		ImageRef:                "localhost:5001/alces-beta-app:dep-other",
-		AppContainerName:        "alces-beta-app-app-dep-other",
+		ImageRef:                "localhost:5001/ovek-beta-app:dep-other",
+		AppContainerName:        "ovek-beta-app-app-dep-other",
 		NetworkName:             "beta-app-net",
-		PocketBaseContainerName: "alces-beta-app-pb",
+		PocketBaseContainerName: "ovek-beta-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-11T00:00:00Z",
 	})
@@ -171,20 +171,20 @@ func TestListProjectDeploymentsHonorsLimit(t *testing.T) {
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-old",
 		ProjectName:             "alpha-app",
-		ImageRef:                "localhost:5001/alces-alpha-app:dep-old",
-		AppContainerName:        "alces-alpha-app-app-dep-old",
+		ImageRef:                "localhost:5001/ovek-alpha-app:dep-old",
+		AppContainerName:        "ovek-alpha-app-app-dep-old",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSuperseded,
 		CreatedAt:               "2026-04-09T00:00:00Z",
 	})
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-current",
 		ProjectName:             "alpha-app",
-		ImageRef:                "localhost:5001/alces-alpha-app:dep-current",
-		AppContainerName:        "alces-alpha-app-app-dep-current",
+		ImageRef:                "localhost:5001/ovek-alpha-app:dep-current",
+		AppContainerName:        "ovek-alpha-app-app-dep-current",
 		NetworkName:             "alpha-app-net",
-		PocketBaseContainerName: "alces-alpha-app-pb",
+		PocketBaseContainerName: "ovek-alpha-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-10T00:00:00Z",
 	})
@@ -292,10 +292,10 @@ func TestGetProjectDeploymentReturnsNotFoundForWrongProject(t *testing.T) {
 	seedDeploymentRecord(t, db, deploymentRecord{
 		ID:                      "dep-other",
 		ProjectName:             "beta-app",
-		ImageRef:                "localhost:5001/alces-beta-app:dep-other",
-		AppContainerName:        "alces-beta-app-app-dep-other",
+		ImageRef:                "localhost:5001/ovek-beta-app:dep-other",
+		AppContainerName:        "ovek-beta-app-app-dep-other",
 		NetworkName:             "beta-app-net",
-		PocketBaseContainerName: "alces-beta-app-pb",
+		PocketBaseContainerName: "ovek-beta-app-pb",
 		Status:                  deploymentStatusSucceeded,
 		CreatedAt:               "2026-04-11T00:00:00Z",
 	})
