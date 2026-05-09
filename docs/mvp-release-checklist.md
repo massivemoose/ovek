@@ -37,6 +37,7 @@ Use this checklist before asking public MVP users for feedback on Ovek's capsule
 - [ ] Confirm the installer prints copy/pasteable preflight, SSH tunnel, and auth bootstrap next commands.
 - [ ] Run the read-only preflight and follow any printed `suggest:` command before retrying:
   `./scripts/ovek-vps-check.sh`
+- [ ] Confirm preflight reaches Brain through the public health endpoint before CLI auth bootstrap.
 - [ ] Complete [vps-trial.md](vps-trial.md) over an SSH tunnel.
 - [ ] Confirm `ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest` succeeds.
 - [ ] Confirm the signup form is reachable through Traefik and writes records to the managed PocketBase sidecar.
