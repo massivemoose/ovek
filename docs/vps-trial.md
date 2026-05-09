@@ -8,6 +8,8 @@ ghcr.io/massivemoose/ovek-signup-example:latest
 
 The VPS runs Brain, Traefik, app containers, and managed PocketBase sidecars through Podman. App builds happen elsewhere; this flow pulls the published Brain runtime image during install, then pulls and runs published OCI capsule images.
 
+To test your own app after the signup trial, see [capsule-runs.md](capsule-runs.md#bring-your-own-app). The short version: build and publish an OCI image for the VPS architecture, make the app listen on `PORT=8080`, initialize app-facing database secrets with `ovek db init <project> --app-secrets` if needed, then run `ovek run <project> <capsule-ref>`.
+
 ## 1. Prepare The VPS
 
 On a fresh Ubuntu VPS:
@@ -164,6 +166,20 @@ Remove the managed database when you are finished with the trial:
 The removal command prompts you to type the project name.
 
 Expected: app runtime, route, and managed database resources are cleaned up.
+
+## 11. Wipe Ovek From The VPS
+
+When you are done evaluating Ovek and want to remove the VPS runtime state entirely, run this on the VPS:
+
+1. `./scripts/ovek-vps-cleanup.sh`
+
+Expected: the script prints the systemd unit, runtime directories, Ovek containers, and Ovek networks it will remove, then asks you to type `remove ovek` before making changes.
+
+For non-interactive test machines where you already reviewed the plan:
+
+1. `./scripts/ovek-vps-cleanup.sh --yes`
+
+The cleanup script is intentionally VPS/runtime-focused. It removes the Ovek systemd unit, Ovek install/config/data directories, the Brain/Traefik runtime stack, and Podman resources labeled or named as Ovek-managed. It does not remove unrelated Podman images, volumes, containers, or host packages.
 
 ## Troubleshooting On The VPS
 

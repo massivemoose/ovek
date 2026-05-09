@@ -37,10 +37,15 @@ func (cmd *statusCommand) Summary() string { return "Inspect projects and runtim
 func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
 	flagSet := flag.NewFlagSet("ovek status", flag.ContinueOnError)
 	flagSet.SetOutput(io.Discard)
+	format := flagSet.String("format", "auto", "output format: auto, wide, or narrow")
 	if err := flagSet.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return command.ErrUsage
 		}
+		return err
+	}
+	tableOptions, err := statusTableOptions(*format)
+	if err != nil {
 		return err
 	}
 
@@ -50,7 +55,7 @@ func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
 	}
 
 	if flagSet.NArg() == 0 {
-		return cmd.runList(ctx, brainClient)
+		return cmd.runList(ctx, brainClient, tableOptions)
 	}
 
 	projectName, err := projectctx.ExplicitResolver{CommandPath: "ovek status"}.Resolve(flagSet.Args())
@@ -58,14 +63,14 @@ func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return cmd.runProject(ctx, brainClient, projectName)
+	return cmd.runProject(ctx, brainClient, projectName, tableOptions)
 }
 
 func (cmd *statusCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  ovek status\n  ovek status <project>\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek status [--format auto|wide|narrow]\n  ovek status [--format auto|wide|narrow] <project>\n")
 }
 
-func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Client) error {
+func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Client, tableOptions output.TableOptions) error {
 	projects, err := brainClient.GetProjects(ctx, 20)
 	if err != nil {
 		return err
@@ -91,11 +96,11 @@ func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Clien
 		})
 	}
 
-	output.WriteTable(cmd.stdout, []string{"Name", "Status", "Current Deployment", "Created"}, rows)
+	output.WriteAdaptiveTable(cmd.stdout, []string{"Name", "Status", "Current Deployment", "Created"}, rows, tableOptions)
 	return nil
 }
 
-func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Client, projectName string) error {
+func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Client, projectName string, tableOptions output.TableOptions) error {
 	project, err := brainClient.GetProject(ctx, projectName)
 	if err != nil {
 		return err
@@ -146,7 +151,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 		for _, job := range jobs {
 			rows = append(rows, []string{job.ID, job.Status, recentJobPhase(job), job.CreatedAt, recentJobSource(job), recentJobError(job)})
 		}
-		output.WriteTable(cmd.stdout, []string{"Job", "Status", "Phase", "Created", "Source", "Error"}, rows)
+		output.WriteAdaptiveTable(cmd.stdout, []string{"Job", "Status", "Phase", "Created", "Source", "Error"}, rows, tableOptions)
 	}
 
 	_, _ = fmt.Fprintln(cmd.stdout)
@@ -166,8 +171,21 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 			deployment.ImageRef,
 		})
 	}
-	output.WriteTable(cmd.stdout, []string{"Deployment", "Status", "Created", "Source", "Image"}, rows)
+	output.WriteAdaptiveTable(cmd.stdout, []string{"Deployment", "Status", "Created", "Source", "Image"}, rows, tableOptions)
 	return nil
+}
+
+func statusTableOptions(format string) (output.TableOptions, error) {
+	switch strings.TrimSpace(format) {
+	case "", "auto":
+		return output.TableOptions{MaxWidth: output.DetectTerminalWidth(120)}, nil
+	case "wide":
+		return output.TableOptions{}, nil
+	case "narrow":
+		return output.TableOptions{ForceNarrow: true}, nil
+	default:
+		return output.TableOptions{}, fmt.Errorf("unknown status format %q", format)
+	}
 }
 
 func fetchRuntimeView(ctx context.Context, brainClient *client.Client, projectName string) (brainapi.ProjectRuntime, bool, error) {
