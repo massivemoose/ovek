@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -29,10 +30,18 @@ func dbAPIKeyMiddleware(db *sql.DB, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, err := validateAPIKey(r.Context(), db, r.Header.Get(headerAPIKey))
 		if errors.Is(err, errInvalidAPIKey) {
+			reason := authFailureReason(err)
+			log.Printf("auth api key rejected: reason=%s path=%s", reason, r.URL.Path)
+			_ = insertAuditLog(r.Context(), db, auditLogRecord{
+				EventType:   "auth.api_key_rejected",
+				DetailsJSON: mustDetailsJSON(map[string]string{"reason": reason, "path": r.URL.Path}),
+				CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+			})
 			writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
 			return
 		}
 		if err != nil {
+			log.Printf("auth api key validation failed: path=%s error=%v", r.URL.Path, err)
 			writeJSONError(w, http.StatusInternalServerError, errorCodeUnauthorized, "unauthorized")
 			return
 		}
@@ -120,6 +129,115 @@ func handleReauth(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func handleListAPIKeys(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := authPrincipalFromContext(r.Context())
+		if !ok {
+			writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
+			return
+		}
+
+		keys, err := listAPIKeys(r.Context(), db, principal.UserID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeAuthAPIKeyFailed, "failed to list api keys")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, keys)
+	}
+}
+
+func handleCreateAPIKey(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		principal, ok := authPrincipalFromContext(r.Context())
+		if !ok {
+			writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
+			return
+		}
+
+		var request brainapi.CreateAPIKeyRequest
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidRequestBody, "invalid request body")
+			return
+		}
+
+		response, err := createLabeledAPIKey(r.Context(), db, principal, request.Label)
+		if err != nil {
+			writeAuthMutationError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, response)
+	}
+}
+
+func handleRevokeAPIKey(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := authPrincipalFromContext(r.Context())
+		if !ok {
+			writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
+			return
+		}
+
+		err := revokeAPIKey(r.Context(), db, principal, r.PathValue("keyID"))
+		if errors.Is(err, errAPIKeyNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorCodeAuthAPIKeyNotFound, "api key not found")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeAuthAPIKeyFailed, "failed to revoke api key")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleChangePassword(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		principal, ok := authPrincipalFromContext(r.Context())
+		if !ok {
+			writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
+			return
+		}
+
+		var request brainapi.ChangePasswordRequest
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidRequestBody, "invalid request body")
+			return
+		}
+
+		err := changeAdminPassword(r.Context(), db, principal, request.CurrentPassword, request.NewPassword)
+		if errors.Is(err, errInvalidPassword) {
+			writeJSONError(w, http.StatusUnauthorized, errorCodeAuthPasswordFailed, "password change failed")
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeAuthPasswordFailed, "password change failed")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func writeAuthMutationError(w http.ResponseWriter, err error) {
+	if strings.Contains(err.Error(), "api key label") {
+		writeJSONError(w, http.StatusBadRequest, errorCodeAuthAPIKeyFailed, err.Error())
+		return
+	}
+
+	writeJSONError(w, http.StatusInternalServerError, errorCodeAuthAPIKeyFailed, "auth mutation failed")
+}
+
 func requireCriticalReauth(cfg config, db *sql.DB, eventType string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if cfg.AuthMode != authModeProd {
@@ -134,6 +252,14 @@ func requireCriticalReauth(cfg config, db *sql.DB, eventType string, next http.H
 		}
 
 		if err := requireReauthToken(r.Context(), db, principal, r.Header.Get(headerReauthToken), reauthScopeCriticalMutation); errors.Is(err, errReauthRequired) {
+			log.Printf("auth reauth rejected: event=%s user_id=%s api_key_id=%s path=%s", eventType, principal.UserID, principal.APIKeyID, r.URL.Path)
+			_ = insertAuditLog(r.Context(), db, auditLogRecord{
+				UserID:      sql.NullString{String: principal.UserID, Valid: true},
+				APIKeyID:    sql.NullString{String: principal.APIKeyID, Valid: true},
+				EventType:   "auth.reauth_rejected",
+				DetailsJSON: mustDetailsJSON(map[string]string{"event": eventType, "scope": reauthScopeCriticalMutation}),
+				CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+			})
 			writeJSONError(w, http.StatusUnauthorized, errorCodeReauthRequired, "reauth required")
 			return
 		} else if err != nil {

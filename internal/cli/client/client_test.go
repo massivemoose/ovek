@@ -272,6 +272,124 @@ func TestDeleteRegistryCredentialSendsDeleteRequest(t *testing.T) {
 	}
 }
 
+func TestCreateAPIKeyDecodesOneTimeKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Method; got != http.MethodPost {
+			t.Fatalf("expected method %q, got %q", http.MethodPost, got)
+		}
+		if got := r.URL.Path; got != "/v1/auth/api-keys" {
+			t.Fatalf("expected API key create path, got %q", got)
+		}
+		var request brainapi.CreateAPIKeyRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("expected request to decode, got error: %v", err)
+		}
+		if request.Label != "ci" {
+			t.Fatalf("expected label %q, got %q", "ci", request.Label)
+		}
+		_ = json.NewEncoder(w).Encode(brainapi.CreateAPIKeyResponse{
+			ID:     "key_123",
+			Label:  "ci",
+			APIKey: "ak_key_123_secret",
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	response, err := client.CreateAPIKey(context.Background(), brainapi.CreateAPIKeyRequest{Label: "ci"})
+	if err != nil {
+		t.Fatalf("expected API key create to succeed, got error: %v", err)
+	}
+	if response.APIKey != "ak_key_123_secret" || response.Label != "ci" {
+		t.Fatalf("expected one-time API key response, got %#v", response)
+	}
+}
+
+func TestListAPIKeysDecodesMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Method; got != http.MethodGet {
+			t.Fatalf("expected method %q, got %q", http.MethodGet, got)
+		}
+		if got := r.URL.Path; got != "/v1/auth/api-keys" {
+			t.Fatalf("expected API key list path, got %q", got)
+		}
+		_ = json.NewEncoder(w).Encode([]brainapi.APIKeySummary{{
+			ID:        "key_123",
+			Label:     "bootstrap",
+			CreatedAt: "2026-05-09T00:00:00Z",
+		}})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	keys, err := client.ListAPIKeys(context.Background())
+	if err != nil {
+		t.Fatalf("expected API key list to succeed, got error: %v", err)
+	}
+	if len(keys) != 1 || keys[0].ID != "key_123" {
+		t.Fatalf("expected decoded API key metadata, got %#v", keys)
+	}
+}
+
+func TestRevokeAPIKeySendsDeleteRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Method; got != http.MethodDelete {
+			t.Fatalf("expected method %q, got %q", http.MethodDelete, got)
+		}
+		if got := r.URL.Path; got != "/v1/auth/api-keys/key_123" {
+			t.Fatalf("expected API key revoke path, got %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	if err := client.RevokeAPIKey(context.Background(), "key_123"); err != nil {
+		t.Fatalf("expected API key revoke to succeed, got error: %v", err)
+	}
+}
+
+func TestChangePasswordSendsPasswordRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Method; got != http.MethodPost {
+			t.Fatalf("expected method %q, got %q", http.MethodPost, got)
+		}
+		if got := r.URL.Path; got != "/v1/auth/password" {
+			t.Fatalf("expected password change path, got %q", got)
+		}
+		var request brainapi.ChangePasswordRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("expected request to decode, got error: %v", err)
+		}
+		if request.CurrentPassword != "old-pass" || request.NewPassword != "new-pass" {
+			t.Fatalf("expected password change request, got %#v", request)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	if err := client.ChangePassword(context.Background(), brainapi.ChangePasswordRequest{CurrentPassword: "old-pass", NewPassword: "new-pass"}); err != nil {
+		t.Fatalf("expected password change to succeed, got error: %v", err)
+	}
+}
+
 func TestReadSSEDataEmitsOnlyDataLines(t *testing.T) {
 	stream := strings.NewReader("event: message\ndata: first\n\ndata: second\n\n")
 	var lines []string

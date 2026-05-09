@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/massivemoose/ovek/internal/brainapi"
 )
 
 const (
@@ -31,6 +33,7 @@ const (
 
 var errAuthBootstrapDisabled = errors.New("auth bootstrap disabled")
 var errInvalidAPIKey = errors.New("invalid api key")
+var errAPIKeyNotFound = errors.New("api key not found")
 var errInvalidPassword = errors.New("invalid password")
 var errInvalidReauthToken = errors.New("invalid reauth token")
 var errReauthRequired = errors.New("reauth required")
@@ -60,6 +63,33 @@ type reauthTokenRecord struct {
 	ExpiresAt string
 	UsedAt    sql.NullString
 	RevokedAt sql.NullString
+}
+
+type authFailureError struct {
+	reason string
+}
+
+func (err authFailureError) Error() string {
+	return errInvalidAPIKey.Error()
+}
+
+func (err authFailureError) Unwrap() error {
+	return errInvalidAPIKey
+}
+
+func newAuthFailure(reason string) error {
+	return authFailureError{reason: reason}
+}
+
+func authFailureReason(err error) string {
+	var failure authFailureError
+	if errors.As(err, &failure) && failure.reason != "" {
+		return failure.reason
+	}
+	if errors.Is(err, errInvalidAPIKey) {
+		return "invalid"
+	}
+	return ""
 }
 
 func countAdminUsers(db *sql.DB) (int, error) {
@@ -154,6 +184,185 @@ func createAPIKey(ctx context.Context, db *sql.DB, userID string, label string) 
 	return apiKey, apiKeyID, nil
 }
 
+func listAPIKeys(ctx context.Context, db *sql.DB, userID string) ([]brainapi.APIKeySummary, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT id, label, created_at, last_used_at, revoked_at
+  FROM api_keys
+ WHERE user_id = ?
+ ORDER BY created_at ASC`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list api keys: %w", err)
+	}
+	defer rows.Close()
+
+	var keys []brainapi.APIKeySummary
+	for rows.Next() {
+		var key brainapi.APIKeySummary
+		var lastUsedAt sql.NullString
+		var revokedAt sql.NullString
+		if err := rows.Scan(&key.ID, &key.Label, &key.CreatedAt, &lastUsedAt, &revokedAt); err != nil {
+			return nil, fmt.Errorf("scan api key: %w", err)
+		}
+		if lastUsedAt.Valid {
+			key.LastUsedAt = lastUsedAt.String
+		}
+		if revokedAt.Valid {
+			key.RevokedAt = revokedAt.String
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate api keys: %w", err)
+	}
+
+	return keys, nil
+}
+
+func createLabeledAPIKey(ctx context.Context, db *sql.DB, principal authPrincipal, label string) (brainapi.CreateAPIKeyResponse, error) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return brainapi.CreateAPIKeyResponse{}, errors.New("api key label is required")
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return brainapi.CreateAPIKeyResponse{}, fmt.Errorf("begin api key transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	apiKey, apiKeyID, err := createAPIKeyTx(tx, principal.UserID, label, now)
+	if err != nil {
+		return brainapi.CreateAPIKeyResponse{}, err
+	}
+	if err := insertAuditLogTx(tx, auditLogRecord{
+		UserID:      sql.NullString{String: principal.UserID, Valid: true},
+		APIKeyID:    sql.NullString{String: principal.APIKeyID, Valid: true},
+		EventType:   "auth.api_key_created",
+		DetailsJSON: mustDetailsJSON(map[string]string{"keyId": apiKeyID, "label": label}),
+		CreatedAt:   now,
+	}); err != nil {
+		return brainapi.CreateAPIKeyResponse{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return brainapi.CreateAPIKeyResponse{}, fmt.Errorf("commit api key transaction: %w", err)
+	}
+
+	return brainapi.CreateAPIKeyResponse{
+		ID:        apiKeyID,
+		Label:     label,
+		APIKey:    apiKey,
+		CreatedAt: now,
+	}, nil
+}
+
+func revokeAPIKey(ctx context.Context, db *sql.DB, principal authPrincipal, keyID string) error {
+	keyID = strings.TrimSpace(keyID)
+	if keyID == "" {
+		return errAPIKeyNotFound
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin api key revoke transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `
+UPDATE api_keys
+   SET revoked_at = ?
+ WHERE id = ?
+   AND user_id = ?
+   AND revoked_at IS NULL`,
+		now,
+		keyID,
+		principal.UserID,
+	)
+	if err != nil {
+		return fmt.Errorf("revoke api key: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count revoked api keys: %w", err)
+	}
+	if rowsAffected == 0 {
+		return errAPIKeyNotFound
+	}
+	if err := insertAuditLogTx(tx, auditLogRecord{
+		UserID:      sql.NullString{String: principal.UserID, Valid: true},
+		APIKeyID:    sql.NullString{String: principal.APIKeyID, Valid: true},
+		EventType:   "auth.api_key_revoked",
+		DetailsJSON: mustDetailsJSON(map[string]string{"keyId": keyID}),
+		CreatedAt:   now,
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit api key revoke transaction: %w", err)
+	}
+
+	return nil
+}
+
+func changeAdminPassword(ctx context.Context, db *sql.DB, principal authPrincipal, currentPassword string, newPassword string) error {
+	currentPassword = strings.TrimSpace(currentPassword)
+	newPassword = strings.TrimSpace(newPassword)
+	if currentPassword == "" || newPassword == "" {
+		return errInvalidPassword
+	}
+
+	user, err := getAdminUserByID(ctx, db, principal.UserID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if !verifyPassword(user.PasswordHash, currentPassword) {
+		_ = insertAuditLog(ctx, db, auditLogRecord{
+			UserID:      sql.NullString{String: principal.UserID, Valid: true},
+			APIKeyID:    sql.NullString{String: principal.APIKeyID, Valid: true},
+			EventType:   "auth.password_change_failed",
+			DetailsJSON: mustDetailsJSON(map[string]string{"reason": "invalid_current_password"}),
+			CreatedAt:   now,
+		})
+		return errInvalidPassword
+	}
+
+	passwordHash, err := hashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin password change transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `UPDATE admin_users SET password_hash = ? WHERE id = ?`, passwordHash, principal.UserID); err != nil {
+		return fmt.Errorf("update admin password: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE reauth_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, principal.UserID); err != nil {
+		return fmt.Errorf("revoke reauth tokens after password change: %w", err)
+	}
+	if err := insertAuditLogTx(tx, auditLogRecord{
+		UserID:      sql.NullString{String: principal.UserID, Valid: true},
+		APIKeyID:    sql.NullString{String: principal.APIKeyID, Valid: true},
+		EventType:   "auth.password_changed",
+		DetailsJSON: "{}",
+		CreatedAt:   now,
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit password change transaction: %w", err)
+	}
+
+	return nil
+}
+
 func countAdminUsersTx(tx *sql.Tx) (int, error) {
 	var count int
 	err := tx.QueryRow("SELECT COUNT(1) FROM admin_users WHERE disabled_at IS NULL").Scan(&count)
@@ -184,9 +393,13 @@ func createAPIKeyTx(tx *sql.Tx, userID string, label string, now string) (string
 }
 
 func validateAPIKey(ctx context.Context, db *sql.DB, plaintext string) (authPrincipal, error) {
+	if strings.TrimSpace(plaintext) == "" {
+		return authPrincipal{}, newAuthFailure("missing")
+	}
+
 	apiKeyID, apiKeyHash, err := parseOpaqueCredential(credentialPrefixAPIKey, plaintext)
 	if err != nil {
-		return authPrincipal{}, errInvalidAPIKey
+		return authPrincipal{}, newAuthFailure("malformed")
 	}
 
 	var (
@@ -205,16 +418,19 @@ func validateAPIKey(ctx context.Context, db *sql.DB, plaintext string) (authPrin
 		apiKeyID,
 	).Scan(&recordedHash, &userID, &username, &disabledAt, &revokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return authPrincipal{}, errInvalidAPIKey
+		return authPrincipal{}, newAuthFailure("not_found")
 	}
 	if err != nil {
 		return authPrincipal{}, fmt.Errorf("query api key: %w", err)
 	}
-	if disabledAt.Valid || revokedAt.Valid {
-		return authPrincipal{}, errInvalidAPIKey
+	if disabledAt.Valid {
+		return authPrincipal{}, newAuthFailure("user_disabled")
+	}
+	if revokedAt.Valid {
+		return authPrincipal{}, newAuthFailure("revoked")
 	}
 	if subtle.ConstantTimeCompare([]byte(recordedHash), []byte(apiKeyHash)) != 1 {
-		return authPrincipal{}, errInvalidAPIKey
+		return authPrincipal{}, newAuthFailure("invalid")
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)

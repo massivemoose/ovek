@@ -174,6 +174,86 @@ func (client *Client) Reauth(ctx context.Context, password string) (brainapi.Rea
 	return reauthResponse, nil
 }
 
+func (client *Client) ListAPIKeys(ctx context.Context) ([]brainapi.APIKeySummary, error) {
+	responseBody, err := client.getJSON(ctx, "/v1/auth/api-keys")
+	if err != nil {
+		return nil, err
+	}
+
+	var keys []brainapi.APIKeySummary
+	if err := json.Unmarshal(responseBody, &keys); err != nil {
+		return nil, fmt.Errorf("decode API keys response: %w", err)
+	}
+
+	return keys, nil
+}
+
+func (client *Client) CreateAPIKey(ctx context.Context, requestBody brainapi.CreateAPIKeyRequest) (brainapi.CreateAPIKeyResponse, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.CreateAPIKeyResponse{}, fmt.Errorf("marshal API key request: %w", err)
+	}
+
+	request, err := client.newRequest(ctx, http.MethodPost, "/v1/auth/api-keys", bytes.NewReader(payload))
+	if err != nil {
+		return brainapi.CreateAPIKeyResponse{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.CreateAPIKeyResponse{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.CreateAPIKeyResponse{}, err
+	}
+
+	var apiKeyResponse brainapi.CreateAPIKeyResponse
+	if err := json.NewDecoder(response.Body).Decode(&apiKeyResponse); err != nil {
+		return brainapi.CreateAPIKeyResponse{}, fmt.Errorf("decode API key response: %w", err)
+	}
+
+	return apiKeyResponse, nil
+}
+
+func (client *Client) RevokeAPIKey(ctx context.Context, keyID string) error {
+	request, err := client.newRequest(ctx, http.MethodDelete, "/v1/auth/api-keys/"+url.PathEscape(strings.TrimSpace(keyID)), nil)
+	if err != nil {
+		return err
+	}
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	return decodeAPIError(response)
+}
+
+func (client *Client) ChangePassword(ctx context.Context, requestBody brainapi.ChangePasswordRequest) error {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return fmt.Errorf("marshal password change request: %w", err)
+	}
+
+	request, err := client.newRequest(ctx, http.MethodPost, "/v1/auth/password", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	return decodeAPIError(response)
+}
+
 func (client *Client) ListRegistryCredentials(ctx context.Context) ([]brainapi.RegistryCredential, error) {
 	responseBody, err := client.getJSON(ctx, "/v1/registry/credentials")
 	if err != nil {

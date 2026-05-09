@@ -30,6 +30,30 @@ type ReauthResponse struct {
 	ExpiresAt   string `json:"expiresAt"`
 }
 
+type APIKeySummary struct {
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	CreatedAt  string `json:"createdAt"`
+	LastUsedAt string `json:"lastUsedAt,omitempty"`
+	RevokedAt  string `json:"revokedAt,omitempty"`
+}
+
+type CreateAPIKeyRequest struct {
+	Label string `json:"label"`
+}
+
+type CreateAPIKeyResponse struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	APIKey    string `json:"apiKey"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
 type RegistryCredential struct {
 	Host      string `json:"host"`
 	Username  string `json:"username"`
