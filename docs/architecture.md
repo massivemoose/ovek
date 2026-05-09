@@ -47,6 +47,6 @@ Shared or external databases remain future capabilities. PostgreSQL can be added
 
 ## Internal Builder Path
 
-The legacy source-build path remains an internal regression surface. It uses Railpack/BuildKit/local-registry plumbing for local dogfood and larger-host experiments, but it is not public MVP guidance and should not shape the tiny-VPS install path.
+The legacy source-build path remains an internal regression surface for local dogfood and larger-host experiments, but it is not public MVP guidance and should not shape the tiny-VPS install path.
 
 Build helpers should eventually live in local CLI workflows, CI actions, or a hosted builder that produces OCI capsule refs for `ovek run`. Heavy builds should not run on the tiny VPS by default.

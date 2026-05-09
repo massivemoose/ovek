@@ -95,7 +95,7 @@ Current limits:
 
 ## Internal Regression Only
 
-The legacy server-side source-build stack is not a public MVP path. It remains available only for internal regression of older builder plumbing, including the explicit builder compose file that starts BuildKit and the local registry.
+The legacy server-side source-build stack is not a public MVP path. It remains available only for internal regression of older builder plumbing.
 
 On macOS with Podman Machine:
 

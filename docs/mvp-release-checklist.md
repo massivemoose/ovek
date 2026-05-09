@@ -88,5 +88,5 @@ Use this checklist before asking public MVP users for feedback on Ovek's capsule
 - TLS and real domain automation are not part of this MVP trial; the documented VPS path uses an SSH tunnel and `.localhost` hostnames.
 - Automated backups and restore flows are not implemented yet.
 - Private source repos are still handled outside Ovek; users build and push OCI images locally or in CI, then give Ovek image pull access.
-- The legacy source-build path and BuildKit-based builder stack remain internal regression surfaces, not public MVP guidance.
+- The legacy source-build path remains an internal regression surface, not public MVP guidance.
 - The current PocketBase image is still `docker.io/elestio/pocketbase:latest`; an Ovek-owned pinned image remains follow-up work.
