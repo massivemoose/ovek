@@ -175,6 +175,103 @@ func TestReauthSendsBaselineAPIKeyAndDecodesResponse(t *testing.T) {
 	}
 }
 
+func TestUpsertRegistryCredentialSendsCredentialRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Method; got != http.MethodPut {
+			t.Fatalf("expected method %q, got %q", http.MethodPut, got)
+		}
+		if got := r.URL.Path; got != "/v1/registry/credentials/ghcr.io" {
+			t.Fatalf("expected registry credential path, got %q", got)
+		}
+		if got := r.Header.Get("X-API-Key"); got != "test-key" {
+			t.Fatalf("expected api key header %q, got %q", "test-key", got)
+		}
+
+		var request brainapi.UpsertRegistryCredentialRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("expected request to decode, got error: %v", err)
+		}
+		if request.Username != "octo" || request.Password != "secret-token" {
+			t.Fatalf("expected credential request, got %#v", request)
+		}
+
+		_ = json.NewEncoder(w).Encode(brainapi.RegistryCredential{
+			Host:      "ghcr.io",
+			Username:  "octo",
+			UpdatedAt: "2026-05-09T00:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	credential, err := client.UpsertRegistryCredential(context.Background(), "ghcr.io", brainapi.UpsertRegistryCredentialRequest{
+		Username: "octo",
+		Password: "secret-token",
+	})
+	if err != nil {
+		t.Fatalf("expected registry credential upsert to succeed, got error: %v", err)
+	}
+	if credential.Host != "ghcr.io" || credential.Username != "octo" {
+		t.Fatalf("expected redacted registry credential response, got %#v", credential)
+	}
+}
+
+func TestListRegistryCredentialsDecodesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Method; got != http.MethodGet {
+			t.Fatalf("expected method %q, got %q", http.MethodGet, got)
+		}
+		if got := r.URL.Path; got != "/v1/registry/credentials" {
+			t.Fatalf("expected registry credential list path, got %q", got)
+		}
+		_ = json.NewEncoder(w).Encode([]brainapi.RegistryCredential{{
+			Host:      "ghcr.io",
+			Username:  "octo",
+			UpdatedAt: "2026-05-09T00:00:00Z",
+		}})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	credentials, err := client.ListRegistryCredentials(context.Background())
+	if err != nil {
+		t.Fatalf("expected registry credential list to succeed, got error: %v", err)
+	}
+	if len(credentials) != 1 || credentials[0].Host != "ghcr.io" {
+		t.Fatalf("expected decoded registry credential list, got %#v", credentials)
+	}
+}
+
+func TestDeleteRegistryCredentialSendsDeleteRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Method; got != http.MethodDelete {
+			t.Fatalf("expected method %q, got %q", http.MethodDelete, got)
+		}
+		if got := r.URL.Path; got != "/v1/registry/credentials/ghcr.io" {
+			t.Fatalf("expected registry credential delete path, got %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	if err := client.DeleteRegistryCredential(context.Background(), "ghcr.io"); err != nil {
+		t.Fatalf("expected registry credential delete to succeed, got error: %v", err)
+	}
+}
+
 func TestReadSSEDataEmitsOnlyDataLines(t *testing.T) {
 	stream := strings.NewReader("event: message\ndata: first\n\ndata: second\n\n")
 	var lines []string

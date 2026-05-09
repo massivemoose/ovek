@@ -174,6 +174,65 @@ func (client *Client) Reauth(ctx context.Context, password string) (brainapi.Rea
 	return reauthResponse, nil
 }
 
+func (client *Client) ListRegistryCredentials(ctx context.Context) ([]brainapi.RegistryCredential, error) {
+	responseBody, err := client.getJSON(ctx, "/v1/registry/credentials")
+	if err != nil {
+		return nil, err
+	}
+
+	var credentials []brainapi.RegistryCredential
+	if err := json.Unmarshal(responseBody, &credentials); err != nil {
+		return nil, fmt.Errorf("decode registry credentials response: %w", err)
+	}
+
+	return credentials, nil
+}
+
+func (client *Client) UpsertRegistryCredential(ctx context.Context, host string, requestBody brainapi.UpsertRegistryCredentialRequest) (brainapi.RegistryCredential, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.RegistryCredential{}, fmt.Errorf("marshal registry credential request: %w", err)
+	}
+
+	request, err := client.newRequest(ctx, http.MethodPut, "/v1/registry/credentials/"+url.PathEscape(strings.TrimSpace(host)), bytes.NewReader(payload))
+	if err != nil {
+		return brainapi.RegistryCredential{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.RegistryCredential{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.RegistryCredential{}, err
+	}
+
+	var credential brainapi.RegistryCredential
+	if err := json.NewDecoder(response.Body).Decode(&credential); err != nil {
+		return brainapi.RegistryCredential{}, fmt.Errorf("decode registry credential response: %w", err)
+	}
+
+	return credential, nil
+}
+
+func (client *Client) DeleteRegistryCredential(ctx context.Context, host string) error {
+	request, err := client.newRequest(ctx, http.MethodDelete, "/v1/registry/credentials/"+url.PathEscape(strings.TrimSpace(host)), nil)
+	if err != nil {
+		return err
+	}
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	return decodeAPIError(response)
+}
+
 func (client *Client) GetProjects(ctx context.Context, limit int) ([]brainapi.ProjectSummary, error) {
 	responseBody, err := client.getJSON(ctx, withLimit("/v1/projects", limit))
 	if err != nil {

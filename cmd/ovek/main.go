@@ -48,6 +48,7 @@ func newRootRouter(stdin io.Reader, stdout io.Writer, stderr io.Writer, store *c
 		newDBCommand(stdout, store, prompts),
 		newEnvCommand(stdout, store, prompts),
 		newLogsCommand(stdout, store),
+		newRegistryCommand(stdin, stdout, store, prompts),
 		newRemoveCommand(stdout, store, prompts),
 		newRestartCommand(stdout, store, prompts),
 		newRunCommand(stdout, store, prompts),
