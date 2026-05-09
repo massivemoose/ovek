@@ -9,6 +9,27 @@ Capsule v1 is intentionally simple:
 - read project env/secrets from normal environment variables
 - become ready by accepting TCP connections on `PORT`
 
+## Bring Your Own App
+
+To test your own app on a VPS, build it into an OCI image before it reaches the Ovek host. You can build on your laptop or in CI with Docker, Podman, Docker Buildx, Buildah, or another OCI-compatible tool, then push the image to GHCR, Docker Hub, or another registry the VPS can pull from.
+
+Your app should:
+
+- listen on `PORT=8080`
+- accept normal environment variables for configuration
+- use `POCKETBASE_URL=http://db:8090` if it talks to the managed PocketBase sidecar
+- tolerate first request/startup timing while Ovek waits for TCP readiness on port `8080`
+
+If the app needs PocketBase credentials injected into its environment, initialize the managed database before the next run:
+
+1. `./bin/ovek db init <project> --app-secrets`
+
+Then run the published image:
+
+1. `./bin/ovek run <project> <capsule-ref>`
+
+Architecture matters for the current trial. Prefer publishing a `linux/amd64` image unless you have confirmed your VPS architecture and your registry image supports it. For multi-machine builds, set the target platform explicitly in your build command or CI workflow.
+
 ## Publish A Capsule
 
 The app repo can use any OCI-compatible build tool. A common path is a `Dockerfile` as the build recipe plus Podman, Buildah, Docker Buildx, or a GitHub Actions workflow as the producer.

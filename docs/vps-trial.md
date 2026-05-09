@@ -8,6 +8,8 @@ ghcr.io/massivemoose/ovek-signup-example:latest
 
 The VPS runs Brain, Traefik, app containers, and managed PocketBase sidecars through Podman. App builds happen elsewhere; this flow pulls the published Brain runtime image during install, then pulls and runs published OCI capsule images.
 
+To test your own app after the signup trial, see [capsule-runs.md](capsule-runs.md#bring-your-own-app). The short version: build and publish an OCI image for the VPS architecture, make the app listen on `PORT=8080`, initialize app-facing database secrets with `ovek db init <project> --app-secrets` if needed, then run `ovek run <project> <capsule-ref>`.
+
 ## 1. Prepare The VPS
 
 On a fresh Ubuntu VPS:
