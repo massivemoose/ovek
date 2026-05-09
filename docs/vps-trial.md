@@ -70,6 +70,12 @@ The bootstrap command prompts for a username and password. Save the password som
 
 Expected: the active profile points at `http://brain.localhost:8088`.
 
+For follow-up access, create a labeled API key and save it when it is printed:
+
+1. `./bin/ovek auth key create --label laptop`
+
+To switch profiles or inspect key metadata, see [auth.md](auth.md).
+
 ## 5. Initialize The Managed Database
 
 1. `./bin/ovek db init signup-demo --app-secrets`

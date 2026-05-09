@@ -28,6 +28,14 @@ Then run the published image:
 
 1. `./bin/ovek run <project> <capsule-ref>`
 
+For private images, configure registry credentials on Brain before the first run. Ovek stores credentials encrypted and uses them only for matching qualified capsule refs.
+
+1. `printf '<registry-token>' | ./bin/ovek registry login ghcr.io --username <user> --password-stdin`
+2. `./bin/ovek registry list`
+3. `./bin/ovek run <project> ghcr.io/<owner>/<image-name>:<tag>`
+
+Use a registry token with pull-only scope when your registry supports it. For GHCR, the host is `ghcr.io`; for Docker Hub, use the host that appears in the capsule ref. Remove a stored credential with `./bin/ovek registry rm <host>`.
+
 Architecture matters for the current trial. Prefer publishing a `linux/amd64` image unless you have confirmed your VPS architecture and your registry image supports it. For multi-machine builds, set the target platform explicitly in your build command or CI workflow.
 
 ## Publish A Capsule
@@ -43,6 +51,8 @@ For GHCR with Podman:
 Success: the image is visible in GHCR and the Ovek host can pull it by reference.
 
 For public examples, make the GHCR package public so a fresh Ovek host can pull without registry credentials.
+
+For private examples, keep source checkout/build/push in your own local or CI environment. Ovek does not need access to the source repo; it only needs pull access to the published image.
 
 ## Run A Capsule
 

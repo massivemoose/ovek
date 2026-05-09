@@ -29,8 +29,15 @@ Brain owns a small set of durable resources:
 - runtime: currently managed app, database sidecar, and network state
 - project config: environment variables and encrypted secrets captured by config revision
 - registry credentials: encrypted host-level credentials used to pull private capsule images
+- owner auth: single-admin password auth, API key metadata, reauth tokens, and audit logs
 
 Public CLI commands should favor the capsule-first surface: `auth`, `db`, `env`, `secret`, `registry`, `run`, `status`, `logs`, lifecycle commands, and `rm`.
+
+## Auth Model
+
+The launch auth model is single-owner. Production installs bootstrap one admin user, then use local CLI profiles that hold Brain API keys. API keys can be listed, created with labels, and revoked. New API keys are shown once; list responses never return key secrets.
+
+Critical mutations require reauth with the owner password. That includes capsule runs, managed database initialization, registry credential mutations, API key lifecycle mutations, and password changes. HTTP auth failures stay generic to clients, while server logs and audit events retain operational reasons such as missing, malformed, revoked, or reauth-rejected credentials.
 
 ## Managed Data
 
