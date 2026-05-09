@@ -165,6 +165,20 @@ The removal command prompts you to type the project name.
 
 Expected: app runtime, route, and managed database resources are cleaned up.
 
+## 11. Wipe Ovek From The VPS
+
+When you are done evaluating Ovek and want to remove the VPS runtime state entirely, run this on the VPS:
+
+1. `./scripts/ovek-vps-cleanup.sh`
+
+Expected: the script prints the systemd unit, runtime directories, Ovek containers, and Ovek networks it will remove, then asks you to type `remove ovek` before making changes.
+
+For non-interactive test machines where you already reviewed the plan:
+
+1. `./scripts/ovek-vps-cleanup.sh --yes`
+
+The cleanup script is intentionally VPS/runtime-focused. It removes the Ovek systemd unit, Ovek install/config/data directories, the Brain/Traefik runtime stack, and Podman resources labeled or named as Ovek-managed. It does not remove unrelated Podman images, volumes, containers, or host packages.
+
 ## Troubleshooting On The VPS
 
 Use these commands on the VPS only when the public CLI flow does not behave as expected:
