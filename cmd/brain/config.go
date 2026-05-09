@@ -58,12 +58,12 @@ func loadConfig() (config, error) {
 	if runtimeEngine == "" {
 		runtimeEngine = defaultRuntimeEngine
 	}
-	if runtimeEngine != runtimeEnginePodman && runtimeEngine != runtimeEngineDocker {
-		return config{}, errors.New("RUNTIME_ENGINE must be podman or docker")
+	if runtimeEngine != runtimeEnginePodman {
+		return config{}, errors.New("RUNTIME_ENGINE must be podman")
 	}
 
 	runtimeHost := strings.TrimSpace(os.Getenv("RUNTIME_HOST"))
-	if runtimeHost == "" && runtimeEngine == runtimeEnginePodman {
+	if runtimeHost == "" {
 		runtimeHost = defaultPodmanRuntimeHost
 	}
 

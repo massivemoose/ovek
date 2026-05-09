@@ -158,20 +158,14 @@ func TestLoadConfigAllowsProdModeWithoutStaticAPIKey(t *testing.T) {
 	}
 }
 
-func TestLoadConfigReadsExplicitDockerRuntime(t *testing.T) {
+func TestLoadConfigRejectsDockerRuntime(t *testing.T) {
 	t.Setenv("OVEK_AUTH_MODE", authModeDev)
 	t.Setenv("BRAIN_API_KEY", "test-key")
-	t.Setenv("RUNTIME_ENGINE", runtimeEngineDocker)
+	t.Setenv("RUNTIME_ENGINE", "docker")
 
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("expected config to load, got error: %v", err)
-	}
-	if cfg.RuntimeEngine != runtimeEngineDocker {
-		t.Fatalf("expected runtime engine %q, got %q", runtimeEngineDocker, cfg.RuntimeEngine)
-	}
-	if cfg.RuntimeHost != "" {
-		t.Fatalf("expected runtime host %q, got %q", "", cfg.RuntimeHost)
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("expected docker runtime to fail")
 	}
 }
 

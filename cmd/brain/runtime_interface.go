@@ -6,7 +6,6 @@ import (
 )
 
 const (
-	runtimeEngineDocker = "docker"
 	runtimeEnginePodman = "podman"
 )
 
@@ -40,5 +39,4 @@ type Runtime interface {
 	ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options runtimeLogOptions) (io.ReadCloser, error)
 }
 
-var _ Runtime = (*dockerRuntime)(nil)
 var _ Runtime = (*podmanRuntime)(nil)

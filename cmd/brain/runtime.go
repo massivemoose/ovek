@@ -88,31 +88,11 @@ type podmanServiceImagePuller struct {
 
 func newRuntimeFromConfig(cfg config) (Runtime, error) {
 	switch cfg.RuntimeEngine {
-	case runtimeEngineDocker:
-		return newDockerRuntimeFromHost(cfg.RuntimeHost)
 	case runtimeEnginePodman:
 		return newPodmanRuntime(cfg.RuntimeHost, cfg.RegistryInsecure)
 	default:
 		return nil, fmt.Errorf("unsupported runtime engine %q", cfg.RuntimeEngine)
 	}
-}
-
-func newDockerRuntimeFromEnv() (*dockerRuntime, error) {
-	return newDockerRuntimeFromHost("")
-}
-
-func newDockerRuntimeFromHost(runtimeHost string) (*dockerRuntime, error) {
-	client, err := newDockerCompatClient(runtimeHost)
-	if err != nil {
-		return nil, fmt.Errorf("create docker client: %w", err)
-	}
-
-	return &dockerRuntime{
-		client:      client,
-		dialContext: (&net.Dialer{Timeout: appReadinessDialTime}).DialContext,
-		sleep:       sleepWithContext,
-		hostname:    os.Hostname,
-	}, nil
 }
 
 func newPodmanRuntime(runtimeHost string, registryInsecure bool) (*podmanRuntime, error) {
