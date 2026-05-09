@@ -6,7 +6,7 @@ This is the canonical real-server trial for the public MVP. It installs the runt
 ghcr.io/massivemoose/ovek-signup-example:latest
 ```
 
-The VPS runs Brain, Traefik, app containers, and managed PocketBase sidecars through Podman. App builds happen elsewhere; this flow only pulls and runs a published OCI capsule image.
+The VPS runs Brain, Traefik, app containers, and managed PocketBase sidecars through Podman. App builds happen elsewhere; this flow pulls the published Brain runtime image during install, then pulls and runs published OCI capsule images.
 
 ## 1. Prepare The VPS
 
@@ -17,7 +17,9 @@ On a fresh Ubuntu VPS:
 3. `./scripts/ovek-vps-install.sh`
 4. `./scripts/ovek-vps-check.sh`
 
-Expected: `ovek.service` is enabled and running, the runtime-only stack starts Brain and Traefik, and the read-only preflight check passes. The default VPS stack does not start server-side builder services.
+Expected: `ovek.service` is enabled and running, the runtime-only stack pulls and starts Brain and Traefik, and the read-only preflight check passes. The default VPS stack does not build Brain locally or start server-side builder services.
+
+By default, the installer pulls `ghcr.io/massivemoose/ovek-brain:<current-git-sha>`. To test a different published Brain image, set `OVEK_BRAIN_IMAGE` when running the installer.
 
 On success, the installer prints the next preflight, SSH tunnel, and laptop auth bootstrap commands. Re-running the installer preserves existing `/etc/ovek/ovek.env` secrets and existing runtime data under `/var/lib/ovek`.
 
