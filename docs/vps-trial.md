@@ -34,6 +34,31 @@ For other preflight failures, follow the single `suggest:` command printed with 
 
 1. `./scripts/ovek-vps-check.sh`
 
+### Tiny VPS Swap
+
+On very small VPSes, especially hosts with less than 768 MiB RAM, configure swap before running capsule trials. Ovek's steady-state footprint is small, but Ubuntu maintenance tasks, Podman image pulls, and first-run app/database startup can briefly need more memory than a tiny host has available. Without swap, that pressure can show up as high CPU in `kswapd0`, slow SSH sessions, or background service churn.
+
+Check memory and swap:
+
+1. `free -h`
+2. `swapon --show`
+
+If the host has no swap, add a 1 GiB swapfile:
+
+1. `sudo fallocate -l 1G /swapfile`
+2. `sudo chmod 600 /swapfile`
+3. `sudo mkswap /swapfile`
+4. `sudo swapon /swapfile`
+5. `free -h`
+
+Make it persistent:
+
+1. `echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab`
+2. `echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-ovek-swap.conf`
+3. `sudo sysctl --system`
+
+Expected: `swapon --show` lists `/swapfile`, and `./scripts/ovek-vps-check.sh` no longer warns about a tiny no-swap host.
+
 ## 2. Build The CLI On Your Laptop
 
 From a local checkout on your laptop:

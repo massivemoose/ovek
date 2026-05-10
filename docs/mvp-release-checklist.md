@@ -31,12 +31,14 @@ Use this checklist before asking public MVP users for feedback on Ovek's capsule
 ## Fresh VPS Trial
 
 - [ ] Start from a fresh Ubuntu VPS.
+- [ ] On hosts under 768 MiB RAM, configure a 1 GiB swapfile before capsule trials.
 - [ ] Install Ovek:
   `./scripts/ovek-vps-install.sh`
 - [ ] Confirm the installer pulls the pinned Brain image and Traefik instead of building Brain locally.
 - [ ] Confirm the installer prints copy/pasteable preflight, SSH tunnel, and auth bootstrap next commands.
 - [ ] Run the read-only preflight and follow any printed `suggest:` command before retrying:
   `./scripts/ovek-vps-check.sh`
+- [ ] Confirm preflight does not warn about a tiny no-swap host, or document that the test intentionally uses a larger VPS.
 - [ ] Confirm preflight reaches Brain through the public health endpoint before CLI auth bootstrap.
 - [ ] Complete [vps-trial.md](vps-trial.md) over an SSH tunnel.
 - [ ] Confirm `ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest` succeeds.
