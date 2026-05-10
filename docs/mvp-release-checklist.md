@@ -41,6 +41,8 @@ Use this checklist before asking public MVP users for feedback on Ovek's capsule
 - [ ] Complete [vps-trial.md](vps-trial.md) over an SSH tunnel.
 - [ ] Confirm `ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest` succeeds.
 - [ ] Confirm the signup form is reachable through Traefik and writes records to the managed PocketBase sidecar.
+- [ ] Reboot the VPS and confirm Brain, Traefik, the app container, and the PocketBase sidecar come back.
+- [ ] Confirm `./scripts/ovek-vps-check.sh` reports `podman-restart.service` enabled after reboot.
 - [ ] Confirm `ovek auth key create --label <label>`, `ovek auth keys`, and `ovek auth key rm <key-id>` work over the SSH tunnel.
 - [ ] Confirm `ovek auth password` changes the owner password and the new password works for subsequent reauth prompts.
 

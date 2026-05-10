@@ -130,6 +130,23 @@ check_service() {
 	fail_with_suggestion "${service_name} is not active" "${suggested_command}"
 }
 
+check_enabled_service() {
+	service_name="$1"
+	suggested_command="$2"
+
+	if ! command -v systemctl >/dev/null 2>&1; then
+		fail "systemctl is not available; cannot inspect ${service_name}"
+		return
+	fi
+
+	if systemctl is-enabled --quiet "${service_name}"; then
+		ok "${service_name} is enabled"
+		return
+	fi
+
+	fail_with_suggestion "${service_name} is not enabled" "${suggested_command}"
+}
+
 check_env_file() {
 	if [ "${sudo_ready}" != "1" ]; then
 		fail_with_suggestion "cannot inspect ${env_file} without non-interactive sudo" "sudo -v"
@@ -203,6 +220,7 @@ main() {
 	check_podman
 	check_compose
 	check_service podman.socket "sudo systemctl status podman.socket"
+	check_enabled_service podman-restart.service "sudo systemctl enable --now podman-restart.service"
 	check_service ovek.service "sudo systemctl status ovek.service"
 	check_env_file
 	check_containers

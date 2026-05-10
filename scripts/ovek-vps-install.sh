@@ -103,6 +103,14 @@ ensure_podman() {
 			"inspect: sudo systemctl status podman.socket" \
 			"logs: sudo journalctl -u podman.socket -n 100 --no-pager"
 	fi
+
+	log "Enabling podman-restart.service"
+	if ! run_sudo systemctl enable --now podman-restart.service; then
+		fail_with_hints \
+			"could not enable podman-restart.service" \
+			"inspect: sudo systemctl status podman-restart.service" \
+			"retry: sudo systemctl enable --now podman-restart.service"
+	fi
 }
 
 compose_command() {
