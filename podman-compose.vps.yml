@@ -28,7 +28,7 @@ services:
       - RUNTIME_ENGINE=${RUNTIME_ENGINE:-podman}
       - RUNTIME_HOST=${RUNTIME_HOST:-unix:///run/podman/podman.sock}
       - PROJECTS_HOST_DATA_DIR=${PWD}/brain_data/projects
-      - POCKETBASE_IMAGE=${POCKETBASE_IMAGE:-docker.io/elestio/pocketbase:latest}
+      - POCKETBASE_IMAGE=${POCKETBASE_IMAGE:-ghcr.io/massivemoose/ovek-pocketbase:v0.38.1}
       - TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/ovek/traefik/dynamic
       - TRAEFIK_BRAIN_SERVICE_URL=http://brain:8081
     volumes:

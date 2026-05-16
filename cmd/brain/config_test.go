@@ -58,6 +58,9 @@ func TestLoadConfigReadsAPIKey(t *testing.T) {
 	if cfg.PocketBaseImage != defaultPocketBaseImage {
 		t.Fatalf("expected PocketBase image %q, got %q", defaultPocketBaseImage, cfg.PocketBaseImage)
 	}
+	if cfg.PocketBaseImage != "ghcr.io/massivemoose/ovek-pocketbase:v0.38.1" {
+		t.Fatalf("expected pinned Ovek PocketBase image, got %q", cfg.PocketBaseImage)
+	}
 	if cfg.TraefikDynamicConfigDir != defaultTraefikDynamicConfigDir {
 		t.Fatalf("expected Traefik config dir %q, got %q", defaultTraefikDynamicConfigDir, cfg.TraefikDynamicConfigDir)
 	}

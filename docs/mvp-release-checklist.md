@@ -28,13 +28,21 @@ Use this checklist before asking public MVP users for feedback on Ovek's capsule
   `podman pull ghcr.io/massivemoose/ovek-brain:<full-git-sha>`
 - [ ] Confirm the GHCR Brain package is public before asking friends to run the VPS installer.
 
+## Managed PocketBase Image
+
+- [ ] Confirm the PocketBase image workflow published the pinned runtime image:
+  `ghcr.io/massivemoose/ovek-pocketbase:v0.38.1`
+- [ ] Pull the PocketBase image anonymously from a clean host:
+  `podman pull ghcr.io/massivemoose/ovek-pocketbase:v0.38.1`
+- [ ] Confirm the GHCR PocketBase package is public before asking friends to run `ovek db init`.
+
 ## Fresh VPS Trial
 
 - [ ] Start from a fresh Ubuntu VPS.
 - [ ] On hosts under 768 MiB RAM, configure a 1 GiB swapfile before capsule trials.
 - [ ] Install Ovek:
   `./scripts/ovek-vps-install.sh`
-- [ ] Confirm the installer pulls the pinned Brain image and Traefik instead of building Brain locally.
+- [ ] Confirm the installer pulls the pinned Brain, Traefik, and PocketBase images instead of building runtime dependencies locally.
 - [ ] Confirm the installer prints copy/pasteable preflight, SSH tunnel, and auth bootstrap next commands.
 - [ ] Run the read-only preflight and follow any printed `suggest:` command before retrying:
   `./scripts/ovek-vps-check.sh`
@@ -93,4 +101,3 @@ Use this checklist before asking public MVP users for feedback on Ovek's capsule
 - Automated backups and restore flows are not implemented yet.
 - Private source repos are still handled outside Ovek; users build and push OCI images locally or in CI, then give Ovek image pull access.
 - The legacy source-build path remains an internal regression surface, not public MVP guidance.
-- The current PocketBase image is still `docker.io/elestio/pocketbase:latest`; an Ovek-owned pinned image remains follow-up work.

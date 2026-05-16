@@ -34,7 +34,7 @@ services:
       - REGISTRY_API_BASE_URL=${REGISTRY_API_BASE_URL:-http://registry:5000}
       - REGISTRY_INSECURE=true
       - PROJECTS_HOST_DATA_DIR=${PWD}/brain_data/projects
-      - POCKETBASE_IMAGE=${POCKETBASE_IMAGE:-docker.io/elestio/pocketbase:latest}
+      - POCKETBASE_IMAGE=${POCKETBASE_IMAGE:-ghcr.io/massivemoose/ovek-pocketbase:v0.38.1}
       - TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/ovek/traefik/dynamic
       - TRAEFIK_BRAIN_SERVICE_URL=http://brain:8081
     depends_on:

@@ -6,7 +6,7 @@ This is the canonical real-server trial for the public MVP. It installs the runt
 ghcr.io/massivemoose/ovek-signup-example:latest
 ```
 
-The VPS runs Brain, Traefik, app containers, and managed PocketBase sidecars through Podman. App builds happen elsewhere; this flow pulls the published Brain runtime image during install, then pulls and runs published OCI capsule images.
+The VPS runs Brain, Traefik, app containers, and managed PocketBase sidecars through Podman. App builds happen elsewhere; this flow pulls the published Brain runtime image, Traefik image, and Ovek-owned pinned PocketBase image during install, then pulls and runs published OCI capsule images.
 
 To test your own app after the signup trial, see [capsule-runs.md](capsule-runs.md#bring-your-own-app). The short version: build and publish an OCI image for the VPS architecture, make the app listen on `PORT=8080`, initialize app-facing database secrets with `ovek db init <project> --app-secrets` if needed, then run `ovek run <project> <capsule-ref>`.
 
@@ -19,9 +19,9 @@ On a fresh Ubuntu VPS:
 3. `./scripts/ovek-vps-install.sh`
 4. `./scripts/ovek-vps-check.sh`
 
-Expected: `ovek.service` is enabled and running, `podman-restart.service` is enabled for reboot recovery, the runtime-only stack pulls and starts Brain and Traefik, and the read-only preflight check passes through Brain's public health endpoint. The default VPS stack does not build Brain locally or start server-side builder services.
+Expected: `ovek.service` is enabled and running, `podman-restart.service` is enabled for reboot recovery, the runtime-only stack pulls and starts Brain and Traefik, the pinned PocketBase image is available for managed databases, and the read-only preflight check passes through Brain's public health endpoint. The default VPS stack does not build Brain locally or start server-side builder services.
 
-By default, the installer pulls `ghcr.io/massivemoose/ovek-brain:<current-git-sha>`. To test a different published Brain image, set `OVEK_BRAIN_IMAGE` when running the installer.
+By default, the installer pulls `ghcr.io/massivemoose/ovek-brain:<current-git-sha>` and uses `ghcr.io/massivemoose/ovek-pocketbase:v0.38.1` for managed project databases. To test different published images, set `OVEK_BRAIN_IMAGE` or `OVEK_POCKETBASE_IMAGE` when running the installer.
 
 On success, the installer prints the next preflight, SSH tunnel, and laptop auth bootstrap commands. Re-running the installer preserves existing `/etc/ovek/ovek.env` secrets and existing runtime data under `/var/lib/ovek`.
 
