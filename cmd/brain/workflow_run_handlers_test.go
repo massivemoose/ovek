@@ -156,7 +156,7 @@ func newTestWorkflowRunHandler(t *testing.T, enqueuer workflowRunEnqueuer) (http
 	handler := newHandlerWithRegistryStore(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{}, passthroughWorkflowImageResolver{}, enqueuer, registryCredentialStore{})
+	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{}, passthroughWorkflowImageResolver{}, enqueuer, nil, registryCredentialStore{})
 
 	return handler, db, dataDir
 }

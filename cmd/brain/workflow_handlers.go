@@ -71,7 +71,7 @@ func handleGetWorkflowDefinition(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func handleUpsertWorkflowDefinition(db *sql.DB, imageResolver workflowImageResolver) http.HandlerFunc {
+func handleUpsertWorkflowDefinition(db *sql.DB, imageResolver workflowImageResolver, schedules workflowScheduleController) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -141,12 +141,18 @@ func handleUpsertWorkflowDefinition(db *sql.DB, imageResolver workflowImageResol
 			writeJSONError(w, http.StatusInternalServerError, errorCodeWorkflowFailed, "failed to save workflow")
 			return
 		}
+		if schedules != nil {
+			if err := schedules.Replace(workflow); err != nil {
+				writeJSONError(w, http.StatusInternalServerError, errorCodeWorkflowFailed, "failed to schedule workflow")
+				return
+			}
+		}
 
 		writeJSON(w, http.StatusOK, workflow)
 	}
 }
 
-func handleDeleteWorkflowDefinition(db *sql.DB) http.HandlerFunc {
+func handleDeleteWorkflowDefinition(db *sql.DB, schedules workflowScheduleController) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName, workflowName, ok := validateWorkflowDefinitionPath(w, r)
 		if !ok {
@@ -159,6 +165,9 @@ func handleDeleteWorkflowDefinition(db *sql.DB) http.HandlerFunc {
 		} else if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, errorCodeWorkflowFailed, "failed to delete workflow")
 			return
+		}
+		if schedules != nil {
+			schedules.Remove(projectName, workflowName)
 		}
 
 		w.WriteHeader(http.StatusNoContent)

@@ -250,7 +250,7 @@ func newTestHandlerWithWorkflowImageResolver(t *testing.T, imageResolver workflo
 	handler := newHandlerWithRegistryStore(config{
 		BrainAPIKey: "test-key",
 		DataDir:     dataDir,
-	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{}, imageResolver, nil, registryCredentialStore{})
+	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{}, imageResolver, nil, nil, registryCredentialStore{})
 
 	return handler, db
 }
