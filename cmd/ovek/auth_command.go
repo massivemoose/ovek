@@ -26,6 +26,9 @@ func newAuthCommand(stdout io.Writer, stderr io.Writer, store *config.Store, pro
 		&authLogoutCommand{stdout: stdout, config: store},
 		&authProfilesCommand{stdout: stdout, config: store},
 		&authUseCommand{stdout: stdout, config: store},
+		&authKeysCommand{stdout: stdout, config: store},
+		newAuthKeyCommand(stdout, store, prompts),
+		&authPasswordCommand{stdout: stdout, config: store, prompts: prompts},
 	)
 }
 
@@ -339,6 +342,244 @@ func (cmd *authUseCommand) Run(_ context.Context, args []string) error {
 
 func (cmd *authUseCommand) Usage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth use <profile>\n")
+}
+
+type authKeysCommand struct {
+	stdout io.Writer
+	config *config.Store
+}
+
+func (cmd *authKeysCommand) Name() string { return "keys" }
+
+func (cmd *authKeysCommand) Summary() string { return "List Brain API keys" }
+
+func (cmd *authKeysCommand) Run(ctx context.Context, args []string) error {
+	flagSet := flag.NewFlagSet("ovek auth keys", flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
+	if err := flagSet.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return command.ErrUsage
+		}
+		return err
+	}
+	if flagSet.NArg() != 0 {
+		return fmt.Errorf("ovek auth keys does not accept positional arguments")
+	}
+
+	brainClient, _, err := loadConfiguredClient(cmd.config, "")
+	if err != nil {
+		return err
+	}
+	keys, err := brainClient.ListAPIKeys(ctx)
+	if err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		_, _ = fmt.Fprintln(cmd.stdout, "No API keys found.")
+		return nil
+	}
+
+	rows := make([][]string, 0, len(keys))
+	for _, key := range keys {
+		rows = append(rows, []string{
+			key.ID,
+			key.Label,
+			valueOrDash(key.CreatedAt),
+			valueOrDash(key.LastUsedAt),
+			valueOrDash(key.RevokedAt),
+		})
+	}
+	output.WriteTable(cmd.stdout, []string{"ID", "Label", "Created", "Last Used", "Revoked"}, rows)
+	return nil
+}
+
+func (cmd *authKeysCommand) Usage(w io.Writer) {
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth keys\n")
+}
+
+func newAuthKeyCommand(stdout io.Writer, store *config.Store, prompts prompter) command.Command {
+	return command.NewRouter(
+		"key",
+		"Manage Brain API keys.",
+		&authKeyCreateCommand{stdout: stdout, config: store, prompts: prompts},
+		&authKeyRemoveCommand{stdout: stdout, config: store, prompts: prompts},
+	)
+}
+
+type authKeyCreateCommand struct {
+	stdout  io.Writer
+	config  *config.Store
+	prompts prompter
+}
+
+func (cmd *authKeyCreateCommand) Name() string { return "create" }
+
+func (cmd *authKeyCreateCommand) Summary() string { return "Create a Brain API key" }
+
+func (cmd *authKeyCreateCommand) Run(ctx context.Context, args []string) error {
+	flagSet := flag.NewFlagSet("ovek auth key create", flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
+	label := flagSet.String("label", "", "API key label")
+	if err := flagSet.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return command.ErrUsage
+		}
+		return err
+	}
+	if flagSet.NArg() != 0 {
+		return fmt.Errorf("ovek auth key create does not accept positional arguments")
+	}
+	if strings.TrimSpace(*label) == "" {
+		return fmt.Errorf("ovek auth key create requires --label <label>")
+	}
+
+	brainClient, _, err := loadConfiguredClient(cmd.config, "")
+	if err != nil {
+		return err
+	}
+	response, err := runReauthMutation(ctx, brainClient, cmd.prompts, func() (brainapi.CreateAPIKeyResponse, error) {
+		return brainClient.CreateAPIKey(ctx, brainapi.CreateAPIKeyRequest{Label: strings.TrimSpace(*label)})
+	})
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(cmd.stdout, "Created API key %s\n", response.Label)
+	output.WriteKeyValues(cmd.stdout, [][2]string{
+		{"ID", response.ID},
+		{"API Key", response.APIKey},
+	})
+	_, _ = fmt.Fprintln(cmd.stdout, "This key is shown once.")
+	return nil
+}
+
+func (cmd *authKeyCreateCommand) Usage(w io.Writer) {
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth key create --label <label>\n")
+}
+
+type authKeyRemoveCommand struct {
+	stdout  io.Writer
+	config  *config.Store
+	prompts prompter
+}
+
+func (cmd *authKeyRemoveCommand) Name() string { return "rm" }
+
+func (cmd *authKeyRemoveCommand) Summary() string { return "Revoke a Brain API key" }
+
+func (cmd *authKeyRemoveCommand) Run(ctx context.Context, args []string) error {
+	flagSet := flag.NewFlagSet("ovek auth key rm", flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
+	if err := flagSet.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return command.ErrUsage
+		}
+		return err
+	}
+	if flagSet.NArg() != 1 || strings.TrimSpace(flagSet.Arg(0)) == "" {
+		return fmt.Errorf("ovek auth key rm requires <key-id>")
+	}
+	keyID := strings.TrimSpace(flagSet.Arg(0))
+
+	brainClient, _, err := loadConfiguredClient(cmd.config, "")
+	if err != nil {
+		return err
+	}
+	_, err = runReauthMutation(ctx, brainClient, cmd.prompts, func() (struct{}, error) {
+		return struct{}{}, brainClient.RevokeAPIKey(ctx, keyID)
+	})
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(cmd.stdout, "Revoked API key %s\n", keyID)
+	return nil
+}
+
+func (cmd *authKeyRemoveCommand) Usage(w io.Writer) {
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth key rm <key-id>\n")
+}
+
+type authPasswordCommand struct {
+	stdout  io.Writer
+	config  *config.Store
+	prompts prompter
+}
+
+func (cmd *authPasswordCommand) Name() string { return "password" }
+
+func (cmd *authPasswordCommand) Summary() string { return "Change the Brain owner password" }
+
+func (cmd *authPasswordCommand) Run(ctx context.Context, args []string) error {
+	flagSet := flag.NewFlagSet("ovek auth password", flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
+	if err := flagSet.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return command.ErrUsage
+		}
+		return err
+	}
+	if flagSet.NArg() != 0 {
+		return fmt.Errorf("ovek auth password does not accept positional arguments")
+	}
+
+	currentPassword, err := cmd.prompts.PromptPassword("Current password: ")
+	if err != nil {
+		return err
+	}
+	newPassword, err := cmd.prompts.PromptPassword("New password: ")
+	if err != nil {
+		return err
+	}
+	confirmPassword, err := cmd.prompts.PromptPassword("Confirm new password: ")
+	if err != nil {
+		return err
+	}
+	if currentPassword == "" || newPassword == "" {
+		return fmt.Errorf("current password and new password are required")
+	}
+	if newPassword != confirmPassword {
+		return fmt.Errorf("passwords do not match")
+	}
+
+	brainClient, _, err := loadConfiguredClient(cmd.config, "")
+	if err != nil {
+		return err
+	}
+	request := brainapi.ChangePasswordRequest{
+		CurrentPassword: currentPassword,
+		NewPassword:     newPassword,
+	}
+	if err := runPasswordChangeMutation(ctx, brainClient, currentPassword, func() error {
+		return brainClient.ChangePassword(ctx, request)
+	}); err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintln(cmd.stdout, "Password changed.")
+	return nil
+}
+
+func (cmd *authPasswordCommand) Usage(w io.Writer) {
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek auth password\n")
+}
+
+func runPasswordChangeMutation(ctx context.Context, brainClient *client.Client, currentPassword string, mutate func() error) error {
+	if err := mutate(); err != nil {
+		var apiErr *client.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "reauth_required" {
+			return err
+		}
+
+		reauthResponse, reauthErr := brainClient.Reauth(ctx, currentPassword)
+		if reauthErr != nil {
+			return fmt.Errorf("reauthenticate: %w", reauthErr)
+		}
+		brainClient.SetReauthToken(reauthResponse.ReauthToken)
+		return mutate()
+	}
+
+	return nil
 }
 
 func orderedProfileNames(cfg config.Config) []string {

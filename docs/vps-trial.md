@@ -6,7 +6,7 @@ This is the canonical real-server trial for the public MVP. It installs the runt
 ghcr.io/massivemoose/ovek-signup-example:latest
 ```
 
-The VPS runs Brain, Traefik, app containers, and managed PocketBase sidecars through Podman. App builds happen elsewhere; this flow pulls the published Brain runtime image during install, then pulls and runs published OCI capsule images.
+The VPS runs Brain, Traefik, app containers, and managed PocketBase sidecars through Podman. App builds happen elsewhere; this flow pulls the published Brain runtime image, Traefik image, and Ovek-owned pinned PocketBase image during install, then pulls and runs published OCI capsule images.
 
 To test your own app after the signup trial, see [capsule-runs.md](capsule-runs.md#bring-your-own-app). The short version: build and publish an OCI image for the VPS architecture, make the app listen on `PORT=8080`, initialize app-facing database secrets with `ovek db init <project> --app-secrets` if needed, then run `ovek run <project> <capsule-ref>`.
 
@@ -19,9 +19,9 @@ On a fresh Ubuntu VPS:
 3. `./scripts/ovek-vps-install.sh`
 4. `./scripts/ovek-vps-check.sh`
 
-Expected: `ovek.service` is enabled and running, the runtime-only stack pulls and starts Brain and Traefik, and the read-only preflight check passes through Brain's public health endpoint. The default VPS stack does not build Brain locally or start server-side builder services.
+Expected: `ovek.service` is enabled and running, `podman-restart.service` is enabled for reboot recovery, the runtime-only stack pulls and starts Brain and Traefik, the pinned PocketBase image is available for managed databases, and the read-only preflight check passes through Brain's public health endpoint. The default VPS stack does not build Brain locally or start server-side builder services.
 
-By default, the installer pulls `ghcr.io/massivemoose/ovek-brain:<current-git-sha>`. To test a different published Brain image, set `OVEK_BRAIN_IMAGE` when running the installer.
+By default, the installer pulls `ghcr.io/massivemoose/ovek-brain:<current-git-sha>` and uses `ghcr.io/massivemoose/ovek-pocketbase:v0.38.1` for managed project databases. To test different published images, set `OVEK_BRAIN_IMAGE` or `OVEK_POCKETBASE_IMAGE` when running the installer.
 
 On success, the installer prints the next preflight, SSH tunnel, and laptop auth bootstrap commands. Re-running the installer preserves existing `/etc/ovek/ovek.env` secrets and existing runtime data under `/var/lib/ovek`.
 
@@ -33,6 +33,31 @@ If the preflight reports that sudo cannot run non-interactively:
 For other preflight failures, follow the single `suggest:` command printed with the failure, then rerun:
 
 1. `./scripts/ovek-vps-check.sh`
+
+### Tiny VPS Swap
+
+On very small VPSes, especially hosts with less than 768 MiB RAM, configure swap before running capsule trials. Ovek's steady-state footprint is small, but Ubuntu maintenance tasks, Podman image pulls, and first-run app/database startup can briefly need more memory than a tiny host has available. Without swap, that pressure can show up as high CPU in `kswapd0`, slow SSH sessions, or background service churn.
+
+Check memory and swap:
+
+1. `free -h`
+2. `swapon --show`
+
+If the host has no swap, add a 1 GiB swapfile:
+
+1. `sudo fallocate -l 1G /swapfile`
+2. `sudo chmod 600 /swapfile`
+3. `sudo mkswap /swapfile`
+4. `sudo swapon /swapfile`
+5. `free -h`
+
+Make it persistent:
+
+1. `echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab`
+2. `echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-ovek-swap.conf`
+3. `sudo sysctl --system`
+
+Expected: `swapon --show` lists `/swapfile`, and `./scripts/ovek-vps-check.sh` no longer warns about a tiny no-swap host.
 
 ## 2. Build The CLI On Your Laptop
 
@@ -69,6 +94,12 @@ From your laptop checkout, with the SSH tunnel open:
 The bootstrap command prompts for a username and password. Save the password somewhere safe for this trial; protected mutations use it for reauth.
 
 Expected: the active profile points at `http://brain.localhost:8088`.
+
+For follow-up access, create a labeled API key and save it when it is printed:
+
+1. `./bin/ovek auth key create --label laptop`
+
+To switch profiles or inspect key metadata, see [auth.md](auth.md).
 
 ## 5. Initialize The Managed Database
 

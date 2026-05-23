@@ -10,6 +10,9 @@ env_file="${OVEK_ENV_FILE:-${config_dir}/ovek.env}"
 service_file="${OVEK_SERVICE_FILE:-/etc/systemd/system/ovek.service}"
 brain_image=""
 brain_image_repo="ghcr.io/massivemoose/ovek-brain"
+pocketbase_image_default="ghcr.io/massivemoose/ovek-pocketbase:v0.38.1"
+pocketbase_image_legacy="docker.io/elestio/pocketbase:latest"
+pocketbase_image="${OVEK_POCKETBASE_IMAGE:-${pocketbase_image_default}}"
 vps_compose_file="podman-compose.vps.yml"
 traefik_image="docker.io/library/traefik:v3.6"
 
@@ -103,6 +106,14 @@ ensure_podman() {
 			"inspect: sudo systemctl status podman.socket" \
 			"logs: sudo journalctl -u podman.socket -n 100 --no-pager"
 	fi
+
+	log "Enabling podman-restart.service"
+	if ! run_sudo systemctl enable --now podman-restart.service; then
+		fail_with_hints \
+			"could not enable podman-restart.service" \
+			"inspect: sudo systemctl status podman-restart.service" \
+			"retry: sudo systemctl enable --now podman-restart.service"
+	fi
 }
 
 compose_command() {
@@ -176,6 +187,25 @@ install_runtime_files() {
 write_env_file() {
 	if [ -f "${env_file}" ]; then
 		log "Preserving existing ${env_file}; secrets and runtime data are unchanged"
+		if run_sudo grep -qx "POCKETBASE_IMAGE=${pocketbase_image_legacy}" "${env_file}"; then
+			log "Updating legacy PocketBase image default in ${env_file}"
+			tmp_file="$(mktemp)"
+			if ! run_sudo awk -v image_line="POCKETBASE_IMAGE=${pocketbase_image}" '
+				/^POCKETBASE_IMAGE=/ {
+					print image_line
+					next
+				}
+				{ print }
+			' "${env_file}" >"${tmp_file}"; then
+				rm -f "${tmp_file}"
+				fail "could not update legacy PocketBase image in ${env_file}"
+			fi
+			if ! run_sudo install -m 0600 -o root -g root "${tmp_file}" "${env_file}"; then
+				rm -f "${tmp_file}"
+				fail "could not save updated ${env_file}"
+			fi
+			rm -f "${tmp_file}"
+		fi
 		return
 	fi
 
@@ -187,7 +217,7 @@ OVEK_AUTH_MODE=prod
 OVEK_SECRETS_KEY=${secrets_key}
 RUNTIME_ENGINE=podman
 RUNTIME_HOST=unix:///run/podman/podman.sock
-POCKETBASE_IMAGE=docker.io/elestio/pocketbase:latest
+POCKETBASE_IMAGE=${pocketbase_image}
 EOF
 	if ! run_sudo install -m 0600 -o root -g root "${tmp_file}" "${env_file}"; then
 		rm -f "${tmp_file}"
@@ -197,6 +227,17 @@ EOF
 			"retry after fixing permissions"
 	fi
 	rm -f "${tmp_file}"
+}
+
+load_pocketbase_image_from_env() {
+	if [ ! -f "${env_file}" ]; then
+		return
+	fi
+
+	env_pocketbase_image="$(run_sudo awk -F= '$1 == "POCKETBASE_IMAGE" {print substr($0, index($0, "=") + 1)}' "${env_file}" | tail -n 1)"
+	if [ -n "${env_pocketbase_image}" ]; then
+		pocketbase_image="${env_pocketbase_image}"
+	fi
 }
 
 pull_runtime_images() {
@@ -215,6 +256,14 @@ pull_runtime_images() {
 			"could not pull Traefik image ${traefik_image}" \
 			"inspect: sudo podman pull ${traefik_image}" \
 			"check network, DNS, and registry availability"
+	fi
+
+	log "Pulling PocketBase image ${pocketbase_image}"
+	if ! run_sudo podman pull "${pocketbase_image}"; then
+		fail_with_hints \
+			"could not pull PocketBase image ${pocketbase_image}" \
+			"inspect: sudo podman pull ${pocketbase_image}" \
+			"confirm the GHCR package is public and the pocketbase-image workflow published this tag"
 	fi
 }
 
@@ -237,6 +286,7 @@ Environment=OVEK_BRAIN_IMAGE=${brain_image}
 ExecStartPre=/usr/bin/mkdir -p ${data_dir}/projects ${data_dir}/traefik/dynamic ${data_dir}/job-logs
 ExecStartPre=/bin/sh -lc '/usr/bin/podman pull "\$OVEK_BRAIN_IMAGE"'
 ExecStartPre=/usr/bin/podman pull ${traefik_image}
+ExecStartPre=/usr/bin/podman pull ${pocketbase_image}
 ExecStart=/bin/sh -lc '${compose_cmd} -f ${vps_compose_file} up -d --force-recreate'
 ExecStop=/bin/sh -lc '${compose_cmd} -f ${vps_compose_file} down'
 TimeoutStartSec=600
@@ -286,6 +336,7 @@ main() {
 	ensure_podman
 	install_runtime_files
 	write_env_file
+	load_pocketbase_image_from_env
 	pull_runtime_images
 	write_systemd_unit
 	start_service

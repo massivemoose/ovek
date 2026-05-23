@@ -65,6 +65,11 @@ http://signup-demo.localhost/
 
 See [docs/signup-example-quickstart.md](docs/signup-example-quickstart.md) for the full app capsule walkthrough.
 
+For private capsule images, configure a registry pull credential first:
+
+1. `printf '<registry-token>' | ./bin/ovek registry login ghcr.io --username <user> --password-stdin`
+2. `./bin/ovek run <project> ghcr.io/<owner>/<image-name>:<tag>`
+
 ## VPS Trial
 
 The first real-server path is Ubuntu + Podman + SSH tunnel:
@@ -102,8 +107,10 @@ See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM and Lin
 
 ## More Docs
 
+- [Auth](docs/auth.md): bootstrap vs login, profiles, API keys, reauth, registry credentials, and tunnel/TLS guidance.
 - [Capsule runs](docs/capsule-runs.md): capsule expectations, GHCR image publishing, and validation commands.
 - [Project env and secrets](docs/project-env-secrets.md): project configuration captured by the next capsule run.
+- [Async workflows design](docs/async-workflows-design.md): scheduled and triggered OCI jobs as the next project capability.
 - [Podman testing](docs/podman-testing.md): local VM and Linux acceptance workflows.
 - [Ubuntu VPS trial](docs/vps-trial.md): first real-server flow over an SSH tunnel.
 - [MVP release checklist](docs/mvp-release-checklist.md): final public-feedback readiness checks.

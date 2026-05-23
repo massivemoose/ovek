@@ -10,7 +10,7 @@ import (
 const defaultDataDir = "/var/lib/ovek"
 const defaultBuildKitHost = "docker-container://buildkit"
 const defaultProjectsHostDataDir = "/var/lib/ovek/projects"
-const defaultPocketBaseImage = "docker.io/elestio/pocketbase:latest"
+const defaultPocketBaseImage = "ghcr.io/massivemoose/ovek-pocketbase:v0.38.1"
 const defaultBuildRegistryPublishHost = "host.docker.internal:5001"
 const defaultRuntimeRegistryHost = "localhost:5001"
 const defaultRegistryAPIBaseURL = "http://registry:5000"
@@ -58,12 +58,12 @@ func loadConfig() (config, error) {
 	if runtimeEngine == "" {
 		runtimeEngine = defaultRuntimeEngine
 	}
-	if runtimeEngine != runtimeEnginePodman && runtimeEngine != runtimeEngineDocker {
-		return config{}, errors.New("RUNTIME_ENGINE must be podman or docker")
+	if runtimeEngine != runtimeEnginePodman {
+		return config{}, errors.New("RUNTIME_ENGINE must be podman")
 	}
 
 	runtimeHost := strings.TrimSpace(os.Getenv("RUNTIME_HOST"))
-	if runtimeHost == "" && runtimeEngine == runtimeEnginePodman {
+	if runtimeHost == "" {
 		runtimeHost = defaultPodmanRuntimeHost
 	}
 

@@ -26,7 +26,15 @@ func main() {
 		}
 	}()
 
-	runtime, err := newRuntimeFromConfig(cfg)
+	secretCipher, err := loadSecretCipher(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("failed to load secret key: %v", err)
+	}
+	projectConfigStore := newProjectConfigStore(db, secretCipher)
+	projectPocketBaseStore := newProjectPocketBaseStore(db, secretCipher)
+	registryCredentialStore := newRegistryCredentialStore(db, secretCipher)
+
+	runtime, err := newRuntimeFromConfig(cfg, registryCredentialStore)
 	if err != nil {
 		log.Fatalf("failed to create runtime: %v", err)
 	}
@@ -40,13 +48,6 @@ func main() {
 	if err := ingress.SyncAll(context.Background()); err != nil {
 		log.Printf("warning: failed to fully reconcile startup ingress state: %v", err)
 	}
-	secretCipher, err := loadSecretCipher(cfg.DataDir)
-	if err != nil {
-		log.Fatalf("failed to load secret key: %v", err)
-	}
-	projectConfigStore := newProjectConfigStore(db, secretCipher)
-	projectPocketBaseStore := newProjectPocketBaseStore(db, secretCipher)
-
 	processor := newManagedDeploymentProcessor(
 		db,
 		sourceDispatchProcessor{
@@ -87,8 +88,17 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    listenAddr,
-		Handler: newHandler(cfg, db, jobManager, cleaner, projectRuntimeService, projectPocketBaseService, projectConfigStore),
+		Addr: listenAddr,
+		Handler: newHandlerWithRegistryStore(
+			cfg,
+			db,
+			jobManager,
+			cleaner,
+			projectRuntimeService,
+			projectPocketBaseService,
+			registryCredentialStore,
+			projectConfigStore,
+		),
 	}
 
 	log.Printf("brain listening on %s", listenAddr)
@@ -100,6 +110,10 @@ func main() {
 }
 
 func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, configStores ...projectConfigStore) http.Handler {
+	return newHandlerWithRegistryStore(cfg, db, enqueuer, cleaner, projectRuntimeService, projectPocketBaseService, registryCredentialStore{}, configStores...)
+}
+
+func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, registryStore registryCredentialStore, configStores ...projectConfigStore) http.Handler {
 	var projectConfigStore projectConfigStore
 	if len(configStores) > 0 {
 		projectConfigStore = configStores[0]
@@ -114,6 +128,10 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 		_, _ = w.Write([]byte("pong"))
 	})
 	apiMux.HandleFunc("POST /v1/auth/reauth", handleReauth(db))
+	apiMux.HandleFunc("GET /v1/auth/api-keys", handleListAPIKeys(db))
+	apiMux.HandleFunc("POST /v1/auth/api-keys", requireCriticalReauth(cfg, db, "auth.api_key_create.authorized", handleCreateAPIKey(db)))
+	apiMux.HandleFunc("DELETE /v1/auth/api-keys/{keyID}", requireCriticalReauth(cfg, db, "auth.api_key_revoke.authorized", handleRevokeAPIKey(db)))
+	apiMux.HandleFunc("POST /v1/auth/password", requireCriticalReauth(cfg, db, "auth.password_change.authorized", handleChangePassword(db)))
 	apiMux.HandleFunc("GET /v1/projects", handleListProjects(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}", handleGetProject(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/deployments", handleListProjectDeployments(db))
@@ -131,6 +149,11 @@ func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner pro
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/env", handleListProjectEnvironment(projectConfigStore))
 	apiMux.HandleFunc("PUT /v1/projects/{projectName}/env/{name}", requireCriticalReauth(cfg, db, "project_env.authorized", handleSetProjectEnvironment(projectConfigStore)))
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/env/{name}", requireCriticalReauth(cfg, db, "project_env.authorized", handleDeleteProjectEnvironment(projectConfigStore)))
+	if registryStore.db != nil {
+		apiMux.HandleFunc("GET /v1/registry/credentials", handleListRegistryCredentials(registryStore))
+		apiMux.HandleFunc("PUT /v1/registry/credentials/{host}", requireCriticalReauth(cfg, db, "registry_credential.authorized", handleUpsertRegistryCredential(registryStore)))
+		apiMux.HandleFunc("DELETE /v1/registry/credentials/{host}", requireCriticalReauth(cfg, db, "registry_credential.authorized", handleDeleteRegistryCredential(registryStore)))
+	}
 	apiMux.HandleFunc("POST /v1/projects/{projectName}/deployments", requireCriticalReauth(cfg, db, "deploy.authorized", handleCreateDeployment(db, enqueuer)))
 	apiMux.HandleFunc("POST /v1/projects/{projectName}/runs", requireCriticalReauth(cfg, db, "run.authorized", handleCreateRun(db, enqueuer)))
 	apiMux.HandleFunc("GET /v1/jobs/{jobID}", handleGetJob(db))

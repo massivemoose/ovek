@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+
+FROM --platform=$BUILDPLATFORM alpine:3.22 AS fetch
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ARG PB_VERSION=0.38.1
+
+RUN apk add --no-cache ca-certificates curl unzip
+
+WORKDIR /tmp/pocketbase
+
+RUN set -eux; \
+	case "${TARGETARCH}" in \
+		amd64) pb_arch="amd64" ;; \
+		arm64) pb_arch="arm64" ;; \
+		*) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+	esac; \
+	archive="pocketbase_${PB_VERSION}_${TARGETOS}_${pb_arch}.zip"; \
+	base_url="https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}"; \
+	curl -fsSLO "${base_url}/checksums.txt"; \
+	curl -fsSLO "${base_url}/${archive}"; \
+	checksum_line="$(grep " ${archive}$" checksums.txt)"; \
+	printf '%s\n' "${checksum_line}" | sha256sum -c -; \
+	unzip "${archive}" pocketbase; \
+	chmod 0755 pocketbase
+
+FROM scratch
+
+LABEL org.opencontainers.image.source="https://github.com/massivemoose/ovek"
+LABEL org.opencontainers.image.description="Version-pinned PocketBase runtime image for Ovek managed project databases"
+
+COPY --from=fetch /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=fetch /tmp/pocketbase/pocketbase /pocketbase
+
+USER 100:101
+EXPOSE 8090
+
+ENTRYPOINT ["/pocketbase"]
+CMD ["serve", "--http=0.0.0.0:8090", "--dir=/pb_data"]

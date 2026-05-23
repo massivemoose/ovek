@@ -190,6 +190,19 @@ UPDATE deployments
  WHERE source_ref IS NULL OR source_ref = '';
 `,
 	},
+	{
+		version: 7,
+		name:    "create registry credential table",
+		upSQL: `
+CREATE TABLE registry_credentials (
+	registry_host TEXT PRIMARY KEY,
+	username TEXT NOT NULL,
+	encrypted_password TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+`,
+	},
 }
 
 func openBrainDB(dataDir string) (*sql.DB, error) {

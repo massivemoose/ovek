@@ -108,6 +108,30 @@ check_compose() {
 	fail_with_suggestion "no Podman compose provider found" "podman-compose --version"
 }
 
+check_memory_headroom() {
+	if [ ! -r /proc/meminfo ]; then
+		warn "cannot inspect memory headroom; /proc/meminfo is not readable"
+		return
+	fi
+
+	mem_total_kib="$(awk '$1 == "MemTotal:" {print $2}' /proc/meminfo 2>/dev/null || true)"
+	swap_total_kib="$(awk '$1 == "SwapTotal:" {print $2}' /proc/meminfo 2>/dev/null || true)"
+	if [ -z "${mem_total_kib}" ] || [ -z "${swap_total_kib}" ]; then
+		warn "cannot parse memory headroom from /proc/meminfo"
+		return
+	fi
+
+	mem_total_mib=$((mem_total_kib / 1024))
+	swap_total_mib=$((swap_total_kib / 1024))
+	if [ "${mem_total_mib}" -lt 768 ] && [ "${swap_total_mib}" -eq 0 ]; then
+		warn "host has ${mem_total_mib}MiB RAM and no swap; tiny VPSes may hit CPU pressure during image pulls or Ubuntu maintenance"
+		suggest "add a 1G swapfile; see docs/vps-trial.md#tiny-vps-swap"
+		return
+	fi
+
+	ok "memory headroom detected (${mem_total_mib}MiB RAM, ${swap_total_mib}MiB swap)"
+}
+
 check_service() {
 	service_name="$1"
 	suggested_command="$2"
@@ -128,6 +152,23 @@ check_service() {
 	fi
 
 	fail_with_suggestion "${service_name} is not active" "${suggested_command}"
+}
+
+check_enabled_service() {
+	service_name="$1"
+	suggested_command="$2"
+
+	if ! command -v systemctl >/dev/null 2>&1; then
+		fail "systemctl is not available; cannot inspect ${service_name}"
+		return
+	fi
+
+	if systemctl is-enabled --quiet "${service_name}"; then
+		ok "${service_name} is enabled"
+		return
+	fi
+
+	fail_with_suggestion "${service_name} is not enabled" "${suggested_command}"
 }
 
 check_env_file() {
@@ -202,7 +243,9 @@ main() {
 	check_sudo
 	check_podman
 	check_compose
+	check_memory_headroom
 	check_service podman.socket "sudo systemctl status podman.socket"
+	check_enabled_service podman-restart.service "sudo systemctl enable --now podman-restart.service"
 	check_service ovek.service "sudo systemctl status ovek.service"
 	check_env_file
 	check_containers

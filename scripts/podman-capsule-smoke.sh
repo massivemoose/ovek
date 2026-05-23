@@ -119,7 +119,8 @@ build_ovek() {
 		(cd "${repo_root}" && go build -o "${ovek_bin}" ./cmd/ovek)
 	fi
 
-	if ! "${ovek_bin}" help 2>/dev/null | grep -Eq '^[[:space:]]+db[[:space:]]'; then
+	db_help="$("${ovek_bin}" help db 2>/dev/null || true)"
+	if ! grep -Eq 'ovek db (init|status|tunnel)' <<<"${db_help}"; then
 		fail "Ovek CLI at ${ovek_bin} does not support 'ovek db'; rebuild it or unset OVEK_BIN"
 	fi
 }

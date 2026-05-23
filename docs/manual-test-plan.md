@@ -6,7 +6,7 @@ This plan validates the public Ovek MVP surface with public CLI commands. It use
 ghcr.io/massivemoose/ovek-signup-example:latest
 ```
 
-The setup commands can start local or VPS infrastructure, but the product validation path uses `ovek auth`, `ovek db`, `ovek run`, `ovek status`, `ovek logs`, lifecycle commands, and `ovek rm`.
+The setup commands can start local or VPS infrastructure, but the product validation path uses `ovek auth`, `ovek registry`, `ovek db`, `ovek run`, `ovek status`, `ovek logs`, lifecycle commands, and `ovek rm`.
 
 ## 1. Build The CLI
 
@@ -52,6 +52,14 @@ For a VPS trial over the documented SSH tunnel, use [vps-trial.md](vps-trial.md)
 
 Expected: the active profile points at the Brain host you are testing.
 
+For production auth mode, also validate owner key lifecycle:
+
+1. `./bin/ovek auth key create --label manual-test`
+2. `./bin/ovek auth keys`
+3. `./bin/ovek auth key rm <KEY_ID>`
+
+Expected: the created key is printed once, list output shows metadata only, and revocation succeeds after reauth.
+
 ## 5. Initialize The Managed Database
 
 1. `./bin/ovek db init signup-demo --app-secrets`
@@ -64,6 +72,14 @@ Expected: running is `yes`, initialized is `yes`, and app secrets are `yes`.
 1. `./bin/ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`
 
 Expected: the command streams lifecycle logs and finishes with status `succeeded`.
+
+Optional private-image check:
+
+1. `printf '<registry-token>' | ./bin/ovek registry login ghcr.io --username <user> --password-stdin`
+2. `./bin/ovek registry list`
+3. `./bin/ovek run private-demo ghcr.io/<owner>/<image>:<tag>`
+
+Expected: registry list output is redacted, and the private image pull succeeds through Podman.
 
 ## 7. Inspect Status And Logs
 
