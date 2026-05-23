@@ -13,6 +13,7 @@ import (
 
 const (
 	defaultWorkflowQueueCap = 64
+	workflowQueueSize       = 64
 
 	workflowRunStatusQueued    = brainapi.WorkflowRunStatusQueued
 	workflowRunStatusPreparing = brainapi.WorkflowRunStatusPreparing
@@ -28,7 +29,10 @@ const (
 	workflowRunTriggerAPI      = brainapi.WorkflowRunTriggerAPI
 )
 
-var errWorkflowNotFound = errors.New("workflow not found")
+var (
+	errWorkflowNotFound  = errors.New("workflow not found")
+	errWorkflowQueueFull = errors.New("workflow queue full")
+)
 
 func isValidWorkflowName(name string) bool {
 	return isValidProjectName(name)
@@ -237,6 +241,198 @@ func createWorkflowRunRecord(ctx context.Context, db *sql.DB, run workflowRun) (
 	return decorateWorkflowRun(run), nil
 }
 
+func createQueuedWorkflowRun(ctx context.Context, db *sql.DB, projectName string, workflowName string, triggerType string) (workflowRun, error) {
+	if triggerType == "" {
+		triggerType = workflowRunTriggerAPI
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return workflowRun{}, fmt.Errorf("begin workflow run transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	workflow, found, err := getWorkflowDefinitionTx(ctx, tx, projectName, workflowName)
+	if err != nil {
+		return workflowRun{}, err
+	}
+	if !found {
+		return workflowRun{}, errWorkflowNotFound
+	}
+	if workflow.QueueCap <= 0 {
+		workflow.QueueCap = defaultWorkflowQueueCap
+	}
+
+	activeCount, err := countActiveWorkflowRuns(ctx, tx, projectName, workflowName)
+	if err != nil {
+		return workflowRun{}, err
+	}
+	if activeCount >= workflow.QueueCap {
+		return workflowRun{}, errWorkflowQueueFull
+	}
+
+	configRevisionID, configRevisionFound, err := latestProjectConfigRevisionID(ctx, tx, projectName)
+	if err != nil {
+		return workflowRun{}, err
+	}
+
+	run, err := insertWorkflowRunTx(ctx, tx, workflowRun{
+		ProjectName:        projectName,
+		WorkflowName:       workflowName,
+		TriggerType:        triggerType,
+		Status:             workflowRunStatusQueued,
+		ConfigRevisionID:   optionalRevisionID(configRevisionID, configRevisionFound),
+		SourceImageRef:     workflow.SourceImageRef,
+		ResolvedRepoDigest: workflow.ResolvedRepoDigest,
+		RuntimeImageID:     workflow.RuntimeImageID,
+	})
+	if err != nil {
+		return workflowRun{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return workflowRun{}, fmt.Errorf("commit workflow run transaction: %w", err)
+	}
+
+	return decorateWorkflowRun(run), nil
+}
+
+func createScheduledWorkflowRun(ctx context.Context, db *sql.DB, projectName string, workflowName string) (workflowRun, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return workflowRun{}, fmt.Errorf("begin scheduled workflow run transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	workflow, found, err := getWorkflowDefinitionTx(ctx, tx, projectName, workflowName)
+	if err != nil {
+		return workflowRun{}, err
+	}
+	if !found {
+		return workflowRun{}, errWorkflowNotFound
+	}
+
+	activeCount, err := countActiveWorkflowRuns(ctx, tx, projectName, workflowName)
+	if err != nil {
+		return workflowRun{}, err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if activeCount > 0 {
+		run, err := insertWorkflowRunTx(ctx, tx, workflowRun{
+			ProjectName:        projectName,
+			WorkflowName:       workflowName,
+			TriggerType:        workflowRunTriggerSchedule,
+			Status:             workflowRunStatusSkipped,
+			SourceImageRef:     workflow.SourceImageRef,
+			ResolvedRepoDigest: workflow.ResolvedRepoDigest,
+			RuntimeImageID:     workflow.RuntimeImageID,
+			ErrorMessage:       "scheduled tick skipped because workflow already has queued or running work",
+			CreatedAt:          now,
+			FinishedAt:         now,
+		})
+		if err != nil {
+			return workflowRun{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return workflowRun{}, fmt.Errorf("commit skipped workflow run transaction: %w", err)
+		}
+		return decorateWorkflowRun(run), nil
+	}
+
+	configRevisionID, configRevisionFound, err := latestProjectConfigRevisionID(ctx, tx, projectName)
+	if err != nil {
+		return workflowRun{}, err
+	}
+
+	run, err := insertWorkflowRunTx(ctx, tx, workflowRun{
+		ProjectName:        projectName,
+		WorkflowName:       workflowName,
+		TriggerType:        workflowRunTriggerSchedule,
+		Status:             workflowRunStatusQueued,
+		ConfigRevisionID:   optionalRevisionID(configRevisionID, configRevisionFound),
+		SourceImageRef:     workflow.SourceImageRef,
+		ResolvedRepoDigest: workflow.ResolvedRepoDigest,
+		RuntimeImageID:     workflow.RuntimeImageID,
+		CreatedAt:          now,
+	})
+	if err != nil {
+		return workflowRun{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return workflowRun{}, fmt.Errorf("commit scheduled workflow run transaction: %w", err)
+	}
+
+	return decorateWorkflowRun(run), nil
+}
+
+func insertWorkflowRunTx(ctx context.Context, tx *sql.Tx, run workflowRun) (workflowRun, error) {
+	runID := strings.TrimSpace(run.ID)
+	var err error
+	if runID == "" {
+		runID, err = newID()
+		if err != nil {
+			return workflowRun{}, err
+		}
+	}
+	now := strings.TrimSpace(run.CreatedAt)
+	if now == "" {
+		now = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if run.Status == "" {
+		run.Status = workflowRunStatusQueued
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO workflow_runs(id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		runID,
+		run.ProjectName,
+		run.WorkflowName,
+		run.TriggerType,
+		run.Status,
+		nullableString(run.ConfigRevisionID),
+		nullableString(run.LogPath),
+		run.SourceImageRef,
+		nullableString(run.ResolvedRepoDigest),
+		nullableString(run.RuntimeImageID),
+		nullableInt(run.ExitCode),
+		nullableString(run.ErrorMessage),
+		now,
+		nullableString(run.StartedAt),
+		nullableString(run.FinishedAt),
+	); err != nil {
+		return workflowRun{}, fmt.Errorf("create workflow run: %w", err)
+	}
+
+	run.ID = runID
+	run.CreatedAt = now
+	return run, nil
+}
+
+func countActiveWorkflowRuns(ctx context.Context, queryer workflowQueryer, projectName string, workflowName string) (int, error) {
+	var count int
+	if err := queryer.QueryRowContext(
+		ctx,
+		`SELECT COUNT(1)
+		 FROM workflow_runs
+		 WHERE project_name = ?
+		   AND workflow_name = ?
+		   AND status IN (?, ?, ?)`,
+		projectName,
+		workflowName,
+		workflowRunStatusQueued,
+		workflowRunStatusPreparing,
+		workflowRunStatusRunning,
+	).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count active workflow runs: %w", err)
+	}
+
+	return count, nil
+}
+
 func listWorkflowRuns(ctx context.Context, db *sql.DB, projectName string, limit int) ([]workflowRun, error) {
 	rows, err := db.QueryContext(
 		ctx,
@@ -276,6 +472,23 @@ func getWorkflowRun(ctx context.Context, db *sql.DB, projectName string, runID s
 			 FROM workflow_runs
 			 WHERE project_name = ? AND id = ?`,
 			projectName,
+			runID,
+		),
+	)
+	if err != nil {
+		return workflowRun{}, err
+	}
+
+	return decorateWorkflowRun(run), nil
+}
+
+func getWorkflowRunByID(ctx context.Context, db *sql.DB, runID string) (workflowRun, error) {
+	run, err := scanWorkflowRun(
+		db.QueryRowContext(
+			ctx,
+			`SELECT id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at
+			 FROM workflow_runs
+			 WHERE id = ?`,
 			runID,
 		),
 	)
