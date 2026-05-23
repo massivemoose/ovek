@@ -27,18 +27,23 @@ const (
 	roleLabelKey               = "ovek.role"
 	deploymentLabelKey         = "ovek.deployment"
 	jobLabelKey                = "ovek.job"
+	workflowLabelKey           = "ovek.workflow"
+	workflowRunLabelKey        = "ovek.workflow.run"
 	managedLabelValue          = "true"
 	resourceRoleProjectNetwork = "project-network"
 	resourceRolePocketBase     = "pocketbase"
 	resourceRoleApp            = "app"
+	resourceRoleWorkflow       = "workflow"
 	projectNetworkDriver       = "bridge"
 )
 
 type managedResourceMetadata struct {
-	ProjectName  string
-	Role         string
-	DeploymentID string
-	JobID        string
+	ProjectName   string
+	Role          string
+	DeploymentID  string
+	JobID         string
+	WorkflowName  string
+	WorkflowRunID string
 }
 
 type projectNetwork struct {
@@ -61,6 +66,7 @@ type dockerClient interface {
 	ImageInspect(ctx context.Context, imageID string, inspectOpts ...dockerclient.ImageInspectOption) (dockerimage.InspectResponse, error)
 	ContainerCreate(ctx context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string, options dockercontainer.StartOptions) error
+	ContainerWait(ctx context.Context, containerID string, condition dockercontainer.WaitCondition) (<-chan dockercontainer.WaitResponse, <-chan error)
 	ContainerStop(ctx context.Context, containerID string, options dockercontainer.StopOptions) error
 	ContainerRemove(ctx context.Context, containerID string, options dockercontainer.RemoveOptions) error
 }
@@ -503,6 +509,12 @@ func managedLabels(metadata managedResourceMetadata) map[string]string {
 	if metadata.JobID != "" {
 		labels[jobLabelKey] = metadata.JobID
 	}
+	if metadata.WorkflowName != "" {
+		labels[workflowLabelKey] = metadata.WorkflowName
+	}
+	if metadata.WorkflowRunID != "" {
+		labels[workflowRunLabelKey] = metadata.WorkflowRunID
+	}
 
 	return labels
 }
@@ -522,6 +534,12 @@ func requireManagedResourceOwnership(resourceName string, labels map[string]stri
 	}
 	if metadata.JobID != "" && labels[jobLabelKey] != metadata.JobID {
 		return fmt.Errorf("%s already exists for job %q, not %q", resourceName, labels[jobLabelKey], metadata.JobID)
+	}
+	if metadata.WorkflowName != "" && labels[workflowLabelKey] != metadata.WorkflowName {
+		return fmt.Errorf("%s already exists for workflow %q, not %q", resourceName, labels[workflowLabelKey], metadata.WorkflowName)
+	}
+	if metadata.WorkflowRunID != "" && labels[workflowRunLabelKey] != metadata.WorkflowRunID {
+		return fmt.Errorf("%s already exists for workflow run %q, not %q", resourceName, labels[workflowRunLabelKey], metadata.WorkflowRunID)
 	}
 
 	return nil

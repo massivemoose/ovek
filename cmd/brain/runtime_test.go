@@ -470,6 +470,10 @@ type fakeDockerClient struct {
 	containerStartID                string
 	containerStartOptions           dockercontainer.StartOptions
 	containerStartErr               error
+	containerWaitID                 string
+	containerWaitCondition          dockercontainer.WaitCondition
+	containerWaitResponse           dockercontainer.WaitResponse
+	containerWaitErr                error
 	containerStopID                 string
 	containerStopOptions            dockercontainer.StopOptions
 	containerStopErr                error
@@ -611,6 +615,19 @@ func (client *fakeDockerClient) ContainerStart(_ context.Context, containerID st
 	client.containerStartID = containerID
 	client.containerStartOptions = options
 	return client.containerStartErr
+}
+
+func (client *fakeDockerClient) ContainerWait(_ context.Context, containerID string, condition dockercontainer.WaitCondition) (<-chan dockercontainer.WaitResponse, <-chan error) {
+	client.containerWaitID = containerID
+	client.containerWaitCondition = condition
+	waitCh := make(chan dockercontainer.WaitResponse, 1)
+	errCh := make(chan error, 1)
+	if client.containerWaitErr != nil {
+		errCh <- client.containerWaitErr
+	} else {
+		waitCh <- client.containerWaitResponse
+	}
+	return waitCh, errCh
 }
 
 func (client *fakeDockerClient) ContainerStop(_ context.Context, containerID string, options dockercontainer.StopOptions) error {

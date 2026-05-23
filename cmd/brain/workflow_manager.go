@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 )
 
 const interruptedWorkflowRunErrorMessage = "workflow run interrupted by brain restart"
+
+var errWorkflowRunTimedOut = errors.New("workflow run timed out")
 
 type workflowRunResult struct {
 	LogPath  string
@@ -90,6 +93,12 @@ func (manager *workflowManager) processRun(ctx context.Context, runID string) {
 	result, err := manager.processor.Process(ctx, run)
 	finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if err != nil {
+		if errors.Is(err, errWorkflowRunTimedOut) {
+			if updateErr := markWorkflowRunTimedOut(manager.db, runID, finishedAt, err.Error(), result); updateErr != nil {
+				log.Printf("failed to mark workflow run %s timed out: %v", runID, updateErr)
+			}
+			return
+		}
 		if updateErr := markWorkflowRunFailed(manager.db, runID, finishedAt, err.Error(), result); updateErr != nil {
 			log.Printf("failed to mark workflow run %s failed: %v", runID, updateErr)
 		}
@@ -221,11 +230,19 @@ func markWorkflowRunSucceeded(db *sql.DB, runID string, finishedAt string, resul
 }
 
 func markWorkflowRunFailed(db *sql.DB, runID string, finishedAt string, errorMessage string, result workflowRunResult) error {
+	return markWorkflowRunTerminal(db, runID, workflowRunStatusFailed, finishedAt, errorMessage, result)
+}
+
+func markWorkflowRunTimedOut(db *sql.DB, runID string, finishedAt string, errorMessage string, result workflowRunResult) error {
+	return markWorkflowRunTerminal(db, runID, workflowRunStatusTimedOut, finishedAt, errorMessage, result)
+}
+
+func markWorkflowRunTerminal(db *sql.DB, runID string, status string, finishedAt string, errorMessage string, result workflowRunResult) error {
 	updateResult, err := db.Exec(
 		`UPDATE workflow_runs
 		 SET status = ?, finished_at = ?, error_message = ?, log_path = ?, exit_code = ?
 		 WHERE id = ? AND status IN (?, ?)`,
-		workflowRunStatusFailed,
+		status,
 		finishedAt,
 		errorMessage,
 		nullableString(result.LogPath),
@@ -235,8 +252,8 @@ func markWorkflowRunFailed(db *sql.DB, runID string, finishedAt string, errorMes
 		workflowRunStatusRunning,
 	)
 	if err != nil {
-		return fmt.Errorf("mark workflow run failed: %w", err)
+		return fmt.Errorf("mark workflow run terminal: %w", err)
 	}
 
-	return requireUpdatedRow(updateResult, "mark failed workflow run")
+	return requireUpdatedRow(updateResult, "mark terminal workflow run")
 }

@@ -48,6 +48,11 @@ type Runtime interface {
 	GetProjectPocketBaseRuntime(ctx context.Context, projectName string) (projectRuntimeContainer, bool, error)
 	GetProjectNetworkRuntime(ctx context.Context, projectName string) (projectRuntimeNetwork, bool, error)
 	ReadProjectAppLogs(ctx context.Context, deployment deploymentRecord, options runtimeLogOptions) (io.ReadCloser, error)
+	CreateWorkflowContainer(ctx context.Context, run workflowRun, imageRef string, env []string) (string, error)
+	StartWorkflowContainer(ctx context.Context, containerID string) error
+	WaitWorkflowContainer(ctx context.Context, containerID string) (int, error)
+	StopWorkflowContainer(ctx context.Context, containerID string) error
+	RemoveWorkflowContainer(ctx context.Context, containerID string) error
 }
 
 var _ Runtime = (*podmanRuntime)(nil)
