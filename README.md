@@ -110,6 +110,7 @@ See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM and Lin
 - [Auth](docs/auth.md): bootstrap vs login, profiles, API keys, reauth, registry credentials, and tunnel/TLS guidance.
 - [Capsule runs](docs/capsule-runs.md): capsule expectations, GHCR image publishing, and validation commands.
 - [Project env and secrets](docs/project-env-secrets.md): project configuration captured by the next capsule run.
+- [Async workflows design](docs/async-workflows-design.md): scheduled and triggered OCI jobs as the next project capability.
 - [Podman testing](docs/podman-testing.md): local VM and Linux acceptance workflows.
 - [Ubuntu VPS trial](docs/vps-trial.md): first real-server flow over an SSH tunnel.
 - [MVP release checklist](docs/mvp-release-checklist.md): final public-feedback readiness checks.
