@@ -51,6 +51,9 @@ const (
 	errorCodeInvalidWorkflow            = "invalid_workflow"
 	errorCodeWorkflowNotFound           = "workflow_not_found"
 	errorCodeWorkflowFailed             = "workflow_failed"
+	errorCodeWorkflowRunNotFound        = "workflow_run_not_found"
+	errorCodeWorkflowQueueFull          = "workflow_queue_full"
+	errorCodeFetchWorkflowLogsFailed    = "fetch_workflow_logs_failed"
 )
 
 func writeJSON(w http.ResponseWriter, statusCode int, value any) {

@@ -86,6 +86,11 @@ func main() {
 	if err := jobManager.Start(workerContext); err != nil {
 		log.Fatalf("failed to start job manager: %v", err)
 	}
+	workflowProcessor := newManagedWorkflowProcessor(db, runtime, cfg.DataDir, cfg.ProjectsHostDataDir, cfg.PocketBaseImage, projectConfigStore)
+	workflowManager := newWorkflowManager(db, workflowProcessor)
+	if err := workflowManager.Start(workerContext); err != nil {
+		log.Fatalf("failed to start workflow manager: %v", err)
+	}
 
 	server := &http.Server{
 		Addr: listenAddr,
@@ -97,6 +102,7 @@ func main() {
 			projectRuntimeService,
 			projectPocketBaseService,
 			runtime,
+			workflowManager,
 			registryCredentialStore,
 			projectConfigStore,
 		),
@@ -111,10 +117,10 @@ func main() {
 }
 
 func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, configStores ...projectConfigStore) http.Handler {
-	return newHandlerWithRegistryStore(cfg, db, enqueuer, cleaner, projectRuntimeService, projectPocketBaseService, passthroughWorkflowImageResolver{}, registryCredentialStore{}, configStores...)
+	return newHandlerWithRegistryStore(cfg, db, enqueuer, cleaner, projectRuntimeService, projectPocketBaseService, passthroughWorkflowImageResolver{}, nil, registryCredentialStore{}, configStores...)
 }
 
-func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, workflowImages workflowImageResolver, registryStore registryCredentialStore, configStores ...projectConfigStore) http.Handler {
+func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, workflowImages workflowImageResolver, workflowRuns workflowRunEnqueuer, registryStore registryCredentialStore, configStores ...projectConfigStore) http.Handler {
 	var projectConfigStore projectConfigStore
 	if len(configStores) > 0 {
 		projectConfigStore = configStores[0]
@@ -142,6 +148,11 @@ func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqu
 	apiMux.HandleFunc("PUT /v1/projects/{projectName}/workflows/{workflowName}", requireCriticalReauth(cfg, db, "workflow.set.authorized", handleUpsertWorkflowDefinition(db, workflowImages)))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflows/{workflowName}", handleGetWorkflowDefinition(db))
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/workflows/{workflowName}", requireCriticalReauth(cfg, db, "workflow.delete.authorized", handleDeleteWorkflowDefinition(db)))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/workflows/{workflowName}/runs", handleCreateWorkflowRun(db, workflowRuns))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflow-runs", handleListWorkflowRuns(db))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflow-runs/{runID}", handleGetWorkflowRun(db))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflow-runs/{runID}/logs", handleGetWorkflowRunLogs(db, cfg.DataDir))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflow-runs/{runID}/logs/stream", handleGetWorkflowRunLogsStream(db, cfg.DataDir))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
 	apiMux.HandleFunc("POST /v1/projects/{projectName}/runtime/start", requireCriticalReauth(cfg, db, "runtime_start.authorized", handleStartProjectRuntime(projectRuntimeService)))
 	apiMux.HandleFunc("POST /v1/projects/{projectName}/runtime/stop", requireCriticalReauth(cfg, db, "runtime_stop.authorized", handleStopProjectRuntime(projectRuntimeService)))
