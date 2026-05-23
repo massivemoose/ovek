@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/pkg/stdcopy"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -118,6 +120,28 @@ func (runtime *dockerRuntime) WaitWorkflowContainer(ctx context.Context, contain
 		}
 		return int(response.StatusCode), nil
 	}
+}
+
+func (runtime *dockerRuntime) StreamWorkflowContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
+	logs, err := runtime.client.ContainerLogs(ctx, containerID, dockercontainer.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+		Tail:       "all",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("stream workflow container %q logs: %w", containerID, err)
+	}
+
+	reader, writer := io.Pipe()
+	go func() {
+		defer logs.Close()
+
+		_, copyErr := stdcopy.StdCopy(writer, writer, logs)
+		_ = writer.CloseWithError(copyErr)
+	}()
+
+	return reader, nil
 }
 
 func (runtime *dockerRuntime) StopWorkflowContainer(ctx context.Context, containerID string) error {

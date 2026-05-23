@@ -51,6 +51,7 @@ type Runtime interface {
 	CreateWorkflowContainer(ctx context.Context, run workflowRun, imageRef string, env []string) (string, error)
 	StartWorkflowContainer(ctx context.Context, containerID string) error
 	WaitWorkflowContainer(ctx context.Context, containerID string) (int, error)
+	StreamWorkflowContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error)
 	StopWorkflowContainer(ctx context.Context, containerID string) error
 	RemoveWorkflowContainer(ctx context.Context, containerID string) error
 }

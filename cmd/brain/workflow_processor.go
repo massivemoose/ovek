@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 )
 
@@ -13,6 +14,7 @@ const defaultWorkflowRunTimeout = time.Hour
 type managedWorkflowProcessor struct {
 	db                  *sql.DB
 	runtime             workflowExecutionRuntime
+	dataDir             string
 	projectsHostDataDir string
 	pocketBaseImage     string
 	configStore         projectConfigStore
@@ -26,14 +28,16 @@ type workflowExecutionRuntime interface {
 	CreateWorkflowContainer(ctx context.Context, run workflowRun, imageRef string, env []string) (string, error)
 	StartWorkflowContainer(ctx context.Context, containerID string) error
 	WaitWorkflowContainer(ctx context.Context, containerID string) (int, error)
+	StreamWorkflowContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error)
 	StopWorkflowContainer(ctx context.Context, containerID string) error
 	RemoveWorkflowContainer(ctx context.Context, containerID string) error
 }
 
-func newManagedWorkflowProcessor(db *sql.DB, runtime workflowExecutionRuntime, projectsHostDataDir string, pocketBaseImage string, configStore projectConfigStore) managedWorkflowProcessor {
+func newManagedWorkflowProcessor(db *sql.DB, runtime workflowExecutionRuntime, dataDir string, projectsHostDataDir string, pocketBaseImage string, configStore projectConfigStore) managedWorkflowProcessor {
 	return managedWorkflowProcessor{
 		db:                  db,
 		runtime:             runtime,
+		dataDir:             dataDir,
 		projectsHostDataDir: projectsHostDataDir,
 		pocketBaseImage:     pocketBaseImage,
 		configStore:         configStore,
@@ -42,6 +46,9 @@ func newManagedWorkflowProcessor(db *sql.DB, runtime workflowExecutionRuntime, p
 }
 
 func (processor managedWorkflowProcessor) Process(ctx context.Context, run workflowRun) (workflowRunResult, error) {
+	result := workflowRunResult{
+		LogPath: workflowLogPath(processor.dataDir, run.ID),
+	}
 	if processor.timeout <= 0 {
 		processor.timeout = defaultWorkflowRunTimeout
 	}
@@ -51,24 +58,32 @@ func (processor managedWorkflowProcessor) Process(ctx context.Context, run workf
 			return workflowRunResult{}, fmt.Errorf("check project exists: %w", err)
 		}
 		if !exists {
-			return workflowRunResult{}, fmt.Errorf("project %q not found", run.ProjectName)
+			return result, fmt.Errorf("project %q not found", run.ProjectName)
 		}
 	}
 
+	logFile, err := createManagedJobLogFile(result.LogPath)
+	if err != nil {
+		return workflowRunResult{}, fmt.Errorf("create workflow log file: %w", err)
+	}
+	defer logFile.Close()
+
 	if _, err := processor.runtime.EnsureProjectNetwork(ctx, run.ProjectName); err != nil {
-		return workflowRunResult{}, fmt.Errorf("ensure project network: %w", err)
+		return result, fmt.Errorf("ensure project network: %w", err)
 	}
 	if _, err := processor.runtime.EnsureProjectPocketBase(ctx, run.ProjectName, processor.pocketBaseImage, processor.projectsHostDataDir); err != nil {
-		return workflowRunResult{}, fmt.Errorf("ensure PocketBase: %w", err)
+		return result, fmt.Errorf("ensure PocketBase: %w", err)
 	}
 	if err := processor.runtime.WaitForProjectPocketBaseReady(ctx, run.ProjectName); err != nil {
-		return workflowRunResult{}, fmt.Errorf("wait for PocketBase readiness: %w", err)
+		return result, fmt.Errorf("wait for PocketBase readiness: %w", err)
 	}
 
 	runtimeConfig, err := processor.configStore.ResolveRuntimeConfig(ctx, run.ProjectName, run.ConfigRevisionID)
 	if err != nil {
-		return workflowRunResult{}, fmt.Errorf("resolve project config: %w", err)
+		return result, fmt.Errorf("resolve project config: %w", err)
 	}
+	logWriter := runtimeConfig.SecretScrubber.Writer(logFile)
+	defer logWriter.Flush()
 
 	imageRef := run.RuntimeImageID
 	if imageRef == "" {
@@ -76,27 +91,43 @@ func (processor managedWorkflowProcessor) Process(ctx context.Context, run workf
 	}
 	containerID, err := processor.runtime.CreateWorkflowContainer(ctx, run, imageRef, runtimeConfig.Env)
 	if err != nil {
-		return workflowRunResult{}, fmt.Errorf("create workflow container: %w", err)
+		return result, fmt.Errorf("create workflow container: %w", err)
 	}
 	defer func() {
 		_ = processor.runtime.RemoveWorkflowContainer(context.Background(), containerID)
 	}()
 
 	if err := processor.runtime.StartWorkflowContainer(ctx, containerID); err != nil {
-		return workflowRunResult{}, fmt.Errorf("start workflow container: %w", err)
+		return result, fmt.Errorf("start workflow container: %w", err)
 	}
+
+	logs, err := processor.runtime.StreamWorkflowContainerLogs(ctx, containerID)
+	if err != nil {
+		return result, fmt.Errorf("stream workflow container logs: %w", err)
+	}
+	logCopyDone := make(chan error, 1)
+	go func() {
+		defer logs.Close()
+		_, copyErr := io.Copy(logWriter, logs)
+		logCopyDone <- copyErr
+	}()
 
 	runCtx, cancel := context.WithTimeout(ctx, processor.timeout)
 	defer cancel()
 
 	exitCode, err := processor.runtime.WaitWorkflowContainer(runCtx, containerID)
-	result := workflowRunResult{ExitCode: &exitCode}
+	result.ExitCode = &exitCode
 	if errors.Is(err, context.DeadlineExceeded) {
 		_ = processor.runtime.StopWorkflowContainer(context.Background(), containerID)
+		<-logCopyDone
 		return result, fmt.Errorf("%w after %s", errWorkflowRunTimedOut, processor.timeout)
 	}
+	logCopyErr := <-logCopyDone
 	if err != nil {
 		return result, fmt.Errorf("wait for workflow container: %w", err)
+	}
+	if logCopyErr != nil {
+		return result, fmt.Errorf("copy workflow container logs: %w", logCopyErr)
 	}
 	if exitCode != 0 {
 		return result, fmt.Errorf("workflow container exited with code %d", exitCode)

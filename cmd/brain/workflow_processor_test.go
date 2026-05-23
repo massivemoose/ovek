@@ -4,6 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
+	"os"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -14,10 +18,15 @@ func TestManagedWorkflowProcessorRunsContainerWithProjectServicesAndEnv(t *testi
 	if err != nil {
 		t.Fatalf("expected env mutation to succeed, got error: %v", err)
 	}
+	mutation, err = configStore.SetEnvironmentEntry(context.Background(), "demo-app", "API_TOKEN", "secret-token", true, "test")
+	if err != nil {
+		t.Fatalf("expected secret mutation to succeed, got error: %v", err)
+	}
 	runtime := &recordingWorkflowExecutionRuntime{
 		waitExitCode: 0,
+		logs:         "prefix-prefix-prefix secret-token suffix-suffix-suffix\n",
 	}
-	processor := newManagedWorkflowProcessor(db, runtime, "/srv/ovek/projects", defaultPocketBaseImage, configStore)
+	processor := newManagedWorkflowProcessor(db, runtime, t.TempDir(), "/srv/ovek/projects", defaultPocketBaseImage, configStore)
 	run := workflowRun{
 		ID:               "run-123",
 		ProjectName:      "demo-app",
@@ -44,11 +53,19 @@ func TestManagedWorkflowProcessorRunsContainerWithProjectServicesAndEnv(t *testi
 	if runtime.createRun.ID != run.ID || runtime.createImageRef != "sha256:image-id" {
 		t.Fatalf("expected workflow container to use runtime image ID, got runtime=%#v", runtime)
 	}
-	if len(runtime.createEnv) != 1 || runtime.createEnv[0] != "PUBLIC_SITE_URL=https://example.com" {
+	wantEnv := []string{"API_TOKEN=secret-token", "PUBLIC_SITE_URL=https://example.com"}
+	if !reflect.DeepEqual(runtime.createEnv, wantEnv) {
 		t.Fatalf("expected project config env, got %#v", runtime.createEnv)
 	}
 	if runtime.startContainerID != "workflow-container-123" || runtime.waitContainerID != "workflow-container-123" || runtime.removeContainerID != "workflow-container-123" {
 		t.Fatalf("expected lifecycle to target created container, got runtime=%#v", runtime)
+	}
+	logBytes, err := os.ReadFile(result.LogPath)
+	if err != nil {
+		t.Fatalf("expected workflow logs to be readable, got error: %v", err)
+	}
+	if got := string(logBytes); got != "prefix-prefix-prefix [redacted] suffix-suffix-suffix\n" {
+		t.Fatalf("expected workflow logs to be captured, got %q", got)
 	}
 }
 
@@ -57,8 +74,9 @@ func TestManagedWorkflowProcessorFailsOnNonzeroExit(t *testing.T) {
 	seedWorkflowProject(t, db, "demo-app")
 	runtime := &recordingWorkflowExecutionRuntime{
 		waitExitCode: 2,
+		logs:         "failed\n",
 	}
-	processor := newManagedWorkflowProcessor(db, runtime, "/srv/ovek/projects", defaultPocketBaseImage, projectConfigStore{})
+	processor := newManagedWorkflowProcessor(db, runtime, t.TempDir(), "/srv/ovek/projects", defaultPocketBaseImage, projectConfigStore{})
 
 	result, err := processor.Process(context.Background(), workflowRun{
 		ID:             "run-123",
@@ -82,8 +100,9 @@ func TestManagedWorkflowProcessorStopsAndRemovesTimedOutContainer(t *testing.T) 
 	seedWorkflowProject(t, db, "demo-app")
 	runtime := &recordingWorkflowExecutionRuntime{
 		waitErr: context.DeadlineExceeded,
+		logs:    "slow\n",
 	}
-	processor := newManagedWorkflowProcessor(db, runtime, "/srv/ovek/projects", defaultPocketBaseImage, projectConfigStore{})
+	processor := newManagedWorkflowProcessor(db, runtime, t.TempDir(), "/srv/ovek/projects", defaultPocketBaseImage, projectConfigStore{})
 	processor.timeout = 1
 
 	_, err := processor.Process(context.Background(), workflowRun{
@@ -120,6 +139,8 @@ type recordingWorkflowExecutionRuntime struct {
 	waitContainerID         string
 	waitExitCode            int
 	waitErr                 error
+	logs                    string
+	streamLogsContainerID   string
 	stopContainerID         string
 	removeContainerID       string
 }
@@ -156,6 +177,11 @@ func (runtime *recordingWorkflowExecutionRuntime) StartWorkflowContainer(_ conte
 func (runtime *recordingWorkflowExecutionRuntime) WaitWorkflowContainer(_ context.Context, containerID string) (int, error) {
 	runtime.waitContainerID = containerID
 	return runtime.waitExitCode, runtime.waitErr
+}
+
+func (runtime *recordingWorkflowExecutionRuntime) StreamWorkflowContainerLogs(_ context.Context, containerID string) (io.ReadCloser, error) {
+	runtime.streamLogsContainerID = containerID
+	return io.NopCloser(strings.NewReader(runtime.logs)), nil
 }
 
 func (runtime *recordingWorkflowExecutionRuntime) StopWorkflowContainer(_ context.Context, containerID string) error {
