@@ -97,6 +97,65 @@ cleanup_project_runtime_quiet() {
 		"$(brain_api_url "/v1/projects/${project_name}/runtime")" >/dev/null 2>&1 || true
 }
 
+diagnostic_podman() {
+	if command -v sudo >/dev/null 2>&1 && sudo -n podman ps >/dev/null 2>&1; then
+		sudo -n podman "$@"
+		return
+	fi
+	if command -v podman >/dev/null 2>&1 && podman ps >/dev/null 2>&1; then
+		podman "$@"
+		return
+	fi
+
+	return 127
+}
+
+print_capsule_failure_diagnostics() {
+	job_id="${1:-}"
+	app_container=""
+	if [ -n "${job_id}" ]; then
+		app_container="ovek-${project_name}-app-${job_id}"
+	fi
+	pb_container="ovek-${project_name}-pb"
+
+	printf '%s\n' "--- capsule failure diagnostics ---" >&2
+
+	if [ -n "${job_id}" ]; then
+		printf '%s\n' "--- job logs (${job_id}) ---" >&2
+		run_ovek logs --job "${job_id}" --no-follow >&2 || true
+	fi
+
+	printf '%s\n' "--- database status (${project_name}) ---" >&2
+	run_ovek db status "${project_name}" >&2 || true
+
+	printf '%s\n' "--- podman containers ---" >&2
+	diagnostic_podman ps -a \
+		--filter "name=ovek-${project_name}" \
+		--format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' >&2 || printf '%s\n' "podman diagnostics unavailable" >&2
+
+	if [ -n "${app_container}" ]; then
+		printf '%s\n' "--- app container state (${app_container}) ---" >&2
+		diagnostic_podman inspect "${app_container}" \
+			--format 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' >&2 || true
+
+		printf '%s\n' "--- app container env names (${app_container}) ---" >&2
+		diagnostic_podman inspect "${app_container}" \
+			--format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed 's/=.*//' | sort >&2 || true
+
+		printf '%s\n' "--- app container logs (${app_container}) ---" >&2
+		diagnostic_podman logs "${app_container}" >&2 || true
+	fi
+
+	printf '%s\n' "--- PocketBase container state (${pb_container}) ---" >&2
+	diagnostic_podman inspect "${pb_container}" \
+		--format 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' >&2 || true
+
+	printf '%s\n' "--- PocketBase container logs (${pb_container}) ---" >&2
+	diagnostic_podman logs "${pb_container}" >&2 || true
+
+	printf '%s\n' "--- end capsule failure diagnostics ---" >&2
+}
+
 cleanup() {
 	if [ "${cleanup_runtime_on_exit}" = "1" ]; then
 		cleanup_project_runtime_quiet
@@ -241,6 +300,8 @@ log "Running capsule ${capsule_image}"
 run_output_file="$(mktemp)"
 if ! run_ovek run "${project_name}" "${capsule_image}" >"${run_output_file}" 2>&1; then
 	cat "${run_output_file}" >&2 || true
+	failed_job_id="$(awk '$1 == "Job" {print $2; exit}' "${run_output_file}")"
+	print_capsule_failure_diagnostics "${failed_job_id}"
 	rm -f "${run_output_file}"
 	fail "Capsule run failed"
 fi
