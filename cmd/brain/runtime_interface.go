@@ -18,8 +18,19 @@ type appReadinessTarget struct {
 	URL     string
 }
 
+type workflowImageMetadata struct {
+	SourceImageRef     string
+	ResolvedRepoDigest string
+	RuntimeImageID     string
+}
+
+type workflowImageResolver interface {
+	ResolveWorkflowImage(ctx context.Context, imageRef string) (workflowImageMetadata, error)
+}
+
 type Runtime interface {
 	PullImage(ctx context.Context, imageRef string) error
+	workflowImageResolver
 	EnsureProjectNetwork(ctx context.Context, projectName string) (projectNetwork, error)
 	RemoveProjectNetwork(ctx context.Context, projectName string) error
 	EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error)

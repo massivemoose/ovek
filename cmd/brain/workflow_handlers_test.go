@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,19 @@ import (
 )
 
 func TestWorkflowDefinitionAPISetListGetAndDelete(t *testing.T) {
-	handler, db := newTestHandler(t, noopEnqueuer{})
+	imageResolver := &recordingWorkflowImageResolver{
+		metadataByRef: map[string]workflowImageMetadata{
+			"ghcr.io/example/digest:latest": {
+				ResolvedRepoDigest: "ghcr.io/example/digest@sha256:first",
+				RuntimeImageID:     "sha256:first-image",
+			},
+			"ghcr.io/example/digest:v2": {
+				ResolvedRepoDigest: "ghcr.io/example/digest@sha256:second",
+				RuntimeImageID:     "sha256:second-image",
+			},
+		},
+	}
+	handler, db := newTestHandlerWithWorkflowImageResolver(t, imageResolver)
 
 	setRequest := httptest.NewRequest(
 		http.MethodPut,
@@ -36,8 +49,8 @@ func TestWorkflowDefinitionAPISetListGetAndDelete(t *testing.T) {
 	if created.Schedule != "*/5 * * * *" || created.QueueCap != defaultWorkflowQueueCap || !created.Enabled {
 		t.Fatalf("expected default queue cap, enabled workflow, and schedule, got %#v", created)
 	}
-	if created.RuntimeImageID != "" || created.ResolvedRepoDigest != "" {
-		t.Fatalf("expected no resolved image metadata before runtime pull, got %#v", created)
+	if created.RuntimeImageID != "sha256:first-image" || created.ResolvedRepoDigest != "ghcr.io/example/digest@sha256:first" {
+		t.Fatalf("expected resolved image metadata, got %#v", created)
 	}
 	if created.Links.Self != brainapi.ProjectWorkflowPath("demo-app", "digest") {
 		t.Fatalf("expected self link, got %#v", created.Links)
@@ -81,8 +94,14 @@ func TestWorkflowDefinitionAPISetListGetAndDelete(t *testing.T) {
 	if err := json.NewDecoder(updateRecorder.Body).Decode(&updated); err != nil {
 		t.Fatalf("expected update response to decode, got error: %v", err)
 	}
-	if updated.SourceImageRef != "ghcr.io/example/digest:v2" || updated.Schedule != "" || updated.QueueCap != 7 || updated.Enabled {
+	if updated.SourceImageRef != "ghcr.io/example/digest:v2" || updated.ResolvedRepoDigest != "ghcr.io/example/digest@sha256:second" || updated.RuntimeImageID != "sha256:second-image" {
+		t.Fatalf("expected same-name update to refresh image metadata, got %#v", updated)
+	}
+	if updated.Schedule != "" || updated.QueueCap != 7 || updated.Enabled {
 		t.Fatalf("expected full replacement to update image, clear schedule, and preserve requested flags, got %#v", updated)
+	}
+	if len(imageResolver.calls) != 2 {
+		t.Fatalf("expected two image resolution calls, got %#v", imageResolver.calls)
 	}
 
 	deleteRequest := httptest.NewRequest(http.MethodDelete, "/v1/projects/demo-app/workflows/digest", nil)
@@ -99,7 +118,7 @@ func TestWorkflowDefinitionAPISetListGetAndDelete(t *testing.T) {
 }
 
 func TestWorkflowDefinitionAPIValidation(t *testing.T) {
-	handler, _ := newTestHandler(t, noopEnqueuer{})
+	handler, _ := newTestHandlerWithWorkflowImageResolver(t, &recordingWorkflowImageResolver{})
 
 	tests := []struct {
 		name        string
@@ -178,6 +197,33 @@ func TestWorkflowDefinitionAPIValidation(t *testing.T) {
 	}
 }
 
+func TestWorkflowDefinitionAPIReportsImagePullFailures(t *testing.T) {
+	imageResolver := &recordingWorkflowImageResolver{
+		err: errString("pull image \"ghcr.io/example/private:latest\": denied; if this is a private image, run: ovek registry login ghcr.io"),
+	}
+	handler, _ := newTestHandlerWithWorkflowImageResolver(t, imageResolver)
+
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/v1/projects/demo-app/workflows/digest",
+		strings.NewReader(`{"imageRef":"ghcr.io/example/private:latest"}`),
+	)
+	request.Header.Set(headerAPIKey, "test-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(
+		t,
+		recorder,
+		http.StatusBadGateway,
+		errorCodeWorkflowFailed,
+		"pull image \"ghcr.io/example/private:latest\": denied; if this is a private image, run: ovek registry login ghcr.io",
+	)
+	if len(imageResolver.calls) != 1 || imageResolver.calls[0] != "ghcr.io/example/private:latest" {
+		t.Fatalf("expected image resolver to be called with private ref, got %#v", imageResolver.calls)
+	}
+}
+
 func TestWorkflowDefinitionAPIListRequiresExistingProject(t *testing.T) {
 	handler, _ := newTestHandler(t, noopEnqueuer{})
 
@@ -187,6 +233,53 @@ func TestWorkflowDefinitionAPIListRequiresExistingProject(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 
 	assertAPIError(t, recorder, http.StatusNotFound, errorCodeProjectNotFound, "project not found")
+}
+
+func newTestHandlerWithWorkflowImageResolver(t *testing.T, imageResolver workflowImageResolver) (http.Handler, *sql.DB) {
+	t.Helper()
+
+	dataDir := t.TempDir()
+	db, err := openBrainDB(dataDir)
+	if err != nil {
+		t.Fatalf("expected test database to open, got error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	handler := newHandlerWithRegistryStore(config{
+		BrainAPIKey: "test-key",
+		DataDir:     dataDir,
+	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{}, imageResolver, registryCredentialStore{})
+
+	return handler, db
+}
+
+type recordingWorkflowImageResolver struct {
+	calls         []string
+	metadataByRef map[string]workflowImageMetadata
+	err           error
+}
+
+func (resolver *recordingWorkflowImageResolver) ResolveWorkflowImage(_ context.Context, imageRef string) (workflowImageMetadata, error) {
+	resolver.calls = append(resolver.calls, imageRef)
+	if resolver.err != nil {
+		return workflowImageMetadata{}, resolver.err
+	}
+	metadata := resolver.metadataByRef[imageRef]
+	if metadata.SourceImageRef == "" {
+		metadata.SourceImageRef = imageRef
+	}
+	if metadata.RuntimeImageID == "" {
+		metadata.RuntimeImageID = "sha256:test-image"
+	}
+	return metadata, nil
+}
+
+type errString string
+
+func (err errString) Error() string {
+	return string(err)
 }
 
 func TestWorkflowDefinitionAPIRequiresReauthInProdMode(t *testing.T) {

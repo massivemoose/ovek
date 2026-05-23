@@ -17,6 +17,7 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerimage "github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	dockerclient "github.com/docker/docker/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -31,6 +32,77 @@ func TestProjectResourceNames(t *testing.T) {
 	}
 	if got := appContainerName(projectName, "dep-123"); got != "ovek-demo-app-app-dep-123" {
 		t.Fatalf("expected app container name %q, got %q", "ovek-demo-app-app-dep-123", got)
+	}
+}
+
+func TestDockerRuntimeResolveWorkflowImagePullsAndInspects(t *testing.T) {
+	client := &fakeDockerClient{
+		imageInspectResponse: dockerimage.InspectResponse{
+			ID:          "sha256:image-id",
+			RepoDigests: []string{"ghcr.io/example/digest@sha256:repo-digest"},
+		},
+	}
+	runtime := newDockerRuntime(client)
+
+	metadata, err := runtime.ResolveWorkflowImage(context.Background(), "ghcr.io/example/digest:latest")
+	if err != nil {
+		t.Fatalf("expected workflow image to resolve, got error: %v", err)
+	}
+
+	if client.imagePullRef != "ghcr.io/example/digest:latest" {
+		t.Fatalf("expected pull ref %q, got %q", "ghcr.io/example/digest:latest", client.imagePullRef)
+	}
+	if client.imageInspectID != "ghcr.io/example/digest:latest" {
+		t.Fatalf("expected inspect ID %q, got %q", "ghcr.io/example/digest:latest", client.imageInspectID)
+	}
+	if metadata.SourceImageRef != "ghcr.io/example/digest:latest" {
+		t.Fatalf("expected source image ref, got %#v", metadata)
+	}
+	if metadata.ResolvedRepoDigest != "ghcr.io/example/digest@sha256:repo-digest" {
+		t.Fatalf("expected repo digest, got %#v", metadata)
+	}
+	if metadata.RuntimeImageID != "sha256:image-id" {
+		t.Fatalf("expected runtime image ID, got %#v", metadata)
+	}
+}
+
+func TestPodmanRuntimeResolveWorkflowImageUsesCredentialAwarePuller(t *testing.T) {
+	client := &fakeDockerClient{
+		imageInspectResponse: dockerimage.InspectResponse{
+			ID:          "sha256:image-id",
+			RepoDigests: []string{"ghcr.io/example/private@sha256:repo-digest"},
+		},
+	}
+	puller := &fakePodmanImagePuller{}
+	runtime := &podmanRuntime{
+		dockerRuntime:    newDockerRuntime(client),
+		puller:           puller,
+		registryInsecure: true,
+		registryCredentials: staticRegistryCredentialResolver{
+			found: true,
+			credential: registryCredentialSecret{
+				Username: "robot",
+				Password: "secret",
+			},
+		},
+	}
+
+	metadata, err := runtime.ResolveWorkflowImage(context.Background(), "ghcr.io/example/private:latest")
+	if err != nil {
+		t.Fatalf("expected workflow image to resolve, got error: %v", err)
+	}
+
+	if client.imagePullRef != "" {
+		t.Fatalf("expected docker pull not to be called, got %q", client.imagePullRef)
+	}
+	if puller.imageRef != "ghcr.io/example/private:latest" {
+		t.Fatalf("expected podman puller image ref, got %q", puller.imageRef)
+	}
+	if puller.credential == nil || puller.credential.Username != "robot" || puller.credential.Password != "secret" {
+		t.Fatalf("expected registry credentials to be passed to puller, got %#v", puller.credential)
+	}
+	if metadata.RuntimeImageID != "sha256:image-id" || metadata.ResolvedRepoDigest != "ghcr.io/example/private@sha256:repo-digest" {
+		t.Fatalf("expected resolved metadata, got %#v", metadata)
 	}
 }
 
@@ -385,6 +457,9 @@ type fakeDockerClient struct {
 	imagePullOptions                dockerimage.PullOptions
 	imagePullResponse               io.ReadCloser
 	imagePullErr                    error
+	imageInspectID                  string
+	imageInspectResponse            dockerimage.InspectResponse
+	imageInspectErr                 error
 	containerCreateName             string
 	containerCreateConfig           *dockercontainer.Config
 	containerCreateHostConfig       *dockercontainer.HostConfig
@@ -516,6 +591,11 @@ func (client *fakeDockerClient) ImagePull(_ context.Context, refStr string, opti
 	}
 
 	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (client *fakeDockerClient) ImageInspect(_ context.Context, imageID string, _ ...dockerclient.ImageInspectOption) (dockerimage.InspectResponse, error) {
+	client.imageInspectID = imageID
+	return client.imageInspectResponse, client.imageInspectErr
 }
 
 func (client *fakeDockerClient) ContainerCreate(_ context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error) {

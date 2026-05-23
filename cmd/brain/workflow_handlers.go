@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,15 @@ import (
 )
 
 var workflowCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+
+type passthroughWorkflowImageResolver struct{}
+
+func (passthroughWorkflowImageResolver) ResolveWorkflowImage(_ context.Context, imageRef string) (workflowImageMetadata, error) {
+	return workflowImageMetadata{
+		SourceImageRef: imageRef,
+		RuntimeImageID: imageRef,
+	}, nil
+}
 
 func handleListWorkflowDefinitions(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +71,7 @@ func handleGetWorkflowDefinition(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func handleUpsertWorkflowDefinition(db *sql.DB) http.HandlerFunc {
+func handleUpsertWorkflowDefinition(db *sql.DB, imageResolver workflowImageResolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -99,18 +109,33 @@ func handleUpsertWorkflowDefinition(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		resolver := imageResolver
+		if resolver == nil {
+			resolver = passthroughWorkflowImageResolver{}
+		}
+		imageMetadata, err := resolver.ResolveWorkflowImage(r.Context(), imageRef)
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, errorCodeWorkflowFailed, err.Error())
+			return
+		}
+		if imageMetadata.SourceImageRef == "" {
+			imageMetadata.SourceImageRef = imageRef
+		}
+
 		enabled := true
 		if request.Enabled != nil {
 			enabled = *request.Enabled
 		}
 
 		workflow, err := upsertWorkflowDefinition(r.Context(), db, workflowDefinition{
-			ProjectName:    projectName,
-			Name:           workflowName,
-			SourceImageRef: imageRef,
-			Schedule:       schedule,
-			QueueCap:       request.QueueCap,
-			Enabled:        enabled,
+			ProjectName:        projectName,
+			Name:               workflowName,
+			SourceImageRef:     imageMetadata.SourceImageRef,
+			ResolvedRepoDigest: imageMetadata.ResolvedRepoDigest,
+			RuntimeImageID:     imageMetadata.RuntimeImageID,
+			Schedule:           schedule,
+			QueueCap:           request.QueueCap,
+			Enabled:            enabled,
 		})
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, errorCodeWorkflowFailed, "failed to save workflow")

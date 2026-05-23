@@ -96,6 +96,7 @@ func main() {
 			cleaner,
 			projectRuntimeService,
 			projectPocketBaseService,
+			runtime,
 			registryCredentialStore,
 			projectConfigStore,
 		),
@@ -110,10 +111,10 @@ func main() {
 }
 
 func newHandler(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, configStores ...projectConfigStore) http.Handler {
-	return newHandlerWithRegistryStore(cfg, db, enqueuer, cleaner, projectRuntimeService, projectPocketBaseService, registryCredentialStore{}, configStores...)
+	return newHandlerWithRegistryStore(cfg, db, enqueuer, cleaner, projectRuntimeService, projectPocketBaseService, passthroughWorkflowImageResolver{}, registryCredentialStore{}, configStores...)
 }
 
-func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, registryStore registryCredentialStore, configStores ...projectConfigStore) http.Handler {
+func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqueuer, cleaner projectCleanupService, projectRuntimeService projectRuntimeService, projectPocketBaseService managedProjectPocketBaseService, workflowImages workflowImageResolver, registryStore registryCredentialStore, configStores ...projectConfigStore) http.Handler {
 	var projectConfigStore projectConfigStore
 	if len(configStores) > 0 {
 		projectConfigStore = configStores[0]
@@ -138,7 +139,7 @@ func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqu
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/deployments/{deploymentID}", handleGetProjectDeployment(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/jobs", handleListProjectJobs(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflows", handleListWorkflowDefinitions(db))
-	apiMux.HandleFunc("PUT /v1/projects/{projectName}/workflows/{workflowName}", requireCriticalReauth(cfg, db, "workflow.set.authorized", handleUpsertWorkflowDefinition(db)))
+	apiMux.HandleFunc("PUT /v1/projects/{projectName}/workflows/{workflowName}", requireCriticalReauth(cfg, db, "workflow.set.authorized", handleUpsertWorkflowDefinition(db, workflowImages)))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflows/{workflowName}", handleGetWorkflowDefinition(db))
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/workflows/{workflowName}", requireCriticalReauth(cfg, db, "workflow.delete.authorized", handleDeleteWorkflowDefinition(db)))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/runtime", handleGetProjectRuntime(projectRuntimeService))
