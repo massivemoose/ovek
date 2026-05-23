@@ -203,6 +203,55 @@ CREATE TABLE registry_credentials (
 );
 `,
 	},
+	{
+		version: 8,
+		name:    "create workflow tables",
+		upSQL: `
+CREATE TABLE workflows (
+	project_name TEXT NOT NULL,
+	name TEXT NOT NULL,
+	source_image_ref TEXT NOT NULL,
+	resolved_repo_digest TEXT,
+	runtime_image_id TEXT,
+	schedule TEXT,
+	queue_cap INTEGER NOT NULL,
+	enabled INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY (project_name, name),
+	FOREIGN KEY (project_name) REFERENCES projects(name)
+);
+
+CREATE TABLE workflow_runs (
+	id TEXT PRIMARY KEY,
+	project_name TEXT NOT NULL,
+	workflow_name TEXT NOT NULL,
+	trigger_type TEXT NOT NULL,
+	status TEXT NOT NULL,
+	config_revision_id TEXT,
+	log_path TEXT,
+	source_image_ref TEXT NOT NULL,
+	resolved_repo_digest TEXT,
+	runtime_image_id TEXT,
+	exit_code INTEGER,
+	error_message TEXT,
+	created_at TEXT NOT NULL,
+	started_at TEXT,
+	finished_at TEXT,
+	FOREIGN KEY (project_name) REFERENCES projects(name),
+	FOREIGN KEY (project_name, workflow_name) REFERENCES workflows(project_name, name)
+);
+
+CREATE INDEX idx_workflows_project_name
+	ON workflows(project_name, name);
+
+CREATE INDEX idx_workflow_runs_project_created
+	ON workflow_runs(project_name, created_at DESC);
+
+CREATE INDEX idx_workflow_runs_workflow_status_created
+	ON workflow_runs(project_name, workflow_name, status, created_at ASC);
+`,
+	},
 }
 
 func openBrainDB(dataDir string) (*sql.DB, error) {
