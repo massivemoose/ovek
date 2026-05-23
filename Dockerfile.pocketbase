@@ -31,10 +31,12 @@ LABEL org.opencontainers.image.source="https://github.com/massivemoose/ovek"
 LABEL org.opencontainers.image.description="Version-pinned PocketBase runtime image for Ovek managed project databases"
 
 COPY --from=fetch /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=fetch /tmp/pocketbase/pocketbase /pocketbase
+COPY --from=fetch /tmp/pocketbase/pocketbase /usr/local/bin/pocketbase
+
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 USER 100:101
 EXPOSE 8090
 
-ENTRYPOINT ["/pocketbase"]
+ENTRYPOINT ["pocketbase"]
 CMD ["serve", "--http=0.0.0.0:8090", "--dir=/pb_data"]
