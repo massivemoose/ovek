@@ -70,6 +70,17 @@ For private capsule images, configure a registry pull credential first:
 1. `printf '<registry-token>' | ./bin/ovek registry login ghcr.io --username <user> --password-stdin`
 2. `./bin/ovek run <project> ghcr.io/<owner>/<image-name>:<tag>`
 
+## Async Workflows
+
+Register scheduled or manual OCI workflow jobs for a project:
+
+1. `./bin/ovek workflow set <project> <name> --image <capsule-ref> --schedule '@hourly'`
+2. `./bin/ovek workflow run <project> <name>`
+3. `./bin/ovek workflow status <project> [<name>]`
+4. `./bin/ovek workflow logs <project> <run-id> --no-follow`
+
+Workflow containers get the same project env/secrets and managed PocketBase access as app capsules, plus `OVEK_PROJECT`, `OVEK_WORKFLOW`, and `OVEK_WORKFLOW_RUN_ID`. See [docs/async-workflows.md](docs/async-workflows.md).
+
 ## VPS Trial
 
 The first real-server path is Ubuntu + Podman + SSH tunnel:
@@ -109,6 +120,7 @@ See [docs/podman-testing.md](docs/podman-testing.md) for the full Mac VM and Lin
 
 - [Auth](docs/auth.md): bootstrap vs login, profiles, API keys, reauth, registry credentials, and tunnel/TLS guidance.
 - [Capsule runs](docs/capsule-runs.md): capsule expectations, GHCR image publishing, and validation commands.
+- [Async workflows](docs/async-workflows.md): scheduled/manual OCI workflows, queue behavior, env injection, logs, and validation.
 - [Project env and secrets](docs/project-env-secrets.md): project configuration captured by the next capsule run.
 - [Async workflows design](docs/async-workflows-design.md): scheduled and triggered OCI jobs as the next project capability.
 - [Podman testing](docs/podman-testing.md): local VM and Linux acceptance workflows.
