@@ -25,7 +25,7 @@ type workflowContainerSpec struct {
 }
 
 func workflowContainerName(projectName string, workflowName string, runID string) string {
-	return "ovek-" + projectName + "-workflow-" + workflowName + "-" + runID
+	return "ovek-" + projectName + "-wf-" + runID
 }
 
 func workflowContainerEnv(run workflowRun, env []string) []string {

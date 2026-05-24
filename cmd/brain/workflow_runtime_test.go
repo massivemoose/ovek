@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -19,7 +20,7 @@ func TestNewWorkflowContainerSpec(t *testing.T) {
 	}
 	spec := newWorkflowContainerSpec(run, "sha256:image-id", projectNetwork{Name: "demo-app-net"}, []string{"PUBLIC_SITE_URL=https://example.com"})
 
-	if spec.Name != "ovek-demo-app-workflow-digest-run-123" {
+	if spec.Name != "ovek-demo-app-wf-run-123" {
 		t.Fatalf("expected workflow container name, got %q", spec.Name)
 	}
 	if spec.Config.Image != "sha256:image-id" {
@@ -86,7 +87,7 @@ func TestDockerRuntimeWorkflowContainerLifecycle(t *testing.T) {
 	if containerID != "container-123" {
 		t.Fatalf("expected container ID %q, got %q", "container-123", containerID)
 	}
-	if client.containerCreateName != "ovek-demo-app-workflow-digest-run-123" {
+	if client.containerCreateName != "ovek-demo-app-wf-run-123" {
 		t.Fatalf("expected create name, got %q", client.containerCreateName)
 	}
 	if client.containerCreateConfig.Image != "sha256:image-id" {
@@ -108,6 +109,30 @@ func TestDockerRuntimeWorkflowContainerLifecycle(t *testing.T) {
 	}
 	if client.containerStartID != "container-123" || client.containerWaitID != "container-123" || client.containerRemoveID != "container-123" {
 		t.Fatalf("expected lifecycle to use container ID, got start=%q wait=%q remove=%q", client.containerStartID, client.containerWaitID, client.containerRemoveID)
+	}
+}
+
+func TestWorkflowContainerNameStaysShortForMaxLengthNames(t *testing.T) {
+	projectName := "project-" + strings.Repeat("a", 55)
+	workflowName := "workflow-" + strings.Repeat("b", 54)
+	runID := strings.Repeat("c", 32)
+	name := workflowContainerName(projectName, workflowName, runID)
+
+	if name != "ovek-"+projectName+"-wf-"+runID {
+		t.Fatalf("expected shortened workflow container name, got %q", name)
+	}
+	if len(name) > len("ovek-"+projectName+"-app-"+runID) {
+		t.Fatalf("expected workflow container name %q to stay within app container name length class", name)
+	}
+
+	run := workflowRun{
+		ID:           runID,
+		ProjectName:  projectName,
+		WorkflowName: workflowName,
+	}
+	spec := newWorkflowContainerSpec(run, "sha256:image-id", projectNetwork{Name: projectName + "-net"}, nil)
+	if spec.Config.Labels[workflowLabelKey] != workflowName {
+		t.Fatalf("expected full workflow name in labels, got %q", spec.Config.Labels[workflowLabelKey])
 	}
 }
 
