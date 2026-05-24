@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManagedWorkflowProcessorRunsContainerWithProjectServicesAndEnv(t *testing.T) {
@@ -116,6 +117,14 @@ func TestManagedWorkflowProcessorStopsAndRemovesTimedOutContainer(t *testing.T) 
 	}
 	if runtime.stopContainerID != "workflow-container-123" || runtime.removeContainerID != "workflow-container-123" {
 		t.Fatalf("expected timed out container stop and removal, got runtime=%#v", runtime)
+	}
+}
+
+func TestNewManagedWorkflowProcessorUsesConfiguredTimeout(t *testing.T) {
+	processor := newManagedWorkflowProcessor(nil, &recordingWorkflowExecutionRuntime{}, t.TempDir(), "/srv/ovek/projects", defaultPocketBaseImage, projectConfigStore{}, 25*time.Minute)
+
+	if processor.timeout != 25*time.Minute {
+		t.Fatalf("expected configured workflow timeout %s, got %s", 25*time.Minute, processor.timeout)
 	}
 }
 

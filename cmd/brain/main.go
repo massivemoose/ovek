@@ -86,7 +86,7 @@ func main() {
 	if err := jobManager.Start(workerContext); err != nil {
 		log.Fatalf("failed to start job manager: %v", err)
 	}
-	workflowProcessor := newManagedWorkflowProcessor(db, runtime, cfg.DataDir, cfg.ProjectsHostDataDir, cfg.PocketBaseImage, projectConfigStore)
+	workflowProcessor := newManagedWorkflowProcessor(db, runtime, cfg.DataDir, cfg.ProjectsHostDataDir, cfg.PocketBaseImage, projectConfigStore, cfg.WorkflowRunTimeout)
 	workflowManager := newWorkflowManager(db, workflowProcessor)
 	if err := workflowManager.Start(workerContext); err != nil {
 		log.Fatalf("failed to start workflow manager: %v", err)

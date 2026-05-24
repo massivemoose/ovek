@@ -33,7 +33,7 @@ ovek workflow rm <project> <name>
 - Scheduled runs are evaluated by Brain in UTC.
 - Scheduled overlap is skipped; manual/API overlap queues until the workflow queue cap.
 - Default queue cap is `64` per workflow.
-- Default execution timeout is one hour.
+- Default execution timeout is 10 minutes. Brain admins can override the install-wide default with `OVEK_WORKFLOW_RUN_TIMEOUT`, using Go duration syntax such as `5m`, `30m`, or `1h`.
 - Project removal deletes workflow definitions, workflow run rows, managed workflow logs, and outstanding workflow containers. It does not delete workflow images.
 
 Workflow containers receive:

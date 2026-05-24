@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadConfigRequiresAPIKey(t *testing.T) {
 	t.Setenv("OVEK_AUTH_MODE", authModeDev)
@@ -67,6 +70,9 @@ func TestLoadConfigReadsAPIKey(t *testing.T) {
 	if cfg.TraefikBrainServiceURL != defaultTraefikBrainServiceURL {
 		t.Fatalf("expected Traefik brain service URL %q, got %q", defaultTraefikBrainServiceURL, cfg.TraefikBrainServiceURL)
 	}
+	if cfg.WorkflowRunTimeout != 10*time.Minute {
+		t.Fatalf("expected workflow run timeout %s, got %s", 10*time.Minute, cfg.WorkflowRunTimeout)
+	}
 	if cfg.AuthMode != authModeDev {
 		t.Fatalf("expected auth mode %q, got %q", authModeDev, cfg.AuthMode)
 	}
@@ -131,6 +137,43 @@ func TestLoadConfigReadsRegistryAndProjectRuntimeOverrides(t *testing.T) {
 	}
 	if cfg.TraefikBrainServiceURL != "http://brain.internal:8081" {
 		t.Fatalf("expected Traefik brain service URL %q, got %q", "http://brain.internal:8081", cfg.TraefikBrainServiceURL)
+	}
+}
+
+func TestLoadConfigReadsWorkflowRunTimeoutOverride(t *testing.T) {
+	t.Setenv("OVEK_AUTH_MODE", authModeDev)
+	t.Setenv("BRAIN_API_KEY", "test-key")
+	t.Setenv("OVEK_WORKFLOW_RUN_TIMEOUT", "25m")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("expected config to load, got error: %v", err)
+	}
+
+	if cfg.WorkflowRunTimeout != 25*time.Minute {
+		t.Fatalf("expected workflow run timeout %s, got %s", 25*time.Minute, cfg.WorkflowRunTimeout)
+	}
+}
+
+func TestLoadConfigRejectsInvalidWorkflowRunTimeout(t *testing.T) {
+	t.Setenv("OVEK_AUTH_MODE", authModeDev)
+	t.Setenv("BRAIN_API_KEY", "test-key")
+	t.Setenv("OVEK_WORKFLOW_RUN_TIMEOUT", "forever")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("expected invalid workflow run timeout to fail")
+	}
+}
+
+func TestLoadConfigRejectsNonPositiveWorkflowRunTimeout(t *testing.T) {
+	t.Setenv("OVEK_AUTH_MODE", authModeDev)
+	t.Setenv("BRAIN_API_KEY", "test-key")
+	t.Setenv("OVEK_WORKFLOW_RUN_TIMEOUT", "0s")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("expected non-positive workflow run timeout to fail")
 	}
 }
 

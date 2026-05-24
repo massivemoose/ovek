@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const defaultDataDir = "/var/lib/ovek"
@@ -38,6 +39,7 @@ type config struct {
 	PocketBaseImage          string
 	TraefikDynamicConfigDir  string
 	TraefikBrainServiceURL   string
+	WorkflowRunTimeout       time.Duration
 }
 
 func loadConfig() (config, error) {
@@ -121,6 +123,18 @@ func loadConfig() (config, error) {
 		traefikBrainServiceURL = defaultTraefikBrainServiceURL
 	}
 
+	workflowRunTimeout := defaultWorkflowRunTimeout
+	if workflowRunTimeoutValue := strings.TrimSpace(os.Getenv("OVEK_WORKFLOW_RUN_TIMEOUT")); workflowRunTimeoutValue != "" {
+		parsedWorkflowRunTimeout, err := time.ParseDuration(workflowRunTimeoutValue)
+		if err != nil {
+			return config{}, errors.New("OVEK_WORKFLOW_RUN_TIMEOUT must be a valid duration")
+		}
+		if parsedWorkflowRunTimeout <= 0 {
+			return config{}, errors.New("OVEK_WORKFLOW_RUN_TIMEOUT must be positive")
+		}
+		workflowRunTimeout = parsedWorkflowRunTimeout
+	}
+
 	return config{
 		AuthMode:                 authMode,
 		BrainAPIKey:              apiKey,
@@ -137,5 +151,6 @@ func loadConfig() (config, error) {
 		PocketBaseImage:          pocketBaseImage,
 		TraefikDynamicConfigDir:  traefikDynamicConfigDir,
 		TraefikBrainServiceURL:   traefikBrainServiceURL,
+		WorkflowRunTimeout:       workflowRunTimeout,
 	}, nil
 }

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const defaultWorkflowRunTimeout = time.Hour
+const defaultWorkflowRunTimeout = 10 * time.Minute
 
 type managedWorkflowProcessor struct {
 	db                  *sql.DB
@@ -33,7 +33,11 @@ type workflowExecutionRuntime interface {
 	RemoveWorkflowContainer(ctx context.Context, containerID string) error
 }
 
-func newManagedWorkflowProcessor(db *sql.DB, runtime workflowExecutionRuntime, dataDir string, projectsHostDataDir string, pocketBaseImage string, configStore projectConfigStore) managedWorkflowProcessor {
+func newManagedWorkflowProcessor(db *sql.DB, runtime workflowExecutionRuntime, dataDir string, projectsHostDataDir string, pocketBaseImage string, configStore projectConfigStore, timeoutOverrides ...time.Duration) managedWorkflowProcessor {
+	timeout := defaultWorkflowRunTimeout
+	if len(timeoutOverrides) > 0 && timeoutOverrides[0] > 0 {
+		timeout = timeoutOverrides[0]
+	}
 	return managedWorkflowProcessor{
 		db:                  db,
 		runtime:             runtime,
@@ -41,7 +45,7 @@ func newManagedWorkflowProcessor(db *sql.DB, runtime workflowExecutionRuntime, d
 		projectsHostDataDir: projectsHostDataDir,
 		pocketBaseImage:     pocketBaseImage,
 		configStore:         configStore,
-		timeout:             defaultWorkflowRunTimeout,
+		timeout:             timeout,
 	}
 }
 
