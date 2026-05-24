@@ -56,6 +56,7 @@ func newRootRouter(stdin io.Reader, stdout io.Writer, stderr io.Writer, store *c
 		newStartCommand(stdout, store, prompts),
 		newStatusCommand(stdout, store),
 		newStopCommand(stdout, store, prompts),
+		newWorkflowCommand(stdout, store, prompts),
 	)
 }
 
