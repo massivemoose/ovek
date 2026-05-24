@@ -54,6 +54,7 @@ type Runtime interface {
 	StreamWorkflowContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error)
 	StopWorkflowContainer(ctx context.Context, containerID string) error
 	RemoveWorkflowContainer(ctx context.Context, containerID string) error
+	RemoveProjectWorkflowContainers(ctx context.Context, projectName string) error
 }
 
 var _ Runtime = (*podmanRuntime)(nil)

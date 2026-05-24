@@ -7,7 +7,9 @@ import (
 	"io"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	dockernetwork "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/pkg/stdcopy"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -155,6 +157,30 @@ func (runtime *dockerRuntime) StopWorkflowContainer(ctx context.Context, contain
 func (runtime *dockerRuntime) RemoveWorkflowContainer(ctx context.Context, containerID string) error {
 	if err := runtime.client.ContainerRemove(ctx, containerID, dockercontainer.RemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("remove workflow container %q: %w", containerID, err)
+	}
+	return nil
+}
+
+func (runtime *dockerRuntime) RemoveProjectWorkflowContainers(ctx context.Context, projectName string) error {
+	containers, err := runtime.client.ContainerList(ctx, dockercontainer.ListOptions{
+		All: true,
+		Filters: filters.NewArgs(
+			filters.Arg("label", managedLabelKey+"="+managedLabelValue),
+			filters.Arg("label", projectLabelKey+"="+projectName),
+			filters.Arg("label", roleLabelKey+"="+resourceRoleWorkflow),
+		),
+	})
+	if err != nil {
+		return fmt.Errorf("list workflow containers for project %q: %w", projectName, err)
+	}
+
+	for _, container := range containers {
+		if err := runtime.client.ContainerRemove(ctx, container.ID, dockercontainer.RemoveOptions{Force: true}); err != nil {
+			if cerrdefs.IsNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("remove workflow container %q: %w", container.ID, err)
+		}
 	}
 	return nil
 }
