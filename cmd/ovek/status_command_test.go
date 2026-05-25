@@ -243,6 +243,87 @@ func TestStatusNarrowFormatRendersActivityAsRecords(t *testing.T) {
 	}
 }
 
+func TestStatusAcceptsFormatAfterProject(t *testing.T) {
+	currentDeploymentID := "dep_123"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects/demo-app":
+			_ = json.NewEncoder(w).Encode(brainapi.ProjectSummary{
+				Name:                "demo-app",
+				Status:              "running",
+				CurrentDeploymentID: &currentDeploymentID,
+				CreatedAt:           "2026-04-15T00:00:00Z",
+			})
+		case "/v1/projects/demo-app/runtime":
+			_ = json.NewEncoder(w).Encode(brainapi.ProjectRuntime{ProjectName: "demo-app", CurrentDeploymentID: &currentDeploymentID})
+		case "/v1/projects/demo-app/jobs":
+			_ = json.NewEncoder(w).Encode([]brainapi.Job{{
+				ID:        "job_123",
+				Status:    "succeeded",
+				CreatedAt: "2026-04-15T00:01:00Z",
+			}})
+		case "/v1/projects/demo-app/deployments":
+			_ = json.NewEncoder(w).Encode([]brainapi.Deployment{{
+				ID:        "dep_123",
+				Status:    "succeeded",
+				CreatedAt: "2026-04-15T00:02:00Z",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	store := config.NewStore(t.TempDir())
+	if err := store.SaveProfile("default", config.Profile{Host: server.URL, APIKey: "test-key"}, true); err != nil {
+		t.Fatalf("expected config save to succeed, got error: %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode := runWithStore(context.Background(), []string{"status", "demo-app", "--format", "narrow"}, &stdout, &stderr, store)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Job: job_123") {
+		t.Fatalf("expected narrow output, got %q", stdout.String())
+	}
+}
+
+func TestStatusAcceptsEqualsFormatAfterProject(t *testing.T) {
+	currentDeploymentID := "dep_123"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects/demo-app":
+			_ = json.NewEncoder(w).Encode(brainapi.ProjectSummary{Name: "demo-app", Status: "running", CurrentDeploymentID: &currentDeploymentID})
+		case "/v1/projects/demo-app/runtime":
+			_ = json.NewEncoder(w).Encode(brainapi.ProjectRuntime{ProjectName: "demo-app", CurrentDeploymentID: &currentDeploymentID})
+		case "/v1/projects/demo-app/jobs":
+			_ = json.NewEncoder(w).Encode([]brainapi.Job{{ID: "job_123", Status: "succeeded"}})
+		case "/v1/projects/demo-app/deployments":
+			_ = json.NewEncoder(w).Encode([]brainapi.Deployment{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	store := config.NewStore(t.TempDir())
+	if err := store.SaveProfile("default", config.Profile{Host: server.URL, APIKey: "test-key"}, true); err != nil {
+		t.Fatalf("expected config save to succeed, got error: %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode := runWithStore(context.Background(), []string{"status", "demo-app", "--format=narrow"}, &stdout, &stderr, store)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Job: job_123") {
+		t.Fatalf("expected narrow output, got %q", stdout.String())
+	}
+}
+
 func TestStatusAutoFormatUsesOvekColumnsOverride(t *testing.T) {
 	t.Setenv("OVEK_COLUMNS", "40")
 	currentDeploymentID := "dep_123"

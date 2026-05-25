@@ -56,6 +56,6 @@ Project env and secrets from the captured project config revision are injected a
 4. `./bin/ovek workflow run workflow-demo digest`
 5. `./bin/ovek workflow status workflow-demo digest`
 6. `./bin/ovek workflow logs workflow-demo <RUN_ID> --no-follow`
-7. `./bin/ovek rm workflow-demo --database --delete-database-data`
+7. `./bin/ovek rm workflow-demo --remove-database --delete-database-data`
 
 Success looks like a queued workflow run that streams logs, reaches `succeeded`, and remains visible in `workflow status` after the container is removed.

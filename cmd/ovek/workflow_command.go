@@ -63,27 +63,15 @@ func (cmd *workflowCommand) Usage(w io.Writer) {
 }
 
 func (cmd *workflowCommand) runSet(ctx context.Context, brainClient *client.Client, args []string) error {
-	flagSet := flag.NewFlagSet("ovek workflow set", flag.ContinueOnError)
-	flagSet.SetOutput(io.Discard)
-	imageRef := flagSet.String("image", "", "Workflow image ref")
-	schedule := flagSet.String("schedule", "", "Cron schedule")
-	if err := flagSet.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return command.ErrUsage
-		}
+	setArgs, err := parseWorkflowSetArgs(args)
+	if err != nil {
 		return err
-	}
-	if flagSet.NArg() != 2 {
-		return fmt.Errorf("ovek workflow set requires <project> and <name>")
-	}
-	if strings.TrimSpace(*imageRef) == "" {
-		return fmt.Errorf("ovek workflow set requires --image")
 	}
 
 	workflow, err := runReauthMutation(ctx, brainClient, cmd.prompts, func() (brainapi.Workflow, error) {
-		return brainClient.UpsertWorkflow(ctx, flagSet.Arg(0), flagSet.Arg(1), brainapi.UpsertWorkflowRequest{
-			ImageRef: strings.TrimSpace(*imageRef),
-			Schedule: strings.TrimSpace(*schedule),
+		return brainClient.UpsertWorkflow(ctx, setArgs.projectName, setArgs.workflowName, brainapi.UpsertWorkflowRequest{
+			ImageRef: setArgs.imageRef,
+			Schedule: setArgs.schedule,
 		})
 	})
 	if err != nil {
@@ -93,6 +81,62 @@ func (cmd *workflowCommand) runSet(ctx context.Context, brainClient *client.Clie
 	output.WriteSection(cmd.stdout, "Workflow")
 	output.WriteKeyValues(cmd.stdout, workflowDefinitionPairs(workflow))
 	return nil
+}
+
+type workflowSetArgs struct {
+	projectName  string
+	workflowName string
+	imageRef     string
+	schedule     string
+}
+
+func parseWorkflowSetArgs(args []string) (workflowSetArgs, error) {
+	var parsed workflowSetArgs
+	var positionals []string
+	for index := 0; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		switch {
+		case arg == "-h" || arg == "--help":
+			return workflowSetArgs{}, command.ErrUsage
+		case arg == "--image":
+			index++
+			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
+				return workflowSetArgs{}, fmt.Errorf("ovek workflow set --image requires a value")
+			}
+			parsed.imageRef = strings.TrimSpace(args[index])
+		case strings.HasPrefix(arg, "--image="):
+			parsed.imageRef = strings.TrimSpace(strings.TrimPrefix(arg, "--image="))
+			if parsed.imageRef == "" {
+				return workflowSetArgs{}, fmt.Errorf("ovek workflow set --image requires a value")
+			}
+		case arg == "--schedule":
+			index++
+			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
+				return workflowSetArgs{}, fmt.Errorf("ovek workflow set --schedule requires a value")
+			}
+			parsed.schedule = strings.TrimSpace(args[index])
+		case strings.HasPrefix(arg, "--schedule="):
+			parsed.schedule = strings.TrimSpace(strings.TrimPrefix(arg, "--schedule="))
+			if parsed.schedule == "" {
+				return workflowSetArgs{}, fmt.Errorf("ovek workflow set --schedule requires a value")
+			}
+		case strings.HasPrefix(arg, "-"):
+			return workflowSetArgs{}, fmt.Errorf("unknown workflow set flag %q", arg)
+		case arg == "":
+			return workflowSetArgs{}, fmt.Errorf("ovek workflow set requires <project> and <name>")
+		default:
+			positionals = append(positionals, arg)
+		}
+	}
+	if len(positionals) != 2 {
+		return workflowSetArgs{}, fmt.Errorf("ovek workflow set requires <project> and <name>")
+	}
+	if strings.TrimSpace(parsed.imageRef) == "" {
+		return workflowSetArgs{}, fmt.Errorf("ovek workflow set requires --image")
+	}
+	parsed.projectName = positionals[0]
+	parsed.workflowName = positionals[1]
+	return parsed, nil
 }
 
 func (cmd *workflowCommand) runRun(ctx context.Context, brainClient *client.Client, args []string) error {
