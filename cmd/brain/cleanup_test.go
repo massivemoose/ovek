@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -72,6 +73,7 @@ func TestManagedProjectCleanerRemovesManagedResourcesInOrderAndClearsRuntimeStat
 	wantSequence := []string{
 		"app:ovek-demo-app-app-dep-current",
 		"app:ovek-demo-app-app-dep-old",
+		"workflows:demo-app",
 		"pocketbase:demo-app",
 		"network:demo-app",
 	}
@@ -287,6 +289,7 @@ func TestManagedProjectCleanerRetriesTransientRuntimeTeardownFailures(t *testing
 	wantSequence := []string{
 		"app:ovek-demo-app-app-dep-current",
 		"app:ovek-demo-app-app-dep-current",
+		"workflows:demo-app",
 		"pocketbase:demo-app",
 		"pocketbase:demo-app",
 		"network:demo-app",
@@ -377,8 +380,10 @@ func TestManagedProjectCleanerIsIdempotentWhenRuntimeResourcesAreAlreadyGone(t *
 	}
 
 	wantSequence := []string{
+		"workflows:demo-app",
 		"pocketbase:demo-app",
 		"network:demo-app",
+		"workflows:demo-app",
 		"pocketbase:demo-app",
 		"network:demo-app",
 	}
@@ -516,6 +521,64 @@ func TestManagedProjectCleanerRemovesManagedProjectJobLogFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(otherLogPath); err != nil {
 		t.Fatalf("expected other log file %q to remain, got error %v", otherLogPath, err)
+	}
+}
+
+func TestManagedProjectCleanerRemovesWorkflowStateAndLogs(t *testing.T) {
+	dataDir := t.TempDir()
+	db, err := openBrainDB(dataDir)
+	if err != nil {
+		t.Fatalf("expected test database to open, got error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	seedWorkflowDefinition(t, db, workflowDefinition{
+		ProjectName:    "demo-app",
+		Name:           "digest",
+		SourceImageRef: "ghcr.io/example/digest:latest",
+		RuntimeImageID: "sha256:image-id",
+		QueueCap:       1,
+		Enabled:        true,
+	})
+	run, err := createWorkflowRunRecord(context.Background(), db, workflowRun{
+		ProjectName:    "demo-app",
+		WorkflowName:   "digest",
+		TriggerType:    workflowRunTriggerManual,
+		Status:         workflowRunStatusSucceeded,
+		SourceImageRef: "ghcr.io/example/digest:latest",
+		RuntimeImageID: "sha256:image-id",
+		LogPath:        workflowLogPath(dataDir, "run-123"),
+	})
+	if err != nil {
+		t.Fatalf("expected workflow run creation to succeed, got error: %v", err)
+	}
+	logPath := workflowLogPath(dataDir, "run-123")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatalf("expected workflow log dir creation to succeed, got error: %v", err)
+	}
+	if err := os.WriteFile(logPath, []byte("workflow logs\n"), 0o644); err != nil {
+		t.Fatalf("expected workflow log write to succeed, got error: %v", err)
+	}
+
+	runtime := &fakeProjectCleanupRuntime{}
+	err = newManagedProjectCleaner(db, runtime, dataDir).Cleanup(context.Background(), "demo-app")
+	if err != nil {
+		t.Fatalf("expected cleanup to succeed, got error: %v", err)
+	}
+
+	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected workflow log file %q to be removed, got error %v", logPath, err)
+	}
+	if count := queryCount(t, db, "SELECT COUNT(1) FROM workflow_runs WHERE id = ?", run.ID); count != 0 {
+		t.Fatalf("expected workflow run row to be removed, got %d", count)
+	}
+	if count := queryCount(t, db, "SELECT COUNT(1) FROM workflows WHERE project_name = ?", "demo-app"); count != 0 {
+		t.Fatalf("expected workflow definition row to be removed, got %d", count)
+	}
+	if !slices.Contains(runtime.sequence, "workflows:demo-app") {
+		t.Fatalf("expected workflow container cleanup, got sequence %#v", runtime.sequence)
 	}
 }
 
@@ -806,6 +869,11 @@ func (runtime *fakeProjectCleanupRuntime) RemoveProjectApp(_ context.Context, de
 		return err
 	}
 	return runtime.removeAppErr
+}
+
+func (runtime *fakeProjectCleanupRuntime) RemoveProjectWorkflowContainers(_ context.Context, projectName string) error {
+	runtime.sequence = append(runtime.sequence, "workflows:"+projectName)
+	return nil
 }
 
 func (runtime *fakeProjectCleanupRuntime) RemoveProjectPocketBase(_ context.Context, projectName string) error {

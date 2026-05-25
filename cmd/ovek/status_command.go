@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -35,16 +34,11 @@ func (cmd *statusCommand) Name() string { return "status" }
 func (cmd *statusCommand) Summary() string { return "Inspect projects and runtime state" }
 
 func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
-	flagSet := flag.NewFlagSet("ovek status", flag.ContinueOnError)
-	flagSet.SetOutput(io.Discard)
-	format := flagSet.String("format", "auto", "output format: auto, wide, or narrow")
-	if err := flagSet.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return command.ErrUsage
-		}
+	format, positionals, err := parseStatusArgs(args)
+	if err != nil {
 		return err
 	}
-	tableOptions, err := statusTableOptions(*format)
+	tableOptions, err := statusTableOptions(format)
 	if err != nil {
 		return err
 	}
@@ -54,11 +48,11 @@ func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if flagSet.NArg() == 0 {
+	if len(positionals) == 0 {
 		return cmd.runList(ctx, brainClient, tableOptions)
 	}
 
-	projectName, err := projectctx.ExplicitResolver{CommandPath: "ovek status"}.Resolve(flagSet.Args())
+	projectName, err := projectctx.ExplicitResolver{CommandPath: "ovek status"}.Resolve(positionals)
 	if err != nil {
 		return err
 	}
@@ -68,6 +62,36 @@ func (cmd *statusCommand) Run(ctx context.Context, args []string) error {
 
 func (cmd *statusCommand) Usage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "Usage:\n  ovek status [--format auto|wide|narrow]\n  ovek status [--format auto|wide|narrow] <project>\n")
+}
+
+func parseStatusArgs(args []string) (string, []string, error) {
+	format := "auto"
+	var positionals []string
+	for index := 0; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		switch {
+		case arg == "-h" || arg == "--help":
+			return "", nil, command.ErrUsage
+		case arg == "--format":
+			index++
+			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
+				return "", nil, fmt.Errorf("ovek status --format requires a value")
+			}
+			format = strings.TrimSpace(args[index])
+		case strings.HasPrefix(arg, "--format="):
+			format = strings.TrimSpace(strings.TrimPrefix(arg, "--format="))
+			if format == "" {
+				return "", nil, fmt.Errorf("ovek status --format requires a value")
+			}
+		case strings.HasPrefix(arg, "-"):
+			return "", nil, fmt.Errorf("unknown status flag %q", arg)
+		case arg == "":
+			positionals = append(positionals, arg)
+		default:
+			positionals = append(positionals, arg)
+		}
+	}
+	return format, positionals, nil
 }
 
 func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Client, tableOptions output.TableOptions) error {

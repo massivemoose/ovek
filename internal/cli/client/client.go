@@ -674,6 +674,131 @@ func (client *Client) CreateRun(ctx context.Context, projectName string, request
 	return job, nil
 }
 
+func (client *Client) ListWorkflows(ctx context.Context, projectName string) ([]brainapi.Workflow, error) {
+	responseBody, err := client.getJSON(ctx, brainapi.ProjectWorkflowsPath(strings.TrimSpace(projectName)))
+	if err != nil {
+		return nil, err
+	}
+
+	var workflows []brainapi.Workflow
+	if err := json.Unmarshal(responseBody, &workflows); err != nil {
+		return nil, fmt.Errorf("decode workflows response: %w", err)
+	}
+
+	return workflows, nil
+}
+
+func (client *Client) UpsertWorkflow(ctx context.Context, projectName string, workflowName string, requestBody brainapi.UpsertWorkflowRequest) (brainapi.Workflow, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.Workflow{}, fmt.Errorf("marshal workflow request: %w", err)
+	}
+
+	request, err := client.newRequest(ctx, http.MethodPut, brainapi.ProjectWorkflowPath(strings.TrimSpace(projectName), strings.TrimSpace(workflowName)), bytes.NewReader(payload))
+	if err != nil {
+		return brainapi.Workflow{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.Workflow{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.Workflow{}, err
+	}
+
+	var workflow brainapi.Workflow
+	if err := json.NewDecoder(response.Body).Decode(&workflow); err != nil {
+		return brainapi.Workflow{}, fmt.Errorf("decode workflow response: %w", err)
+	}
+
+	return workflow, nil
+}
+
+func (client *Client) DeleteWorkflow(ctx context.Context, projectName string, workflowName string) error {
+	request, err := client.newRequest(ctx, http.MethodDelete, brainapi.ProjectWorkflowPath(strings.TrimSpace(projectName), strings.TrimSpace(workflowName)), nil)
+	if err != nil {
+		return err
+	}
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	return decodeAPIError(response)
+}
+
+func (client *Client) CreateWorkflowRun(ctx context.Context, projectName string, workflowName string, requestBody brainapi.CreateWorkflowRunRequest) (brainapi.WorkflowRun, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.WorkflowRun{}, fmt.Errorf("marshal workflow run request: %w", err)
+	}
+
+	request, err := client.newRequest(ctx, http.MethodPost, brainapi.ProjectWorkflowDefinitionRunsPath(strings.TrimSpace(projectName), strings.TrimSpace(workflowName)), bytes.NewReader(payload))
+	if err != nil {
+		return brainapi.WorkflowRun{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.WorkflowRun{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.WorkflowRun{}, err
+	}
+
+	var run brainapi.WorkflowRun
+	if err := json.NewDecoder(response.Body).Decode(&run); err != nil {
+		return brainapi.WorkflowRun{}, fmt.Errorf("decode workflow run response: %w", err)
+	}
+
+	return run, nil
+}
+
+func (client *Client) ListWorkflowRuns(ctx context.Context, projectName string, limit int) ([]brainapi.WorkflowRun, error) {
+	responseBody, err := client.getJSON(ctx, withLimit(brainapi.ProjectWorkflowRunsPath(strings.TrimSpace(projectName)), limit))
+	if err != nil {
+		return nil, err
+	}
+
+	var runs []brainapi.WorkflowRun
+	if err := json.Unmarshal(responseBody, &runs); err != nil {
+		return nil, fmt.Errorf("decode workflow runs response: %w", err)
+	}
+
+	return runs, nil
+}
+
+func (client *Client) GetWorkflowRun(ctx context.Context, projectName string, runID string) (brainapi.WorkflowRun, error) {
+	responseBody, err := client.getJSON(ctx, brainapi.ProjectWorkflowRunPath(strings.TrimSpace(projectName), strings.TrimSpace(runID)))
+	if err != nil {
+		return brainapi.WorkflowRun{}, err
+	}
+
+	var run brainapi.WorkflowRun
+	if err := json.Unmarshal(responseBody, &run); err != nil {
+		return brainapi.WorkflowRun{}, fmt.Errorf("decode workflow run response: %w", err)
+	}
+
+	return run, nil
+}
+
+func (client *Client) GetWorkflowRunLogs(ctx context.Context, projectName string, runID string) ([]byte, error) {
+	return client.getText(ctx, brainapi.ProjectWorkflowRunLogsPath(strings.TrimSpace(projectName), strings.TrimSpace(runID)))
+}
+
+func (client *Client) StreamWorkflowRunLogs(ctx context.Context, projectName string, runID string) (io.ReadCloser, error) {
+	return client.openStream(ctx, brainapi.ProjectWorkflowRunLogsStreamPath(strings.TrimSpace(projectName), strings.TrimSpace(runID)))
+}
+
 func (client *Client) GetJob(ctx context.Context, jobID string) (brainapi.Job, error) {
 	responseBody, err := client.getJSON(ctx, brainapi.JobPath(strings.TrimSpace(jobID)))
 	if err != nil {

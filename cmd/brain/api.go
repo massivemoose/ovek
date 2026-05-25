@@ -47,6 +47,13 @@ const (
 	errorCodeInvalidPocketBase          = "invalid_pocketbase"
 	errorCodePocketBaseNotFound         = "pocketbase_not_found"
 	errorCodePocketBaseFailed           = "pocketbase_failed"
+	errorCodeInvalidWorkflowName        = "invalid_workflow_name"
+	errorCodeInvalidWorkflow            = "invalid_workflow"
+	errorCodeWorkflowNotFound           = "workflow_not_found"
+	errorCodeWorkflowFailed             = "workflow_failed"
+	errorCodeWorkflowRunNotFound        = "workflow_run_not_found"
+	errorCodeWorkflowQueueFull          = "workflow_queue_full"
+	errorCodeFetchWorkflowLogsFailed    = "fetch_workflow_logs_failed"
 )
 
 func writeJSON(w http.ResponseWriter, statusCode int, value any) {

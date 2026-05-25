@@ -27,18 +27,23 @@ const (
 	roleLabelKey               = "ovek.role"
 	deploymentLabelKey         = "ovek.deployment"
 	jobLabelKey                = "ovek.job"
+	workflowLabelKey           = "ovek.workflow"
+	workflowRunLabelKey        = "ovek.workflow.run"
 	managedLabelValue          = "true"
 	resourceRoleProjectNetwork = "project-network"
 	resourceRolePocketBase     = "pocketbase"
 	resourceRoleApp            = "app"
+	resourceRoleWorkflow       = "workflow"
 	projectNetworkDriver       = "bridge"
 )
 
 type managedResourceMetadata struct {
-	ProjectName  string
-	Role         string
-	DeploymentID string
-	JobID        string
+	ProjectName   string
+	Role          string
+	DeploymentID  string
+	JobID         string
+	WorkflowName  string
+	WorkflowRunID string
 }
 
 type projectNetwork struct {
@@ -58,8 +63,10 @@ type dockerClient interface {
 	ContainerExecAttach(ctx context.Context, execID string, config dockercontainer.ExecAttachOptions) (dockertypes.HijackedResponse, error)
 	ContainerExecInspect(ctx context.Context, execID string) (dockercontainer.ExecInspect, error)
 	ImagePull(ctx context.Context, refStr string, options dockerimage.PullOptions) (io.ReadCloser, error)
+	ImageInspect(ctx context.Context, imageID string, inspectOpts ...dockerclient.ImageInspectOption) (dockerimage.InspectResponse, error)
 	ContainerCreate(ctx context.Context, config *dockercontainer.Config, hostConfig *dockercontainer.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (dockercontainer.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string, options dockercontainer.StartOptions) error
+	ContainerWait(ctx context.Context, containerID string, condition dockercontainer.WaitCondition) (<-chan dockercontainer.WaitResponse, <-chan error)
 	ContainerStop(ctx context.Context, containerID string, options dockercontainer.StopOptions) error
 	ContainerRemove(ctx context.Context, containerID string, options dockercontainer.RemoveOptions) error
 }
@@ -159,6 +166,14 @@ func (runtime *dockerRuntime) PullImage(ctx context.Context, imageRef string) er
 	return nil
 }
 
+func (runtime *dockerRuntime) ResolveWorkflowImage(ctx context.Context, imageRef string) (workflowImageMetadata, error) {
+	if err := runtime.PullImage(ctx, imageRef); err != nil {
+		return workflowImageMetadata{}, err
+	}
+
+	return runtime.inspectWorkflowImage(ctx, imageRef)
+}
+
 func (runtime *podmanRuntime) PullImage(ctx context.Context, imageRef string) error {
 	var credential *registryCredentialSecret
 	credentialFound := false
@@ -182,6 +197,64 @@ func (runtime *podmanRuntime) PullImage(ctx context.Context, imageRef string) er
 	}
 
 	return nil
+}
+
+func (runtime *podmanRuntime) ResolveWorkflowImage(ctx context.Context, imageRef string) (workflowImageMetadata, error) {
+	if err := runtime.PullImage(ctx, imageRef); err != nil {
+		return workflowImageMetadata{}, err
+	}
+
+	return runtime.inspectWorkflowImage(ctx, imageRef)
+}
+
+func (runtime *dockerRuntime) inspectWorkflowImage(ctx context.Context, imageRef string) (workflowImageMetadata, error) {
+	inspect, err := runtime.client.ImageInspect(ctx, imageRef)
+	if err != nil {
+		return workflowImageMetadata{}, fmt.Errorf("inspect image %q: %w", imageRef, err)
+	}
+
+	runtimeImageID := strings.TrimSpace(inspect.ID)
+	if runtimeImageID == "" {
+		runtimeImageID = imageRef
+	}
+
+	return workflowImageMetadata{
+		SourceImageRef:     imageRef,
+		ResolvedRepoDigest: selectWorkflowRepoDigest(imageRef, inspect.RepoDigests),
+		RuntimeImageID:     runtimeImageID,
+	}, nil
+}
+
+func selectWorkflowRepoDigest(sourceImageRef string, repoDigests []string) string {
+	if len(repoDigests) == 0 {
+		return ""
+	}
+
+	sourceRepo := imageRepositoryName(sourceImageRef)
+	for _, digest := range repoDigests {
+		if sourceRepo != "" && imageRepositoryName(digest) == sourceRepo {
+			return digest
+		}
+	}
+
+	return repoDigests[0]
+}
+
+func imageRepositoryName(imageRef string) string {
+	imageRef = strings.TrimSpace(imageRef)
+	if imageRef == "" {
+		return ""
+	}
+	if beforeDigest, _, found := strings.Cut(imageRef, "@"); found {
+		return beforeDigest
+	}
+	lastSlash := strings.LastIndex(imageRef, "/")
+	tagStart := strings.LastIndex(imageRef, ":")
+	if tagStart > lastSlash {
+		return imageRef[:tagStart]
+	}
+
+	return imageRef
 }
 
 func newPodmanImagePuller(runtimeHost string) (podmanImagePuller, error) {
@@ -436,6 +509,12 @@ func managedLabels(metadata managedResourceMetadata) map[string]string {
 	if metadata.JobID != "" {
 		labels[jobLabelKey] = metadata.JobID
 	}
+	if metadata.WorkflowName != "" {
+		labels[workflowLabelKey] = metadata.WorkflowName
+	}
+	if metadata.WorkflowRunID != "" {
+		labels[workflowRunLabelKey] = metadata.WorkflowRunID
+	}
 
 	return labels
 }
@@ -455,6 +534,12 @@ func requireManagedResourceOwnership(resourceName string, labels map[string]stri
 	}
 	if metadata.JobID != "" && labels[jobLabelKey] != metadata.JobID {
 		return fmt.Errorf("%s already exists for job %q, not %q", resourceName, labels[jobLabelKey], metadata.JobID)
+	}
+	if metadata.WorkflowName != "" && labels[workflowLabelKey] != metadata.WorkflowName {
+		return fmt.Errorf("%s already exists for workflow %q, not %q", resourceName, labels[workflowLabelKey], metadata.WorkflowName)
+	}
+	if metadata.WorkflowRunID != "" && labels[workflowRunLabelKey] != metadata.WorkflowRunID {
+		return fmt.Errorf("%s already exists for workflow run %q, not %q", resourceName, labels[workflowRunLabelKey], metadata.WorkflowRunID)
 	}
 
 	return nil

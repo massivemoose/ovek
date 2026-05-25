@@ -426,7 +426,7 @@ func newProdTestHandler(t *testing.T) (http.Handler, *sql.DB) {
 	handler := newHandlerWithRegistryStore(config{
 		AuthMode: authModeProd,
 		DataDir:  dataDir,
-	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{}, newRegistryCredentialStore(db, cipherBox))
+	}, db, noopEnqueuer{}, noopProjectCleaner{}, noopProjectRuntimeService{}, managedProjectPocketBaseService{}, passthroughWorkflowImageResolver{}, nil, nil, newRegistryCredentialStore(db, cipherBox))
 
 	return handler, db
 }

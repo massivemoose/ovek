@@ -2,8 +2,11 @@ module github.com/massivemoose/ovek
 
 go 1.25.5
 
-require github.com/docker/docker v28.5.2+incompatible
-require modernc.org/sqlite v1.48.0
+require (
+	github.com/docker/docker v28.5.2+incompatible
+	github.com/robfig/cron/v3 v3.0.1
+	modernc.org/sqlite v1.48.0
+)
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect

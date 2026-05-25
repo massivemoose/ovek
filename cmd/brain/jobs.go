@@ -37,6 +37,8 @@ var projectNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9]
 
 const maxCapsuleRefLength = 512
 
+var errCapsuleRefRequired = errors.New("capsuleRef is required")
+
 type deploymentEnqueuer interface {
 	Enqueue(jobID string)
 }
@@ -200,20 +202,32 @@ func createRunJob(w http.ResponseWriter, db *sql.DB, enqueuer deploymentEnqueuer
 	writeJSON(w, http.StatusAccepted, job)
 }
 
-func validateCapsuleRef(w http.ResponseWriter, capsuleRef string) (string, bool) {
-	if strings.TrimSpace(capsuleRef) == "" {
-		writeJSONError(w, http.StatusBadRequest, errorCodeCapsuleRefRequired, "capsuleRef is required")
-		return "", false
+func normalizeCapsuleRef(capsuleRef string) (string, error) {
+	capsuleRef = strings.TrimSpace(capsuleRef)
+	if capsuleRef == "" {
+		return "", errCapsuleRefRequired
 	}
 	if len(capsuleRef) > maxCapsuleRefLength {
-		writeJSONError(w, http.StatusBadRequest, errorCodeInvalidCapsuleRef, fmt.Sprintf("capsuleRef must be at most %d characters", maxCapsuleRefLength))
-		return "", false
+		return "", fmt.Errorf("capsuleRef must be at most %d characters", maxCapsuleRefLength)
 	}
 	for _, value := range capsuleRef {
 		if unicode.IsSpace(value) || unicode.IsControl(value) {
-			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidCapsuleRef, "capsuleRef must not contain whitespace or control characters")
-			return "", false
+			return "", errors.New("capsuleRef must not contain whitespace or control characters")
 		}
+	}
+
+	return capsuleRef, nil
+}
+
+func validateCapsuleRef(w http.ResponseWriter, capsuleRef string) (string, bool) {
+	capsuleRef, err := normalizeCapsuleRef(capsuleRef)
+	if errors.Is(err, errCapsuleRefRequired) {
+		writeJSONError(w, http.StatusBadRequest, errorCodeCapsuleRefRequired, "capsuleRef is required")
+		return "", false
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, errorCodeInvalidCapsuleRef, err.Error())
+		return "", false
 	}
 
 	return capsuleRef, true

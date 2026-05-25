@@ -4,6 +4,19 @@ const (
 	JobTypeDeployment  = "deployment"
 	JobSourceTypeRepo  = "repo"
 	JobSourceTypeImage = "image"
+
+	WorkflowRunStatusQueued    = "queued"
+	WorkflowRunStatusPreparing = "preparing"
+	WorkflowRunStatusRunning   = "running"
+	WorkflowRunStatusSucceeded = "succeeded"
+	WorkflowRunStatusFailed    = "failed"
+	WorkflowRunStatusSkipped   = "skipped"
+	WorkflowRunStatusCanceled  = "canceled"
+	WorkflowRunStatusTimedOut  = "timed_out"
+
+	WorkflowRunTriggerManual   = "manual"
+	WorkflowRunTriggerSchedule = "schedule"
+	WorkflowRunTriggerAPI      = "api"
 )
 
 type APIError struct {
@@ -110,6 +123,61 @@ type Job struct {
 	FinishedAt       string   `json:"finishedAt,omitempty"`
 	ConfigRevisionID string   `json:"configRevisionId,omitempty"`
 	Links            JobLinks `json:"links"`
+}
+
+type WorkflowLinks struct {
+	Self string `json:"self"`
+	Runs string `json:"runs"`
+}
+
+type Workflow struct {
+	ProjectName        string        `json:"projectName"`
+	Name               string        `json:"name"`
+	SourceImageRef     string        `json:"sourceImageRef"`
+	ResolvedRepoDigest string        `json:"resolvedRepoDigest,omitempty"`
+	RuntimeImageID     string        `json:"runtimeImageId,omitempty"`
+	Schedule           string        `json:"schedule,omitempty"`
+	QueueCap           int           `json:"queueCap"`
+	Enabled            bool          `json:"enabled"`
+	CreatedAt          string        `json:"createdAt"`
+	UpdatedAt          string        `json:"updatedAt"`
+	Links              WorkflowLinks `json:"links"`
+}
+
+type WorkflowRunLinks struct {
+	Self       string `json:"self"`
+	Logs       string `json:"logs"`
+	LogsStream string `json:"logsStream"`
+}
+
+type WorkflowRun struct {
+	ID                 string           `json:"id"`
+	ProjectName        string           `json:"projectName"`
+	WorkflowName       string           `json:"workflowName"`
+	TriggerType        string           `json:"triggerType"`
+	Status             string           `json:"status"`
+	ConfigRevisionID   string           `json:"configRevisionId,omitempty"`
+	LogPath            string           `json:"logPath,omitempty"`
+	SourceImageRef     string           `json:"sourceImageRef"`
+	ResolvedRepoDigest string           `json:"resolvedRepoDigest,omitempty"`
+	RuntimeImageID     string           `json:"runtimeImageId,omitempty"`
+	ExitCode           *int             `json:"exitCode,omitempty"`
+	ErrorMessage       string           `json:"errorMessage,omitempty"`
+	CreatedAt          string           `json:"createdAt"`
+	StartedAt          string           `json:"startedAt,omitempty"`
+	FinishedAt         string           `json:"finishedAt,omitempty"`
+	Links              WorkflowRunLinks `json:"links"`
+}
+
+type UpsertWorkflowRequest struct {
+	ImageRef string `json:"imageRef"`
+	Schedule string `json:"schedule,omitempty"`
+	Enabled  *bool  `json:"enabled,omitempty"`
+	QueueCap int    `json:"queueCap,omitempty"`
+}
+
+type CreateWorkflowRunRequest struct {
+	TriggerType string `json:"triggerType,omitempty"`
 }
 
 type CreateDeploymentRequest struct {

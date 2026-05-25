@@ -35,12 +35,16 @@ func TestOpenBrainDBCreatesDatabaseAndSchema(t *testing.T) {
 	assertTableExists(t, db, "project_config_revisions")
 	assertTableExists(t, db, "project_config_entries")
 	assertTableExists(t, db, "project_pocketbase_credentials")
+	assertTableExists(t, db, "workflows")
+	assertTableExists(t, db, "workflow_runs")
 	assertMigrationRecorded(t, db, 1)
 	assertMigrationRecorded(t, db, 2)
 	assertMigrationRecorded(t, db, 3)
 	assertMigrationRecorded(t, db, 4)
 	assertMigrationRecorded(t, db, 5)
 	assertMigrationRecorded(t, db, 6)
+	assertMigrationRecorded(t, db, 7)
+	assertMigrationRecorded(t, db, 8)
 	assertColumnExists(t, db, "jobs", "phase")
 	assertColumnExists(t, db, "jobs", "config_revision_id")
 	assertColumnExists(t, db, "jobs", "source_type")
@@ -48,6 +52,16 @@ func TestOpenBrainDBCreatesDatabaseAndSchema(t *testing.T) {
 	assertColumnExists(t, db, "deployments", "config_revision_id")
 	assertColumnExists(t, db, "deployments", "source_type")
 	assertColumnExists(t, db, "deployments", "source_ref")
+	assertColumnExists(t, db, "workflows", "source_image_ref")
+	assertColumnExists(t, db, "workflows", "resolved_repo_digest")
+	assertColumnExists(t, db, "workflows", "runtime_image_id")
+	assertColumnExists(t, db, "workflows", "schedule")
+	assertColumnExists(t, db, "workflows", "queue_cap")
+	assertColumnExists(t, db, "workflows", "enabled")
+	assertColumnExists(t, db, "workflow_runs", "trigger_type")
+	assertColumnExists(t, db, "workflow_runs", "config_revision_id")
+	assertColumnExists(t, db, "workflow_runs", "log_path")
+	assertColumnExists(t, db, "workflow_runs", "exit_code")
 }
 
 func TestOpenBrainDBIsIdempotent(t *testing.T) {
@@ -75,6 +89,8 @@ func TestOpenBrainDBIsIdempotent(t *testing.T) {
 	assertMigrationRecorded(t, db, 4)
 	assertMigrationRecorded(t, db, 5)
 	assertMigrationRecorded(t, db, 6)
+	assertMigrationRecorded(t, db, 7)
+	assertMigrationRecorded(t, db, 8)
 }
 
 func TestSourceMetadataMigrationBackfillsExistingJobsAndDeployments(t *testing.T) {

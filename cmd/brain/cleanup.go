@@ -31,6 +31,7 @@ type projectCleanupService interface {
 type projectCleanupRuntime interface {
 	ListProjectApps(ctx context.Context, projectName string) ([]projectAppRuntime, error)
 	RemoveProjectApp(ctx context.Context, deployment deploymentRecord) error
+	RemoveProjectWorkflowContainers(ctx context.Context, projectName string) error
 	RemoveProjectPocketBase(ctx context.Context, projectName string) error
 	RemoveProjectNetwork(ctx context.Context, projectName string) error
 }
@@ -85,6 +86,11 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 	if err != nil {
 		log.Printf("warning: failed to list job logs for project %q cleanup: %v", projectName, err)
 	}
+	workflowLogPaths, err := listProjectWorkflowLogPaths(cleaner.db, projectName)
+	if err != nil {
+		log.Printf("warning: failed to list workflow logs for project %q cleanup: %v", projectName, err)
+	}
+	logPaths = append(logPaths, workflowLogPaths...)
 
 	apps, err := cleaner.runtime.ListProjectApps(ctx, projectName)
 	if err != nil {
@@ -96,6 +102,11 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 		}); err != nil {
 			return fmt.Errorf("remove project app %q: %w", app.AppContainerName, err)
 		}
+	}
+	if err := retryRuntimeTeardown(ctx, "remove workflow containers for project "+projectName, func(ctx context.Context) error {
+		return cleaner.runtime.RemoveProjectWorkflowContainers(ctx, projectName)
+	}); err != nil {
+		return fmt.Errorf("remove workflow containers: %w", err)
 	}
 
 	if err := retryRuntimeTeardown(ctx, "remove PocketBase for project "+projectName, func(ctx context.Context) error {
@@ -109,6 +120,9 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 		return fmt.Errorf("remove project network: %w", err)
 	}
 	if err := clearProjectRuntimeState(cleaner.db, projectName); err != nil {
+		return err
+	}
+	if err := clearProjectWorkflowState(cleaner.db, projectName); err != nil {
 		return err
 	}
 	if cleaner.ingress != nil {
@@ -263,23 +277,25 @@ func managedJobLogPath(dataDir string, logPath string) (string, bool) {
 		return "", false
 	}
 
-	baseDir, err := filepath.Abs(filepath.Join(dataDir, jobLogsDirName))
-	if err != nil {
-		return "", false
-	}
 	candidatePath, err := filepath.Abs(logPath)
 	if err != nil {
 		return "", false
 	}
-	relativePath, err := filepath.Rel(baseDir, candidatePath)
-	if err != nil {
-		return "", false
-	}
-	if relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
-		return "", false
+	for _, logsDirName := range []string{jobLogsDirName, workflowLogsDirName} {
+		baseDir, err := filepath.Abs(filepath.Join(dataDir, logsDirName))
+		if err != nil {
+			return "", false
+		}
+		relativePath, err := filepath.Rel(baseDir, candidatePath)
+		if err != nil {
+			return "", false
+		}
+		if relativePath != "." && relativePath != ".." && !strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+			return candidatePath, true
+		}
 	}
 
-	return candidatePath, true
+	return "", false
 }
 
 func handleDeleteProjectRuntime(cleaner projectCleanupService) http.HandlerFunc {
@@ -393,6 +409,25 @@ func clearProjectRuntimeState(db *sql.DB, projectName string) error {
 	return nil
 }
 
+func clearProjectWorkflowState(db *sql.DB, projectName string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin workflow cleanup transaction: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM workflow_runs WHERE project_name = ?`, projectName); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("delete workflow runs for project %q: %w", projectName, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM workflows WHERE project_name = ?`, projectName); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("delete workflows for project %q: %w", projectName, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit workflow cleanup transaction: %w", err)
+	}
+	return nil
+}
+
 func listProjectJobLogPaths(db *sql.DB, projectName string) ([]string, error) {
 	rows, err := db.Query(
 		`SELECT log_path
@@ -419,6 +454,37 @@ func listProjectJobLogPaths(db *sql.DB, projectName string) ([]string, error) {
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate job log paths for project %q: %w", projectName, err)
+	}
+
+	return logPaths, nil
+}
+
+func listProjectWorkflowLogPaths(db *sql.DB, projectName string) ([]string, error) {
+	rows, err := db.Query(
+		`SELECT log_path
+		 FROM workflow_runs
+		 WHERE project_name = ? AND log_path IS NOT NULL
+		 ORDER BY created_at ASC`,
+		projectName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list workflow log paths for project %q: %w", projectName, err)
+	}
+	defer rows.Close()
+
+	var logPaths []string
+	for rows.Next() {
+		var logPath sql.NullString
+		if err := rows.Scan(&logPath); err != nil {
+			return nil, fmt.Errorf("scan workflow log path for project %q: %w", projectName, err)
+		}
+		if logPath.Valid {
+			logPaths = append(logPaths, logPath.String)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate workflow log paths for project %q: %w", projectName, err)
 	}
 
 	return logPaths, nil
