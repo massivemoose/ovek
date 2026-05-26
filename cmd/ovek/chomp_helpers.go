@@ -16,3 +16,7 @@ func normalizeChompError(err error) error {
 	}
 	return err
 }
+
+func ovekCommand(parts ...string) *chomp.Spec {
+	return chomp.New(append([]string{"ovek"}, parts...)...)
+}

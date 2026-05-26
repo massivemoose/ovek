@@ -9,7 +9,7 @@ Use `internal/cli/chomp` for commands that combine flags and positional
 arguments, especially when users naturally place flags after positionals:
 
 ```go
-parsed, err := chomp.New("ovek workflow set").
+parsed, err := ovekCommand("workflow", "set").
 	String("image", chomp.Required()).
 	String("schedule").
 	Positionals(2, 2, "project", "name").

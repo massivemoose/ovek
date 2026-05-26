@@ -168,7 +168,7 @@ type registryLoginArgs struct {
 }
 
 func parseRegistryLoginArgs(args []string) (registryLoginArgs, error) {
-	parsed, err := chomp.New("ovek registry login").
+	parsed, err := ovekCommand("registry", "login").
 		String("username", chomp.Required()).
 		Bool("password-stdin").
 		Positionals(1, 1, "host").
@@ -184,7 +184,7 @@ func parseRegistryLoginArgs(args []string) (registryLoginArgs, error) {
 }
 
 func parseRegistryRemoveArgs(args []string) (string, error) {
-	parsed, err := chomp.New("ovek registry rm").
+	parsed, err := ovekCommand("registry", "rm").
 		Positionals(1, 1, "host").
 		Parse(args)
 	if err != nil {

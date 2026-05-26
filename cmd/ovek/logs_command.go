@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
@@ -111,7 +110,7 @@ func (cmd *logsCommand) runJob(ctx context.Context, brainClient *client.Client, 
 }
 
 func parseLogsArgs(args []string) (string, bool, []string, error) {
-	parsed, err := chomp.New("ovek logs").
+	parsed, err := ovekCommand("logs").
 		String("job").
 		Bool("no-follow").
 		Positionals(0, 1, "project").

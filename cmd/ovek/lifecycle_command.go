@@ -8,7 +8,6 @@ import (
 	"io"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
-	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
@@ -177,7 +176,7 @@ func (cmd *removeCommand) Run(ctx context.Context, args []string) error {
 }
 
 func parseRemoveArgs(args []string) (string, bool, bool, error) {
-	parsed, err := chomp.New("ovek rm").
+	parsed, err := ovekCommand("rm").
 		Bool("remove-database").
 		Bool("delete-database-data").
 		Positionals(1, 1, "project").

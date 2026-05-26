@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
-	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
@@ -151,7 +150,7 @@ func (cmd *dbCommand) runTunnel(ctx context.Context, brainClient *client.Client,
 }
 
 func parseDatabaseInitArgs(args []string) (string, string, bool, error) {
-	parsed, err := chomp.New("ovek db init").
+	parsed, err := ovekCommand("db", "init").
 		String("email").
 		Bool("app-secrets").
 		Positionals(1, 1, "project").
@@ -164,7 +163,7 @@ func parseDatabaseInitArgs(args []string) (string, string, bool, error) {
 
 func parseDatabaseTunnelArgs(args []string) (string, string, error) {
 	listenAddress := defaultDatabaseTunnelListen
-	parsed, err := chomp.New("ovek db tunnel").
+	parsed, err := ovekCommand("db", "tunnel").
 		String("listen").
 		Positionals(1, 1, "project").
 		Parse(args)

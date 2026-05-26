@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
-	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
@@ -67,7 +66,7 @@ func (cmd *statusCommand) Usage(w io.Writer) {
 
 func parseStatusArgs(args []string) (string, []string, error) {
 	format := "auto"
-	parsed, err := chomp.New("ovek status").
+	parsed, err := ovekCommand("status").
 		String("format").
 		Positionals(0, 1, "project").
 		Parse(args)

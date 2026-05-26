@@ -91,7 +91,7 @@ type workflowSetArgs struct {
 }
 
 func parseWorkflowSetArgs(args []string) (workflowSetArgs, error) {
-	parsed, err := chomp.New("ovek workflow set").
+	parsed, err := ovekCommand("workflow", "set").
 		String("image", chomp.Required()).
 		String("schedule").
 		Positionals(2, 2, "project", "name").
@@ -256,7 +256,7 @@ func streamWorkflowLogs(ctx context.Context, stdout io.Writer, brainClient *clie
 
 func parseWorkflowLogsArgs(args []string) (bool, []string, error) {
 	follow := true
-	parsed, err := chomp.New("ovek workflow logs").
+	parsed, err := ovekCommand("workflow", "logs").
 		Bool("follow").
 		Bool("no-follow").
 		Positionals(2, 2, "project", "run-id").

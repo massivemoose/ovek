@@ -46,13 +46,23 @@ type Result struct {
 	positionals []string
 }
 
-func New(command string) *Spec {
+func New(command ...string) *Spec {
 	return &Spec{
-		command:     strings.TrimSpace(command),
+		command:     commandPath(command...),
 		flags:       make(map[string]*flagSpec),
 		minPosition: 0,
 		maxPosition: -1,
 	}
+}
+
+func commandPath(parts ...string) string {
+	trimmed := make([]string, 0, len(parts))
+	for _, part := range parts {
+		for _, field := range strings.Fields(strings.TrimSpace(part)) {
+			trimmed = append(trimmed, field)
+		}
+	}
+	return strings.Join(trimmed, " ")
 }
 
 func (spec *Spec) String(name string, options ...Option) *Spec {

@@ -34,6 +34,24 @@ func TestParseAcceptsInterspersedStringAndBoolFlags(t *testing.T) {
 	}
 }
 
+func TestNewAcceptsComposableCommandPath(t *testing.T) {
+	_, err := New("ovek", "db", "tunnel").
+		String("listen").
+		Positionals(1, 1, "project").
+		Parse([]string{"demo-app", "--listen"})
+	if err == nil || !strings.Contains(err.Error(), "ovek db tunnel --listen requires a value") {
+		t.Fatalf("expected missing value error with full command path, got %v", err)
+	}
+
+	_, err = New("ovek", "db", "tunnel").
+		String("listen").
+		Positionals(1, 1, "project").
+		Parse([]string{"demo-app", "--wat"})
+	if err == nil || !strings.Contains(err.Error(), `unknown db tunnel flag "--wat"`) {
+		t.Fatalf("expected unknown flag error with short command path, got %v", err)
+	}
+}
+
 func TestParseAcceptsFlagsBeforePositionals(t *testing.T) {
 	result, err := New("ovek db init").
 		String("email").
