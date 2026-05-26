@@ -234,7 +234,7 @@ func (cmd *workflowCommand) runRemove(ctx context.Context, brainClient *client.C
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(cmd.stdout, "Workflow %s removed from %s.\n", args[1], args[0])
+	output.WriteSuccess(cmd.stdout, fmt.Sprintf("Workflow %s removed from %s.", args[1], args[0]))
 	return nil
 }
 

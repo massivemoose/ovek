@@ -82,10 +82,11 @@ func (cmd *dbCommand) runInit(ctx context.Context, brainClient *client.Client, a
 		return err
 	}
 
-	_, _ = fmt.Fprintln(cmd.stdout, "Database initialized.")
+	output.WriteSuccess(cmd.stdout, "Database initialized.")
 	writeDatabaseStatus(cmd.stdout, status)
 	if appSecrets {
-		_, _ = fmt.Fprintln(cmd.stdout, "Environment updated. Run 'ovek run <project> <capsule-ref>' to apply changes.")
+		_, _ = fmt.Fprintln(cmd.stdout)
+		output.WriteNextStep(cmd.stdout, [][2]string{{"Apply", "ovek run <project> <capsule-ref>"}})
 	}
 	return nil
 }

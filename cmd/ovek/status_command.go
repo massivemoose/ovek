@@ -88,7 +88,7 @@ func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Clien
 
 	output.WriteSection(cmd.stdout, "Projects")
 	if len(projects) == 0 {
-		_, _ = fmt.Fprintf(cmd.stdout, "No projects found.\n")
+		output.WriteEmpty(cmd.stdout, "No projects found.")
 		return nil
 	}
 
@@ -141,7 +141,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	_, _ = fmt.Fprintln(cmd.stdout)
 	output.WriteSection(cmd.stdout, "Runtime")
 	if !hasRuntime {
-		_, _ = fmt.Fprintf(cmd.stdout, "No runtime is currently available.\n")
+		output.WriteEmpty(cmd.stdout, "No runtime is currently available.")
 	} else {
 		runtimePairs := [][2]string{
 			{"Deployment", stringOrDash(runtimeView.CurrentDeploymentID)},
@@ -155,7 +155,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	_, _ = fmt.Fprintln(cmd.stdout)
 	output.WriteSection(cmd.stdout, "Recent Jobs")
 	if len(jobs) == 0 {
-		_, _ = fmt.Fprintf(cmd.stdout, "No jobs found.\n")
+		output.WriteEmpty(cmd.stdout, "No jobs found.")
 	} else {
 		rows := make([][]string, 0, len(jobs))
 		for _, job := range jobs {
@@ -167,7 +167,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	_, _ = fmt.Fprintln(cmd.stdout)
 	output.WriteSection(cmd.stdout, "Recent Deployments")
 	if len(deployments) == 0 {
-		_, _ = fmt.Fprintf(cmd.stdout, "No deployments found.\n")
+		output.WriteEmpty(cmd.stdout, "No deployments found.")
 		return nil
 	}
 

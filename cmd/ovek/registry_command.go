@@ -86,8 +86,8 @@ func (cmd *registryCommand) runLogin(ctx context.Context, brainClient *client.Cl
 		return err
 	}
 
-	_, _ = fmt.Fprintf(cmd.stdout, "Saved registry credentials for %s\n", credential.Host)
-	_, _ = fmt.Fprintf(cmd.stdout, "Username: %s\n", credential.Username)
+	output.WriteSuccess(cmd.stdout, fmt.Sprintf("Saved registry credentials for %s", credential.Host))
+	output.WriteKeyValues(cmd.stdout, [][2]string{{"Username", credential.Username}})
 	return nil
 }
 
@@ -109,7 +109,7 @@ func (cmd *registryCommand) runList(ctx context.Context, brainClient *client.Cli
 		return err
 	}
 	if len(credentials) == 0 {
-		_, _ = fmt.Fprintln(cmd.stdout, "No registry credentials configured.")
+		output.WriteEmpty(cmd.stdout, "No registry credentials configured.")
 		return nil
 	}
 
@@ -134,7 +134,7 @@ func (cmd *registryCommand) runRemove(ctx context.Context, brainClient *client.C
 		return err
 	}
 
-	_, _ = fmt.Fprintf(cmd.stdout, "Removed registry credentials for %s\n", host)
+	output.WriteSuccess(cmd.stdout, fmt.Sprintf("Removed registry credentials for %s", host))
 	return nil
 }
 
