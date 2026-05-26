@@ -162,6 +162,21 @@ func TestParseUsesLastRepeatedFlagValue(t *testing.T) {
 	}
 }
 
+func TestParseTracksLastFlagForMutuallyExclusiveOptions(t *testing.T) {
+	result, err := New("ovek workflow logs").
+		Bool("follow").
+		Bool("no-follow").
+		Positionals(2, 2, "project", "run-id").
+		Parse([]string{"workflow-demo", "run_123", "--no-follow", "--follow"})
+	if err != nil {
+		t.Fatalf("expected parse to succeed, got error: %v", err)
+	}
+
+	if got := result.LastFlag("follow", "no-follow"); got != "follow" {
+		t.Fatalf("expected last follow flag, got %q", got)
+	}
+}
+
 func TestParseRejectsTooFewAndTooManyPositionals(t *testing.T) {
 	_, err := New("ovek workflow set").
 		String("image", Required()).

@@ -41,6 +41,8 @@ const (
 type Result struct {
 	strings     map[string]string
 	bools       map[string]bool
+	seen        map[string]bool
+	flagOrder   []string
 	positionals []string
 }
 
@@ -72,6 +74,7 @@ func (spec *Spec) Parse(args []string) (Result, error) {
 	result := Result{
 		strings: make(map[string]string),
 		bools:   make(map[string]bool),
+		seen:    make(map[string]bool),
 	}
 	parseFlags := true
 	for index := 0; index < len(args); index++ {
@@ -103,6 +106,8 @@ func (spec *Spec) Parse(args []string) (Result, error) {
 					return Result{}, fmt.Errorf("%s --%s requires a value", spec.command, name)
 				}
 				result.strings[name] = strings.TrimSpace(value)
+				result.seen[name] = true
+				result.flagOrder = append(result.flagOrder, name)
 			case flagKindBool:
 				value := true
 				if hasInlineValue {
@@ -118,6 +123,8 @@ func (spec *Spec) Parse(args []string) (Result, error) {
 					}
 				}
 				result.bools[name] = value
+				result.seen[name] = true
+				result.flagOrder = append(result.flagOrder, name)
 			}
 			continue
 		}
@@ -158,6 +165,27 @@ func (result Result) String(name string) string {
 
 func (result Result) Bool(name string) bool {
 	return result.bools[name]
+}
+
+func (result Result) IsSet(name string) bool {
+	return result.seen[name]
+}
+
+func (result Result) LastFlag(names ...string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	wanted := make(map[string]bool, len(names))
+	for _, name := range names {
+		wanted[name] = true
+	}
+	for index := len(result.flagOrder) - 1; index >= 0; index-- {
+		name := result.flagOrder[index]
+		if wanted[name] {
+			return name
+		}
+	}
+	return ""
 }
 
 func (result Result) Positionals() []string {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
@@ -66,32 +67,17 @@ func (cmd *statusCommand) Usage(w io.Writer) {
 
 func parseStatusArgs(args []string) (string, []string, error) {
 	format := "auto"
-	var positionals []string
-	for index := 0; index < len(args); index++ {
-		arg := strings.TrimSpace(args[index])
-		switch {
-		case arg == "-h" || arg == "--help":
-			return "", nil, command.ErrUsage
-		case arg == "--format":
-			index++
-			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
-				return "", nil, fmt.Errorf("ovek status --format requires a value")
-			}
-			format = strings.TrimSpace(args[index])
-		case strings.HasPrefix(arg, "--format="):
-			format = strings.TrimSpace(strings.TrimPrefix(arg, "--format="))
-			if format == "" {
-				return "", nil, fmt.Errorf("ovek status --format requires a value")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return "", nil, fmt.Errorf("unknown status flag %q", arg)
-		case arg == "":
-			positionals = append(positionals, arg)
-		default:
-			positionals = append(positionals, arg)
-		}
+	parsed, err := chomp.New("ovek status").
+		String("format").
+		Positionals(0, 1, "project").
+		Parse(args)
+	if err != nil {
+		return "", nil, normalizeChompError(err)
 	}
-	return format, positionals, nil
+	if parsed.String("format") != "" {
+		format = parsed.String("format")
+	}
+	return format, parsed.Positionals(), nil
 }
 
 func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Client, tableOptions output.TableOptions) error {

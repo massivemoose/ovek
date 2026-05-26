@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
@@ -167,56 +168,27 @@ type registryLoginArgs struct {
 }
 
 func parseRegistryLoginArgs(args []string) (registryLoginArgs, error) {
-	var parsed registryLoginArgs
-	for index := 0; index < len(args); index++ {
-		arg := strings.TrimSpace(args[index])
-		switch {
-		case arg == "-h" || arg == "--help":
-			return registryLoginArgs{}, command.ErrUsage
-		case arg == "--password-stdin":
-			parsed.passwordStdin = true
-		case arg == "--username":
-			index++
-			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
-				return registryLoginArgs{}, fmt.Errorf("ovek registry login --username requires a value")
-			}
-			parsed.username = strings.TrimSpace(args[index])
-		case strings.HasPrefix(arg, "--username="):
-			parsed.username = strings.TrimSpace(strings.TrimPrefix(arg, "--username="))
-			if parsed.username == "" {
-				return registryLoginArgs{}, fmt.Errorf("ovek registry login --username requires a value")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return registryLoginArgs{}, fmt.Errorf("unknown registry login flag %q", arg)
-		case arg == "":
-			return registryLoginArgs{}, fmt.Errorf("ovek registry login requires <host>")
-		default:
-			if parsed.host != "" {
-				return registryLoginArgs{}, fmt.Errorf("ovek registry login accepts one <host>")
-			}
-			parsed.host = arg
-		}
+	parsed, err := chomp.New("ovek registry login").
+		String("username", chomp.Required()).
+		Bool("password-stdin").
+		Positionals(1, 1, "host").
+		Parse(args)
+	if err != nil {
+		return registryLoginArgs{}, normalizeChompError(err)
 	}
-	if parsed.host == "" {
-		return registryLoginArgs{}, fmt.Errorf("ovek registry login requires <host>")
-	}
-	if parsed.username == "" {
-		return registryLoginArgs{}, fmt.Errorf("ovek registry login requires --username <user>")
-	}
-	return parsed, nil
+	return registryLoginArgs{
+		host:          parsed.Positional(0),
+		username:      parsed.String("username"),
+		passwordStdin: parsed.Bool("password-stdin"),
+	}, nil
 }
 
 func parseRegistryRemoveArgs(args []string) (string, error) {
-	flagSet := flag.NewFlagSet("ovek registry rm", flag.ContinueOnError)
-	flagSet.SetOutput(io.Discard)
-	if err := flagSet.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return "", command.ErrUsage
-		}
-		return "", err
+	parsed, err := chomp.New("ovek registry rm").
+		Positionals(1, 1, "host").
+		Parse(args)
+	if err != nil {
+		return "", normalizeChompError(err)
 	}
-	if flagSet.NArg() != 1 || strings.TrimSpace(flagSet.Arg(0)) == "" {
-		return "", fmt.Errorf("ovek registry rm requires <host>")
-	}
-	return strings.TrimSpace(flagSet.Arg(0)), nil
+	return parsed.Positional(0), nil
 }

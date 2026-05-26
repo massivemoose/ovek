@@ -6,9 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
@@ -91,52 +91,20 @@ type workflowSetArgs struct {
 }
 
 func parseWorkflowSetArgs(args []string) (workflowSetArgs, error) {
-	var parsed workflowSetArgs
-	var positionals []string
-	for index := 0; index < len(args); index++ {
-		arg := strings.TrimSpace(args[index])
-		switch {
-		case arg == "-h" || arg == "--help":
-			return workflowSetArgs{}, command.ErrUsage
-		case arg == "--image":
-			index++
-			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
-				return workflowSetArgs{}, fmt.Errorf("ovek workflow set --image requires a value")
-			}
-			parsed.imageRef = strings.TrimSpace(args[index])
-		case strings.HasPrefix(arg, "--image="):
-			parsed.imageRef = strings.TrimSpace(strings.TrimPrefix(arg, "--image="))
-			if parsed.imageRef == "" {
-				return workflowSetArgs{}, fmt.Errorf("ovek workflow set --image requires a value")
-			}
-		case arg == "--schedule":
-			index++
-			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
-				return workflowSetArgs{}, fmt.Errorf("ovek workflow set --schedule requires a value")
-			}
-			parsed.schedule = strings.TrimSpace(args[index])
-		case strings.HasPrefix(arg, "--schedule="):
-			parsed.schedule = strings.TrimSpace(strings.TrimPrefix(arg, "--schedule="))
-			if parsed.schedule == "" {
-				return workflowSetArgs{}, fmt.Errorf("ovek workflow set --schedule requires a value")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return workflowSetArgs{}, fmt.Errorf("unknown workflow set flag %q", arg)
-		case arg == "":
-			return workflowSetArgs{}, fmt.Errorf("ovek workflow set requires <project> and <name>")
-		default:
-			positionals = append(positionals, arg)
-		}
+	parsed, err := chomp.New("ovek workflow set").
+		String("image", chomp.Required()).
+		String("schedule").
+		Positionals(2, 2, "project", "name").
+		Parse(args)
+	if err != nil {
+		return workflowSetArgs{}, normalizeChompError(err)
 	}
-	if len(positionals) != 2 {
-		return workflowSetArgs{}, fmt.Errorf("ovek workflow set requires <project> and <name>")
-	}
-	if strings.TrimSpace(parsed.imageRef) == "" {
-		return workflowSetArgs{}, fmt.Errorf("ovek workflow set requires --image")
-	}
-	parsed.projectName = positionals[0]
-	parsed.workflowName = positionals[1]
-	return parsed, nil
+	return workflowSetArgs{
+		projectName:  parsed.Positional(0),
+		workflowName: parsed.Positional(1),
+		imageRef:     parsed.String("image"),
+		schedule:     parsed.String("schedule"),
+	}, nil
 }
 
 func (cmd *workflowCommand) runRun(ctx context.Context, brainClient *client.Client, args []string) error {
@@ -288,18 +256,21 @@ func streamWorkflowLogs(ctx context.Context, stdout io.Writer, brainClient *clie
 
 func parseWorkflowLogsArgs(args []string) (bool, []string, error) {
 	follow := true
-	var positionals []string
-	for _, arg := range args {
-		switch arg {
-		case "--follow":
-			follow = true
-		case "--no-follow":
-			follow = false
-		default:
-			positionals = append(positionals, arg)
-		}
+	parsed, err := chomp.New("ovek workflow logs").
+		Bool("follow").
+		Bool("no-follow").
+		Positionals(2, 2, "project", "run-id").
+		Parse(args)
+	if err != nil {
+		return false, nil, normalizeChompError(err)
 	}
-	return follow, positionals, nil
+	switch parsed.LastFlag("follow", "no-follow") {
+	case "follow":
+		follow = true
+	case "no-follow":
+		follow = false
+	}
+	return follow, parsed.Positionals(), nil
 }
 
 func workflowDefinitionPairs(workflow brainapi.Workflow) [][2]string {
