@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
+	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"
@@ -85,8 +86,8 @@ func (cmd *registryCommand) runLogin(ctx context.Context, brainClient *client.Cl
 		return err
 	}
 
-	_, _ = fmt.Fprintf(cmd.stdout, "Saved registry credentials for %s\n", credential.Host)
-	_, _ = fmt.Fprintf(cmd.stdout, "Username: %s\n", credential.Username)
+	output.WriteSuccess(cmd.stdout, fmt.Sprintf("Saved registry credentials for %s", credential.Host))
+	output.WriteKeyValues(cmd.stdout, [][2]string{{"Username", credential.Username}})
 	return nil
 }
 
@@ -108,7 +109,7 @@ func (cmd *registryCommand) runList(ctx context.Context, brainClient *client.Cli
 		return err
 	}
 	if len(credentials) == 0 {
-		_, _ = fmt.Fprintln(cmd.stdout, "No registry credentials configured.")
+		output.WriteEmpty(cmd.stdout, "No registry credentials configured.")
 		return nil
 	}
 
@@ -133,7 +134,7 @@ func (cmd *registryCommand) runRemove(ctx context.Context, brainClient *client.C
 		return err
 	}
 
-	_, _ = fmt.Fprintf(cmd.stdout, "Removed registry credentials for %s\n", host)
+	output.WriteSuccess(cmd.stdout, fmt.Sprintf("Removed registry credentials for %s", host))
 	return nil
 }
 
@@ -167,56 +168,27 @@ type registryLoginArgs struct {
 }
 
 func parseRegistryLoginArgs(args []string) (registryLoginArgs, error) {
-	var parsed registryLoginArgs
-	for index := 0; index < len(args); index++ {
-		arg := strings.TrimSpace(args[index])
-		switch {
-		case arg == "-h" || arg == "--help":
-			return registryLoginArgs{}, command.ErrUsage
-		case arg == "--password-stdin":
-			parsed.passwordStdin = true
-		case arg == "--username":
-			index++
-			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
-				return registryLoginArgs{}, fmt.Errorf("ovek registry login --username requires a value")
-			}
-			parsed.username = strings.TrimSpace(args[index])
-		case strings.HasPrefix(arg, "--username="):
-			parsed.username = strings.TrimSpace(strings.TrimPrefix(arg, "--username="))
-			if parsed.username == "" {
-				return registryLoginArgs{}, fmt.Errorf("ovek registry login --username requires a value")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return registryLoginArgs{}, fmt.Errorf("unknown registry login flag %q", arg)
-		case arg == "":
-			return registryLoginArgs{}, fmt.Errorf("ovek registry login requires <host>")
-		default:
-			if parsed.host != "" {
-				return registryLoginArgs{}, fmt.Errorf("ovek registry login accepts one <host>")
-			}
-			parsed.host = arg
-		}
+	parsed, err := ovekCommand("registry", "login").
+		String("username", chomp.Required()).
+		Bool("password-stdin").
+		Positionals(1, 1, "host").
+		Parse(args)
+	if err != nil {
+		return registryLoginArgs{}, normalizeChompError(err)
 	}
-	if parsed.host == "" {
-		return registryLoginArgs{}, fmt.Errorf("ovek registry login requires <host>")
-	}
-	if parsed.username == "" {
-		return registryLoginArgs{}, fmt.Errorf("ovek registry login requires --username <user>")
-	}
-	return parsed, nil
+	return registryLoginArgs{
+		host:          parsed.Positional(0),
+		username:      parsed.String("username"),
+		passwordStdin: parsed.Bool("password-stdin"),
+	}, nil
 }
 
 func parseRegistryRemoveArgs(args []string) (string, error) {
-	flagSet := flag.NewFlagSet("ovek registry rm", flag.ContinueOnError)
-	flagSet.SetOutput(io.Discard)
-	if err := flagSet.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return "", command.ErrUsage
-		}
-		return "", err
+	parsed, err := ovekCommand("registry", "rm").
+		Positionals(1, 1, "host").
+		Parse(args)
+	if err != nil {
+		return "", normalizeChompError(err)
 	}
-	if flagSet.NArg() != 1 || strings.TrimSpace(flagSet.Arg(0)) == "" {
-		return "", fmt.Errorf("ovek registry rm requires <host>")
-	}
-	return strings.TrimSpace(flagSet.Arg(0)), nil
+	return parsed.Positional(0), nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
@@ -111,29 +110,13 @@ func (cmd *logsCommand) runJob(ctx context.Context, brainClient *client.Client, 
 }
 
 func parseLogsArgs(args []string) (string, bool, []string, error) {
-	var jobID string
-	var noFollow bool
-	positionals := make([]string, 0, len(args))
-
-	for index := 0; index < len(args); index++ {
-		switch args[index] {
-		case "-h", "--help", "help":
-			return "", false, nil, command.ErrUsage
-		case "--no-follow":
-			noFollow = true
-		case "--job":
-			index++
-			if index >= len(args) {
-				return "", false, nil, fmt.Errorf("ovek logs --job requires a job ID")
-			}
-			jobID = strings.TrimSpace(args[index])
-			if jobID == "" {
-				return "", false, nil, fmt.Errorf("ovek logs --job requires a non-empty job ID")
-			}
-		default:
-			positionals = append(positionals, args[index])
-		}
+	parsed, err := ovekCommand("logs").
+		String("job").
+		Bool("no-follow").
+		Positionals(0, 1, "project").
+		Parse(args)
+	if err != nil {
+		return "", false, nil, normalizeChompError(err)
 	}
-
-	return jobID, noFollow, positionals, nil
+	return parsed.String("job"), parsed.Bool("no-follow"), parsed.Positionals(), nil
 }

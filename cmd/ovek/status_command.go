@@ -66,32 +66,17 @@ func (cmd *statusCommand) Usage(w io.Writer) {
 
 func parseStatusArgs(args []string) (string, []string, error) {
 	format := "auto"
-	var positionals []string
-	for index := 0; index < len(args); index++ {
-		arg := strings.TrimSpace(args[index])
-		switch {
-		case arg == "-h" || arg == "--help":
-			return "", nil, command.ErrUsage
-		case arg == "--format":
-			index++
-			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
-				return "", nil, fmt.Errorf("ovek status --format requires a value")
-			}
-			format = strings.TrimSpace(args[index])
-		case strings.HasPrefix(arg, "--format="):
-			format = strings.TrimSpace(strings.TrimPrefix(arg, "--format="))
-			if format == "" {
-				return "", nil, fmt.Errorf("ovek status --format requires a value")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return "", nil, fmt.Errorf("unknown status flag %q", arg)
-		case arg == "":
-			positionals = append(positionals, arg)
-		default:
-			positionals = append(positionals, arg)
-		}
+	parsed, err := ovekCommand("status").
+		String("format").
+		Positionals(0, 1, "project").
+		Parse(args)
+	if err != nil {
+		return "", nil, normalizeChompError(err)
 	}
-	return format, positionals, nil
+	if parsed.String("format") != "" {
+		format = parsed.String("format")
+	}
+	return format, parsed.Positionals(), nil
 }
 
 func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Client, tableOptions output.TableOptions) error {
@@ -102,7 +87,7 @@ func (cmd *statusCommand) runList(ctx context.Context, brainClient *client.Clien
 
 	output.WriteSection(cmd.stdout, "Projects")
 	if len(projects) == 0 {
-		_, _ = fmt.Fprintf(cmd.stdout, "No projects found.\n")
+		output.WriteEmpty(cmd.stdout, "No projects found.")
 		return nil
 	}
 
@@ -155,7 +140,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	_, _ = fmt.Fprintln(cmd.stdout)
 	output.WriteSection(cmd.stdout, "Runtime")
 	if !hasRuntime {
-		_, _ = fmt.Fprintf(cmd.stdout, "No runtime is currently available.\n")
+		output.WriteEmpty(cmd.stdout, "No runtime is currently available.")
 	} else {
 		runtimePairs := [][2]string{
 			{"Deployment", stringOrDash(runtimeView.CurrentDeploymentID)},
@@ -169,7 +154,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	_, _ = fmt.Fprintln(cmd.stdout)
 	output.WriteSection(cmd.stdout, "Recent Jobs")
 	if len(jobs) == 0 {
-		_, _ = fmt.Fprintf(cmd.stdout, "No jobs found.\n")
+		output.WriteEmpty(cmd.stdout, "No jobs found.")
 	} else {
 		rows := make([][]string, 0, len(jobs))
 		for _, job := range jobs {
@@ -181,7 +166,7 @@ func (cmd *statusCommand) runProject(ctx context.Context, brainClient *client.Cl
 	_, _ = fmt.Fprintln(cmd.stdout)
 	output.WriteSection(cmd.stdout, "Recent Deployments")
 	if len(deployments) == 0 {
-		_, _ = fmt.Fprintf(cmd.stdout, "No deployments found.\n")
+		output.WriteEmpty(cmd.stdout, "No deployments found.")
 		return nil
 	}
 

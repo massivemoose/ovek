@@ -81,10 +81,11 @@ func (cmd *dbCommand) runInit(ctx context.Context, brainClient *client.Client, a
 		return err
 	}
 
-	_, _ = fmt.Fprintln(cmd.stdout, "Database initialized.")
+	output.WriteSuccess(cmd.stdout, "Database initialized.")
 	writeDatabaseStatus(cmd.stdout, status)
 	if appSecrets {
-		_, _ = fmt.Fprintln(cmd.stdout, "Environment updated. Run 'ovek run <project> <capsule-ref>' to apply changes.")
+		_, _ = fmt.Fprintln(cmd.stdout)
+		output.WriteNextStep(cmd.stdout, [][2]string{{"Apply", "ovek run <project> <capsule-ref>"}})
 	}
 	return nil
 }
@@ -149,92 +150,30 @@ func (cmd *dbCommand) runTunnel(ctx context.Context, brainClient *client.Client,
 }
 
 func parseDatabaseInitArgs(args []string) (string, string, bool, error) {
-	var projectName string
-	var email string
-	appSecrets := false
-
-	for index := 0; index < len(args); index++ {
-		arg := strings.TrimSpace(args[index])
-		switch {
-		case arg == "-h" || arg == "--help":
-			return "", "", false, command.ErrUsage
-		case arg == "--app-secrets":
-			appSecrets = true
-		case strings.HasPrefix(arg, "--app-secrets="):
-			value := strings.TrimPrefix(arg, "--app-secrets=")
-			switch strings.ToLower(value) {
-			case "true", "1", "yes":
-				appSecrets = true
-			case "false", "0", "no":
-				appSecrets = false
-			default:
-				return "", "", false, fmt.Errorf("invalid --app-secrets value %q", value)
-			}
-		case arg == "--email":
-			index++
-			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
-				return "", "", false, fmt.Errorf("ovek db init --email requires a value")
-			}
-			email = strings.TrimSpace(args[index])
-		case strings.HasPrefix(arg, "--email="):
-			email = strings.TrimSpace(strings.TrimPrefix(arg, "--email="))
-			if email == "" {
-				return "", "", false, fmt.Errorf("ovek db init --email requires a value")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return "", "", false, fmt.Errorf("unknown db init flag %q", arg)
-		case arg == "":
-			return "", "", false, fmt.Errorf("ovek db init requires <project>")
-		default:
-			if projectName != "" {
-				return "", "", false, fmt.Errorf("ovek db init accepts one <project>")
-			}
-			projectName = arg
-		}
+	parsed, err := ovekCommand("db", "init").
+		String("email").
+		Bool("app-secrets").
+		Positionals(1, 1, "project").
+		Parse(args)
+	if err != nil {
+		return "", "", false, normalizeChompError(err)
 	}
-
-	if projectName == "" {
-		return "", "", false, fmt.Errorf("ovek db init requires <project>")
-	}
-	return projectName, email, appSecrets, nil
+	return parsed.Positional(0), parsed.String("email"), parsed.Bool("app-secrets"), nil
 }
 
 func parseDatabaseTunnelArgs(args []string) (string, string, error) {
-	var projectName string
 	listenAddress := defaultDatabaseTunnelListen
-
-	for index := 0; index < len(args); index++ {
-		arg := strings.TrimSpace(args[index])
-		switch {
-		case arg == "-h" || arg == "--help":
-			return "", "", command.ErrUsage
-		case arg == "--listen":
-			index++
-			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
-				return "", "", fmt.Errorf("ovek db tunnel --listen requires a value")
-			}
-			listenAddress = strings.TrimSpace(args[index])
-		case strings.HasPrefix(arg, "--listen="):
-			listenAddress = strings.TrimSpace(strings.TrimPrefix(arg, "--listen="))
-			if listenAddress == "" {
-				return "", "", fmt.Errorf("ovek db tunnel --listen requires a value")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return "", "", fmt.Errorf("unknown db tunnel flag %q", arg)
-		case arg == "":
-			return "", "", fmt.Errorf("ovek db tunnel requires <project>")
-		default:
-			if projectName != "" {
-				return "", "", fmt.Errorf("ovek db tunnel accepts one <project>")
-			}
-			projectName = arg
-		}
+	parsed, err := ovekCommand("db", "tunnel").
+		String("listen").
+		Positionals(1, 1, "project").
+		Parse(args)
+	if err != nil {
+		return "", "", normalizeChompError(err)
 	}
-
-	if projectName == "" {
-		return "", "", fmt.Errorf("ovek db tunnel requires <project>")
+	if parsed.String("listen") != "" {
+		listenAddress = parsed.String("listen")
 	}
-	return projectName, listenAddress, nil
+	return parsed.Positional(0), listenAddress, nil
 }
 
 func runDatabaseInitMutation(ctx context.Context, brainClient *client.Client, prompts prompter, mutate func() (brainapi.ProjectPocketBaseStatus, error)) (brainapi.ProjectPocketBaseStatus, error) {

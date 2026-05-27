@@ -147,6 +147,46 @@ func TestRemoveCommandReportsNothingToRemoveWithoutCallingDelete(t *testing.T) {
 	}
 }
 
+func TestRemoveCommandAcceptsFalseDatabaseFlagValues(t *testing.T) {
+	deleteCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects/demo-app/runtime":
+			_ = json.NewEncoder(w).Encode(brainapi.ProjectRuntime{
+				ProjectName: "demo-app",
+				App:         &brainapi.ProjectRuntimeApp{ContainerName: "ovek-demo-app-app-dep_123"},
+				PocketBase:  &brainapi.ProjectRuntimeContainer{ContainerName: "ovek-demo-app-pb", Running: true},
+			})
+		case "/v1/projects/demo-app/runtime/app":
+			deleteCalled = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	store := config.NewStore(t.TempDir())
+	if err := store.SaveProfile("default", config.Profile{Host: server.URL, APIKey: "test-key"}, true); err != nil {
+		t.Fatalf("expected config save to succeed, got error: %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode := runWithStore(context.Background(), []string{
+		"rm", "--remove-database=false", "--delete-database-data=false", "demo-app",
+	}, &stdout, &stderr, store)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %q", exitCode, stderr.String())
+	}
+	if !deleteCalled {
+		t.Fatal("expected app runtime delete endpoint to be called")
+	}
+	if strings.Contains(stdout.String(), "Type \"demo-app\"") {
+		t.Fatalf("expected no database removal prompt, got %q", stdout.String())
+	}
+}
+
 func TestRemoveCommandRequiresProjectNameConfirmationForDatabaseRemoval(t *testing.T) {
 	deleteCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

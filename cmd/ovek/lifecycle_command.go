@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/massivemoose/ovek/internal/brainapi"
 	"github.com/massivemoose/ovek/internal/cli/client"
@@ -177,30 +176,17 @@ func (cmd *removeCommand) Run(ctx context.Context, args []string) error {
 }
 
 func parseRemoveArgs(args []string) (string, bool, bool, error) {
-	var projectName string
-	removeDatabase := false
-	deleteDatabaseData := false
-	for _, arg := range args {
-		switch arg {
-		case "-h", "--help":
-			return "", false, false, command.ErrUsage
-		case "--remove-database":
-			removeDatabase = true
-		case "--delete-database-data":
-			deleteDatabaseData = true
-		default:
-			if strings.HasPrefix(arg, "-") {
-				return "", false, false, fmt.Errorf("unknown rm flag %q", arg)
-			}
-			if projectName != "" {
-				return "", false, false, fmt.Errorf("ovek rm accepts one <project>")
-			}
-			projectName = arg
-		}
+	parsed, err := ovekCommand("rm").
+		Bool("remove-database").
+		Bool("delete-database-data").
+		Positionals(1, 1, "project").
+		Parse(args)
+	if err != nil {
+		return "", false, false, normalizeChompError(err)
 	}
-	if projectName == "" {
-		return "", false, false, fmt.Errorf("ovek rm requires <project>")
-	}
+	projectName := parsed.Positional(0)
+	removeDatabase := parsed.Bool("remove-database")
+	deleteDatabaseData := parsed.Bool("delete-database-data")
 	if deleteDatabaseData && !removeDatabase {
 		return "", false, false, fmt.Errorf("ovek rm --delete-database-data requires --remove-database")
 	}

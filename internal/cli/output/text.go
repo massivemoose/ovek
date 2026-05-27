@@ -11,6 +11,31 @@ func WriteSection(w io.Writer, title string) {
 	_, _ = fmt.Fprintf(w, "%s\n", title)
 }
 
+func WriteSuccess(w io.Writer, message string) {
+	_, _ = fmt.Fprintf(w, "%s\n", message)
+}
+
+func WriteEmpty(w io.Writer, message string) {
+	_, _ = fmt.Fprintf(w, "%s\n", message)
+}
+
+func WriteNote(w io.Writer, message string) {
+	_, _ = fmt.Fprintf(w, "Note: %s\n", message)
+}
+
+func WriteWarning(w io.Writer, message string) {
+	_, _ = fmt.Fprintf(w, "Warning: %s\n", message)
+}
+
+func WriteNextStep(w io.Writer, pairs [][2]string) {
+	WriteSection(w, "Next Step")
+	WriteKeyValues(w, pairs)
+}
+
+func WriteCommandSuggestion(w io.Writer, label string, command string) {
+	WriteKeyValues(w, [][2]string{{label, command}})
+}
+
 func WriteKeyValues(w io.Writer, pairs [][2]string) {
 	maxKeyLength := 0
 	for _, pair := range pairs {

@@ -68,7 +68,9 @@ func TestDatabaseInitSendsRequestAndPrintsStatus(t *testing.T) {
 		"admin@example.com",
 		"Revision",
 		"rev_pb",
-		"Environment updated. Run 'ovek run <project> <capsule-ref>' to apply changes.",
+		"Next Step",
+		"Apply",
+		"ovek run <project> <capsule-ref>",
 	} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("expected output to contain %q, got %q", fragment, output)

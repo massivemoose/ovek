@@ -64,3 +64,40 @@ func TestWriteAdaptiveTableUsesRecordsWhenTooWide(t *testing.T) {
 		t.Fatalf("expected record output, got table output %q", text)
 	}
 }
+
+func TestWriteStatusMessagesArePlainText(t *testing.T) {
+	var body strings.Builder
+	WriteSuccess(&body, "Database initialized.")
+	WriteEmpty(&body, "No projects found.")
+	WriteNote(&body, "Run status again after deploy.")
+	WriteWarning(&body, "Runtime is stopped.")
+
+	want := "Database initialized.\nNo projects found.\nNote: Run status again after deploy.\nWarning: Runtime is stopped.\n"
+	if got := body.String(); got != want {
+		t.Fatalf("expected status messages %q, got %q", want, got)
+	}
+}
+
+func TestWriteNextStepRendersSectionAndDetails(t *testing.T) {
+	var body strings.Builder
+	WriteNextStep(&body, [][2]string{
+		{"Apply", "ovek run demo-app ghcr.io/example/app:latest"},
+	})
+
+	text := body.String()
+	for _, fragment := range []string{"Next Step", "Apply", "ovek run demo-app ghcr.io/example/app:latest"} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("expected next step output to contain %q, got %q", fragment, text)
+		}
+	}
+}
+
+func TestWriteCommandSuggestionRendersLabelAndCommand(t *testing.T) {
+	var body strings.Builder
+	WriteCommandSuggestion(&body, "Inspect Logs", "ovek logs demo-app --no-follow")
+
+	want := "Inspect Logs  ovek logs demo-app --no-follow\n"
+	if got := body.String(); got != want {
+		t.Fatalf("expected command suggestion %q, got %q", want, got)
+	}
+}
