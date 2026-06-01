@@ -53,13 +53,15 @@ func (cmd *workflowCommand) Run(ctx context.Context, args []string) error {
 		return cmd.runLogs(ctx, brainClient, args[1:])
 	case "rm":
 		return cmd.runRemove(ctx, brainClient, args[1:])
+	case "token":
+		return cmd.runToken(ctx, brainClient, args[1:])
 	default:
 		return fmt.Errorf("unknown workflow subcommand %q", args[0])
 	}
 }
 
 func (cmd *workflowCommand) Usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Usage:\n  ovek workflow set <project> <name> --image <capsule-ref> [--schedule '<cron>']\n  ovek workflow run <project> <name>\n  ovek workflow list <project>\n  ovek workflow status <project> [<name>]\n  ovek workflow logs <project> <run-id> [--follow|--no-follow]\n  ovek workflow rm <project> <name>\n")
+	_, _ = fmt.Fprintf(w, "Usage:\n  ovek workflow set <project> <name> --image <capsule-ref> [--schedule '<cron>']\n  ovek workflow run <project> <name>\n  ovek workflow list <project>\n  ovek workflow status <project> [<name>]\n  ovek workflow logs <project> <run-id> [--follow|--no-follow]\n  ovek workflow token create <project> <workflow> --label <label>\n  ovek workflow token list <project> <workflow>\n  ovek workflow token rm <project> <workflow> <token-id>\n  ovek workflow rm <project> <name>\n")
 }
 
 func (cmd *workflowCommand) runSet(ctx context.Context, brainClient *client.Client, args []string) error {
@@ -236,6 +238,130 @@ func (cmd *workflowCommand) runRemove(ctx context.Context, brainClient *client.C
 	}
 	output.WriteSuccess(cmd.stdout, fmt.Sprintf("Workflow %s removed from %s.", args[1], args[0]))
 	return nil
+}
+
+func (cmd *workflowCommand) runToken(ctx context.Context, brainClient *client.Client, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("ovek workflow token requires create, list, or rm")
+	}
+	switch args[0] {
+	case "create":
+		return cmd.runTokenCreate(ctx, brainClient, args[1:])
+	case "list":
+		return cmd.runTokenList(ctx, brainClient, args[1:])
+	case "rm":
+		return cmd.runTokenRemove(ctx, brainClient, args[1:])
+	default:
+		return fmt.Errorf("unknown workflow token subcommand %q", args[0])
+	}
+}
+
+func (cmd *workflowCommand) runTokenCreate(ctx context.Context, brainClient *client.Client, args []string) error {
+	tokenArgs, err := parseWorkflowTokenCreateArgs(args)
+	if err != nil {
+		return err
+	}
+	token, err := runReauthMutation(ctx, brainClient, cmd.prompts, func() (brainapi.CreateWorkflowTriggerTokenResponse, error) {
+		return brainClient.CreateWorkflowTriggerToken(ctx, tokenArgs.projectName, tokenArgs.workflowName, brainapi.CreateWorkflowTriggerTokenRequest{Label: tokenArgs.label})
+	})
+	if err != nil {
+		return err
+	}
+
+	output.WriteSection(cmd.stdout, "Workflow Token")
+	output.WriteKeyValues(cmd.stdout, [][2]string{
+		{"Project", token.ProjectName},
+		{"Workflow", token.WorkflowName},
+		{"Token ID", token.ID},
+		{"Label", token.Label},
+		{"Token", token.Token},
+		{"Created", token.CreatedAt},
+	})
+	output.WriteWarning(cmd.stdout, "This token is shown once. Store it as a project secret before closing this terminal.")
+	return nil
+}
+
+type workflowTokenCreateArgs struct {
+	projectName  string
+	workflowName string
+	label        string
+}
+
+func parseWorkflowTokenCreateArgs(args []string) (workflowTokenCreateArgs, error) {
+	parsed, err := ovekCommand("workflow", "token", "create").
+		String("label", chomp.Required()).
+		Positionals(2, 2, "project", "workflow").
+		Parse(args)
+	if err != nil {
+		return workflowTokenCreateArgs{}, normalizeChompError(err)
+	}
+	return workflowTokenCreateArgs{
+		projectName:  parsed.Positional(0),
+		workflowName: parsed.Positional(1),
+		label:        parsed.String("label"),
+	}, nil
+}
+
+func (cmd *workflowCommand) runTokenList(ctx context.Context, brainClient *client.Client, args []string) error {
+	projectName, workflowName, err := parseWorkflowTokenProjectArgs("list", args)
+	if err != nil {
+		return err
+	}
+	tokens, err := brainClient.ListWorkflowTriggerTokens(ctx, projectName, workflowName)
+	if err != nil {
+		return err
+	}
+	rows := make([][]string, 0, len(tokens))
+	for _, token := range tokens {
+		rows = append(rows, []string{token.ID, token.Label, valueOrDash(token.CreatedAt), valueOrDash(token.LastUsedAt), valueOrDash(token.RevokedAt)})
+	}
+	output.WriteTable(cmd.stdout, []string{"Token ID", "Label", "Created", "Last Used", "Revoked"}, rows)
+	return nil
+}
+
+func parseWorkflowTokenProjectArgs(subcommand string, args []string) (string, string, error) {
+	parsed, err := ovekCommand("workflow", "token", subcommand).
+		Positionals(2, 2, "project", "workflow").
+		Parse(args)
+	if err != nil {
+		return "", "", normalizeChompError(err)
+	}
+	return parsed.Positional(0), parsed.Positional(1), nil
+}
+
+func (cmd *workflowCommand) runTokenRemove(ctx context.Context, brainClient *client.Client, args []string) error {
+	tokenArgs, err := parseWorkflowTokenRemoveArgs(args)
+	if err != nil {
+		return err
+	}
+	_, err = runReauthMutation(ctx, brainClient, cmd.prompts, func() (struct{}, error) {
+		return struct{}{}, brainClient.DeleteWorkflowTriggerToken(ctx, tokenArgs.projectName, tokenArgs.workflowName, tokenArgs.tokenID)
+	})
+	if err != nil {
+		return err
+	}
+	output.WriteSuccess(cmd.stdout, fmt.Sprintf("Workflow token %s removed from %s/%s.", tokenArgs.tokenID, tokenArgs.projectName, tokenArgs.workflowName))
+	return nil
+}
+
+type workflowTokenRemoveArgs struct {
+	projectName  string
+	workflowName string
+	tokenID      string
+}
+
+func parseWorkflowTokenRemoveArgs(args []string) (workflowTokenRemoveArgs, error) {
+	parsed, err := ovekCommand("workflow", "token", "rm").
+		Positionals(3, 3, "project", "workflow", "token-id").
+		Parse(args)
+	if err != nil {
+		return workflowTokenRemoveArgs{}, normalizeChompError(err)
+	}
+	return workflowTokenRemoveArgs{
+		projectName:  parsed.Positional(0),
+		workflowName: parsed.Positional(1),
+		tokenID:      parsed.Positional(2),
+	}, nil
 }
 
 func streamWorkflowLogs(ctx context.Context, stdout io.Writer, brainClient *client.Client, projectName string, runID string) error {

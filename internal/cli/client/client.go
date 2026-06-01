@@ -733,6 +733,65 @@ func (client *Client) DeleteWorkflow(ctx context.Context, projectName string, wo
 	return decodeAPIError(response)
 }
 
+func (client *Client) CreateWorkflowTriggerToken(ctx context.Context, projectName string, workflowName string, requestBody brainapi.CreateWorkflowTriggerTokenRequest) (brainapi.CreateWorkflowTriggerTokenResponse, error) {
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return brainapi.CreateWorkflowTriggerTokenResponse{}, fmt.Errorf("marshal workflow trigger token request: %w", err)
+	}
+
+	request, err := client.newRequest(ctx, http.MethodPost, brainapi.ProjectWorkflowTriggerTokensPath(strings.TrimSpace(projectName), strings.TrimSpace(workflowName)), bytes.NewReader(payload))
+	if err != nil {
+		return brainapi.CreateWorkflowTriggerTokenResponse{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return brainapi.CreateWorkflowTriggerTokenResponse{}, err
+	}
+	defer response.Body.Close()
+
+	if err := decodeAPIError(response); err != nil {
+		return brainapi.CreateWorkflowTriggerTokenResponse{}, err
+	}
+
+	var token brainapi.CreateWorkflowTriggerTokenResponse
+	if err := json.NewDecoder(response.Body).Decode(&token); err != nil {
+		return brainapi.CreateWorkflowTriggerTokenResponse{}, fmt.Errorf("decode workflow trigger token response: %w", err)
+	}
+
+	return token, nil
+}
+
+func (client *Client) ListWorkflowTriggerTokens(ctx context.Context, projectName string, workflowName string) ([]brainapi.WorkflowTriggerTokenSummary, error) {
+	responseBody, err := client.getJSON(ctx, brainapi.ProjectWorkflowTriggerTokensPath(strings.TrimSpace(projectName), strings.TrimSpace(workflowName)))
+	if err != nil {
+		return nil, err
+	}
+
+	var tokens []brainapi.WorkflowTriggerTokenSummary
+	if err := json.Unmarshal(responseBody, &tokens); err != nil {
+		return nil, fmt.Errorf("decode workflow trigger tokens response: %w", err)
+	}
+
+	return tokens, nil
+}
+
+func (client *Client) DeleteWorkflowTriggerToken(ctx context.Context, projectName string, workflowName string, tokenID string) error {
+	request, err := client.newRequest(ctx, http.MethodDelete, brainapi.ProjectWorkflowTriggerTokenPath(strings.TrimSpace(projectName), strings.TrimSpace(workflowName), strings.TrimSpace(tokenID)), nil)
+	if err != nil {
+		return err
+	}
+
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	return decodeAPIError(response)
+}
+
 func (client *Client) CreateWorkflowRun(ctx context.Context, projectName string, workflowName string, requestBody brainapi.CreateWorkflowRunRequest) (brainapi.WorkflowRun, error) {
 	payload, err := json.Marshal(requestBody)
 	if err != nil {

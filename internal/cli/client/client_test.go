@@ -123,6 +123,61 @@ func TestCreateRunPostsCapsuleRef(t *testing.T) {
 	}
 }
 
+func TestWorkflowTriggerTokenClientMethods(t *testing.T) {
+	var created bool
+	var listed bool
+	var deleted bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/demo-app/workflows/digest/tokens":
+			created = true
+			var request brainapi.CreateWorkflowTriggerTokenRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("expected create request to decode, got error: %v", err)
+			}
+			if request.Label != "app" {
+				t.Fatalf("expected label %q, got %q", "app", request.Label)
+			}
+			_ = json.NewEncoder(w).Encode(brainapi.CreateWorkflowTriggerTokenResponse{ID: "tok_123", Token: "wft_tok_123_secret", Label: request.Label})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/demo-app/workflows/digest/tokens":
+			listed = true
+			_ = json.NewEncoder(w).Encode([]brainapi.WorkflowTriggerTokenSummary{{ID: "tok_123", Label: "app"}})
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/projects/demo-app/workflows/digest/tokens/tok_123":
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("expected client to construct, got error: %v", err)
+	}
+
+	token, err := client.CreateWorkflowTriggerToken(context.Background(), "demo-app", "digest", brainapi.CreateWorkflowTriggerTokenRequest{Label: "app"})
+	if err != nil {
+		t.Fatalf("expected token create to succeed, got error: %v", err)
+	}
+	if token.Token != "wft_tok_123_secret" {
+		t.Fatalf("expected plaintext token response, got %#v", token)
+	}
+	tokens, err := client.ListWorkflowTriggerTokens(context.Background(), "demo-app", "digest")
+	if err != nil {
+		t.Fatalf("expected token list to succeed, got error: %v", err)
+	}
+	if len(tokens) != 1 || tokens[0].ID != "tok_123" {
+		t.Fatalf("expected token metadata, got %#v", tokens)
+	}
+	if err := client.DeleteWorkflowTriggerToken(context.Background(), "demo-app", "digest", "tok_123"); err != nil {
+		t.Fatalf("expected token delete to succeed, got error: %v", err)
+	}
+	if !created || !listed || !deleted {
+		t.Fatalf("expected create/list/delete calls, got create=%t list=%t delete=%t", created, listed, deleted)
+	}
+}
+
 func TestBootstrapDecodesResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(brainapi.BootstrapAuthResponse{
