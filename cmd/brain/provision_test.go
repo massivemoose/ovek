@@ -60,6 +60,9 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	if provisioner.appImageRef != "ovek-demo-app:job-123" {
 		t.Fatalf("expected app image ref %q, got %q", "ovek-demo-app:job-123", provisioner.appImageRef)
 	}
+	if len(provisioner.appEnv) == 0 || provisioner.appEnv[0] != "OVEK_BRAIN_URL=http://brain:8081" {
+		t.Fatalf("expected default Brain URL env first, got %#v", provisioner.appEnv)
+	}
 	if provisioner.readyCalls != 1 {
 		t.Fatalf("expected readiness to be checked once, got %d", provisioner.readyCalls)
 	}
@@ -71,6 +74,34 @@ func TestManagedDeploymentProcessorEnsuresPocketBaseAfterBuild(t *testing.T) {
 	}
 	if got := provisioner.sequence; len(got) != 3 || got[0] != "pocketbase" || got[1] != "app" || got[2] != "ready" {
 		t.Fatalf("expected provisioner order [pocketbase app ready], got %#v", got)
+	}
+}
+
+func TestManagedDeploymentProcessorUsesConfiguredAppBrainURL(t *testing.T) {
+	db := newTestDB(t)
+	logPath := filepath.Join(t.TempDir(), "job.log")
+	if err := os.WriteFile(logPath, []byte("build output\n"), 0o644); err != nil {
+		t.Fatalf("expected log file seed to succeed, got error: %v", err)
+	}
+	builder := processorFunc(func(_ context.Context, job job) (deploymentResult, error) {
+		return deploymentResult{
+			LogPath:  logPath,
+			ImageRef: "ovek-demo-app:" + job.ID,
+		}, nil
+	})
+	provisioner := &fakeProjectProvisioner{}
+	processor := newManagedDeploymentProcessor(db, builder, provisioner, "/srv/ovek/projects", defaultPocketBaseImage)
+	processor.appBrainURL = "http://brain.internal:9090"
+
+	_, err := processor.Process(context.Background(), job{
+		ID:          "job-123",
+		ProjectName: "demo-app",
+	})
+	if err != nil {
+		t.Fatalf("expected deployment processing to succeed, got error: %v", err)
+	}
+	if len(provisioner.appEnv) == 0 || provisioner.appEnv[0] != "OVEK_BRAIN_URL=http://brain.internal:9090" {
+		t.Fatalf("expected configured Brain URL env first, got %#v", provisioner.appEnv)
 	}
 }
 

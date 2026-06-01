@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 type projectProvisioner interface {
@@ -20,6 +21,7 @@ type managedDeploymentProcessor struct {
 	projectsHostDataDir string
 	pocketBaseImage     string
 	configStore         projectConfigStore
+	appBrainURL         string
 }
 
 func newManagedDeploymentProcessor(db *sql.DB, builder deploymentProcessor, provisioner projectProvisioner, projectsHostDataDir string, pocketBaseImage string, stores ...projectConfigStore) managedDeploymentProcessor {
@@ -35,6 +37,7 @@ func newManagedDeploymentProcessor(db *sql.DB, builder deploymentProcessor, prov
 		projectsHostDataDir: projectsHostDataDir,
 		pocketBaseImage:     pocketBaseImage,
 		configStore:         configStore,
+		appBrainURL:         defaultAppBrainURL,
 	}
 }
 
@@ -71,7 +74,7 @@ func (processor managedDeploymentProcessor) Process(ctx context.Context, job job
 		return result, err
 	}
 	appendJobLogLine(result.LogPath, "lifecycle: starting app container", result.LogScrubber)
-	if _, err := processor.provisioner.EnsureProjectApp(ctx, job, result.ImageRef, runtimeConfig.Env); err != nil {
+	if _, err := processor.provisioner.EnsureProjectApp(ctx, job, result.ImageRef, processor.appRuntimeEnv(runtimeConfig.Env)); err != nil {
 		return result, fmt.Errorf("ensure app container: %w", err)
 	}
 	if err := updateJobPhase(processor.db, job.ID, jobPhaseWaitingForReadiness); err != nil {
@@ -122,6 +125,16 @@ func (processor managedDeploymentProcessor) Process(ctx context.Context, job job
 	result.SupersededDeploymentID = currentDeployment.ID
 	appendJobLogLine(result.LogPath, "lifecycle: runtime promotion prepared", result.LogScrubber)
 	return result, nil
+}
+
+func (processor managedDeploymentProcessor) appRuntimeEnv(projectEnv []string) []string {
+	appBrainURL := strings.TrimSpace(processor.appBrainURL)
+	if appBrainURL == "" {
+		appBrainURL = defaultAppBrainURL
+	}
+	env := []string{"OVEK_BRAIN_URL=" + appBrainURL}
+	env = append(env, projectEnv...)
+	return env
 }
 
 func sourcePreparationPhase(job job) string {

@@ -345,3 +345,60 @@ func TestWorkflowDefinitionAPIAllowsMutationsWithProdReauthAndAudits(t *testing.
 		t.Fatalf("expected workflow delete audit log, got %d rows", count)
 	}
 }
+
+func TestWorkflowTriggerTokenAPICreateListAndRevoke(t *testing.T) {
+	handler, db := newTestHandlerWithWorkflowImageResolver(t, &recordingWorkflowImageResolver{
+		metadataByRef: map[string]workflowImageMetadata{
+			"ghcr.io/example/digest:latest": {RuntimeImageID: "sha256:image-id"},
+		},
+	})
+	seedWorkflowDefinition(t, db, workflowDefinition{
+		ProjectName:    "demo-app",
+		Name:           "digest",
+		SourceImageRef: "ghcr.io/example/digest:latest",
+		RuntimeImageID: "sha256:image-id",
+		QueueCap:       2,
+		Enabled:        true,
+	})
+
+	createRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects/demo-app/workflows/digest/tokens",
+		strings.NewReader(`{"label":"app"}`),
+	)
+	createRequest.Header.Set(headerAPIKey, "test-key")
+	createRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create status %d, got %d with body %q", http.StatusCreated, createRecorder.Code, createRecorder.Body.String())
+	}
+	var created brainapi.CreateWorkflowTriggerTokenResponse
+	if err := json.NewDecoder(createRecorder.Body).Decode(&created); err != nil {
+		t.Fatalf("expected token create response to decode, got error: %v", err)
+	}
+	if created.Token == "" || !strings.HasPrefix(created.Token, credentialPrefixWorkflowTriggerToken+"_") {
+		t.Fatalf("expected one-time plaintext trigger token, got %#v", created)
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/v1/projects/demo-app/workflows/digest/tokens", nil)
+	listRequest.Header.Set(headerAPIKey, "test-key")
+	listRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(listRecorder, listRequest)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list status %d, got %d with body %q", http.StatusOK, listRecorder.Code, listRecorder.Body.String())
+	}
+	if strings.Contains(listRecorder.Body.String(), created.Token) {
+		t.Fatalf("expected list response not to include plaintext token, got %q", listRecorder.Body.String())
+	}
+
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/v1/projects/demo-app/workflows/digest/tokens/"+created.ID, nil)
+	deleteRequest.Header.Set(headerAPIKey, "test-key")
+	deleteRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != http.StatusNoContent {
+		t.Fatalf("expected delete status %d, got %d with body %q", http.StatusNoContent, deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+	if count := queryCount(t, db, `SELECT COUNT(1) FROM workflow_trigger_tokens WHERE id = ? AND revoked_at IS NOT NULL`, created.ID); count != 1 {
+		t.Fatalf("expected revoked trigger token row, got %d", count)
+	}
+}

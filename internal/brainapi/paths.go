@@ -39,3 +39,11 @@ func ProjectWorkflowRunLogsStreamPath(projectName string, runID string) string {
 func ProjectWorkflowDefinitionRunsPath(projectName string, workflowName string) string {
 	return ProjectWorkflowPath(projectName, workflowName) + "/runs"
 }
+
+func ProjectWorkflowTriggerTokensPath(projectName string, workflowName string) string {
+	return ProjectWorkflowPath(projectName, workflowName) + "/tokens"
+}
+
+func ProjectWorkflowTriggerTokenPath(projectName string, workflowName string, tokenID string) string {
+	return ProjectWorkflowTriggerTokensPath(projectName, workflowName) + "/" + tokenID
+}

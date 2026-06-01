@@ -99,6 +99,133 @@ func TestWorkflowRunAPIReturnsQueueFull(t *testing.T) {
 	assertAPIError(t, recorder, http.StatusTooManyRequests, errorCodeWorkflowQueueFull, "workflow queue full")
 }
 
+func TestWorkflowRunAPIAllowsScopedTriggerTokenWithoutAPIKey(t *testing.T) {
+	enqueuer := &recordingWorkflowRunEnqueuer{}
+	handler, db, _ := newTestWorkflowRunHandler(t, enqueuer)
+	seedWorkflowDefinition(t, db, workflowDefinition{
+		ProjectName:    "demo-app",
+		Name:           "digest",
+		SourceImageRef: "ghcr.io/example/digest:latest",
+		RuntimeImageID: "sha256:image-id",
+		QueueCap:       2,
+		Enabled:        true,
+	})
+	token, tokenID := mustCreateWorkflowTriggerToken(t, db, "demo-app", "digest", "app")
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects/demo-app/workflows/digest/runs",
+		strings.NewReader(`{"payload":{"signupId":"rec_123"}}`),
+	)
+	request.Header.Set(headerWorkflowTriggerToken, token)
+	request.Header.Set(headerIdempotencyKey, "signup:rec_123")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("expected create status %d, got %d with body %q", http.StatusAccepted, recorder.Code, recorder.Body.String())
+	}
+	var run brainapi.WorkflowRun
+	if err := json.NewDecoder(recorder.Body).Decode(&run); err != nil {
+		t.Fatalf("expected workflow run response to decode, got error: %v", err)
+	}
+	if run.TriggerType != workflowRunTriggerAPI || run.TriggerTokenID != tokenID || run.IdempotencyKey != "signup:rec_123" {
+		t.Fatalf("expected API run with trigger metadata, got %#v", run)
+	}
+	if len(enqueuer.runIDs) != 1 || enqueuer.runIDs[0] != run.ID {
+		t.Fatalf("expected one enqueued run, got %#v", enqueuer.runIDs)
+	}
+
+	persisted, err := getWorkflowRun(context.Background(), db, "demo-app", run.ID)
+	if err != nil {
+		t.Fatalf("expected persisted workflow run lookup to succeed, got error: %v", err)
+	}
+	if string(persisted.Payload) != `{"signupId":"rec_123"}` {
+		t.Fatalf("expected persisted payload, got %q", string(persisted.Payload))
+	}
+}
+
+func TestWorkflowRunAPIRejectsWrongScopeTriggerToken(t *testing.T) {
+	handler, db, _ := newTestWorkflowRunHandler(t, nil)
+	seedWorkflowDefinition(t, db, workflowDefinition{
+		ProjectName:    "demo-app",
+		Name:           "digest",
+		SourceImageRef: "ghcr.io/example/digest:latest",
+		RuntimeImageID: "sha256:image-id",
+		QueueCap:       2,
+		Enabled:        true,
+	})
+	seedWorkflowDefinition(t, db, workflowDefinition{
+		ProjectName:    "demo-app",
+		Name:           "mailer",
+		SourceImageRef: "ghcr.io/example/mailer:latest",
+		RuntimeImageID: "sha256:mailer-image",
+		QueueCap:       2,
+		Enabled:        true,
+	})
+	token, _ := mustCreateWorkflowTriggerToken(t, db, "demo-app", "mailer", "app")
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/projects/demo-app/workflows/digest/runs", strings.NewReader(`{}`))
+	request.Header.Set(headerWorkflowTriggerToken, token)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
+}
+
+func TestWorkflowRunAPIIdempotencyReturnsExistingRun(t *testing.T) {
+	enqueuer := &recordingWorkflowRunEnqueuer{}
+	handler, db, _ := newTestWorkflowRunHandler(t, enqueuer)
+	seedWorkflowDefinition(t, db, workflowDefinition{
+		ProjectName:    "demo-app",
+		Name:           "digest",
+		SourceImageRef: "ghcr.io/example/digest:latest",
+		RuntimeImageID: "sha256:image-id",
+		QueueCap:       2,
+		Enabled:        true,
+	})
+	token, _ := mustCreateWorkflowTriggerToken(t, db, "demo-app", "digest", "app")
+
+	for i := 0; i < 2; i++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/projects/demo-app/workflows/digest/runs", strings.NewReader(`{"payload":{"attempt":1}}`))
+		request.Header.Set(headerWorkflowTriggerToken, token)
+		request.Header.Set(headerIdempotencyKey, "event-123")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusAccepted {
+			t.Fatalf("expected create status %d on attempt %d, got %d with body %q", http.StatusAccepted, i+1, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	if len(enqueuer.runIDs) != 1 {
+		t.Fatalf("expected duplicate idempotency key to enqueue once, got %#v", enqueuer.runIDs)
+	}
+	if count := queryCount(t, db, `SELECT COUNT(1) FROM workflow_runs WHERE project_name = ? AND workflow_name = ?`, "demo-app", "digest"); count != 1 {
+		t.Fatalf("expected one workflow run row, got %d", count)
+	}
+}
+
+func TestWorkflowRunAPIRejectsOversizedPayload(t *testing.T) {
+	handler, db, _ := newTestWorkflowRunHandler(t, nil)
+	seedWorkflowDefinition(t, db, workflowDefinition{
+		ProjectName:    "demo-app",
+		Name:           "digest",
+		SourceImageRef: "ghcr.io/example/digest:latest",
+		RuntimeImageID: "sha256:image-id",
+		QueueCap:       2,
+		Enabled:        true,
+	})
+	token, _ := mustCreateWorkflowTriggerToken(t, db, "demo-app", "digest", "app")
+	body := `{"payload":{"value":"` + strings.Repeat("x", maxWorkflowRunPayloadBytes+1) + `"}}`
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/projects/demo-app/workflows/digest/runs", strings.NewReader(body))
+	request.Header.Set(headerWorkflowTriggerToken, token)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	assertAPIError(t, recorder, http.StatusBadRequest, errorCodeWorkflowPayloadTooLarge, "workflow payload too large")
+}
+
 func TestWorkflowRunLogsAPIReadsPersistedLogs(t *testing.T) {
 	handler, db, dataDir := newTestWorkflowRunHandler(t, nil)
 	seedWorkflowDefinition(t, db, workflowDefinition{
@@ -167,4 +294,13 @@ type recordingWorkflowRunEnqueuer struct {
 
 func (enqueuer *recordingWorkflowRunEnqueuer) Enqueue(runID string) {
 	enqueuer.runIDs = append(enqueuer.runIDs, runID)
+}
+
+func mustCreateWorkflowTriggerToken(t *testing.T, db *sql.DB, projectName string, workflowName string, label string) (string, string) {
+	t.Helper()
+	response, err := createWorkflowTriggerToken(context.Background(), db, projectName, workflowName, label, "test")
+	if err != nil {
+		t.Fatalf("expected trigger token creation to succeed, got error: %v", err)
+	}
+	return response.Token, response.ID
 }

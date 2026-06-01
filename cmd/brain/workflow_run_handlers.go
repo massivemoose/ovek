@@ -1,20 +1,29 @@
 package main
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
+)
+
+const (
+	headerWorkflowTriggerToken = "X-Ovek-Workflow-Token"
+	headerIdempotencyKey       = "Idempotency-Key"
+	maxWorkflowRunPayloadBytes = 64 * 1024
+	maxWorkflowRunRequestBytes = maxWorkflowRunPayloadBytes + 1024
 )
 
 type workflowRunEnqueuer interface {
 	Enqueue(runID string)
 }
 
-func handleCreateWorkflowRun(db *sql.DB, enqueuer workflowRunEnqueuer) http.HandlerFunc {
+func handleCreateWorkflowRun(cfg config, db *sql.DB, enqueuer workflowRunEnqueuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -23,24 +32,51 @@ func handleCreateWorkflowRun(db *sql.DB, enqueuer workflowRunEnqueuer) http.Hand
 			return
 		}
 
-		request := createWorkflowRunRequest{TriggerType: workflowRunTriggerAPI}
+		auth, ok := authenticateWorkflowRunCreateRequest(w, r, cfg, db, projectName, workflowName)
+		if !ok {
+			return
+		}
+
+		request := createWorkflowRunRequest{TriggerType: auth.defaultTriggerType}
 		if r.Body != nil {
-			decoder := json.NewDecoder(r.Body)
+			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxWorkflowRunRequestBytes))
 			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+				if strings.Contains(err.Error(), "http: request body too large") {
+					writeJSONError(w, http.StatusBadRequest, errorCodeWorkflowPayloadTooLarge, "workflow payload too large")
+					return
+				}
 				writeJSONError(w, http.StatusBadRequest, errorCodeInvalidRequestBody, "invalid request body")
 				return
 			}
 		}
 		if request.TriggerType == "" {
-			request.TriggerType = workflowRunTriggerAPI
+			request.TriggerType = auth.defaultTriggerType
+		}
+		if auth.triggerTokenID != "" && request.TriggerType != workflowRunTriggerAPI {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidWorkflow, "triggerType must be api")
+			return
 		}
 		if request.TriggerType != workflowRunTriggerAPI && request.TriggerType != workflowRunTriggerManual {
 			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidWorkflow, "triggerType must be api or manual")
 			return
 		}
+		payload := normalizeWorkflowRunPayload(request.Payload)
+		if len(payload) > maxWorkflowRunPayloadBytes {
+			writeJSONError(w, http.StatusBadRequest, errorCodeWorkflowPayloadTooLarge, "workflow payload too large")
+			return
+		}
+		if !json.Valid(payload) {
+			writeJSONError(w, http.StatusBadRequest, errorCodeInvalidWorkflowPayload, "invalid workflow payload")
+			return
+		}
 
-		run, err := createQueuedWorkflowRun(r.Context(), db, projectName, workflowName, request.TriggerType)
+		run, created, err := createQueuedWorkflowRunWithOptions(r.Context(), db, projectName, workflowName, createWorkflowRunOptions{
+			TriggerType:    request.TriggerType,
+			Payload:        payload,
+			IdempotencyKey: strings.TrimSpace(r.Header.Get(headerIdempotencyKey)),
+			TriggerTokenID: auth.triggerTokenID,
+		})
 		if errors.Is(err, errWorkflowNotFound) {
 			writeJSONError(w, http.StatusNotFound, errorCodeWorkflowNotFound, "workflow not found")
 			return
@@ -61,18 +97,69 @@ func handleCreateWorkflowRun(db *sql.DB, enqueuer workflowRunEnqueuer) http.Hand
 				"workflow": run.WorkflowName,
 				"run_id":   run.ID,
 				"trigger":  run.TriggerType,
-				"actor":    requestActor(r),
+				"actor":    auth.actor,
 			}),
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		})
 
-		if enqueuer != nil {
+		if created && enqueuer != nil {
 			enqueuer.Enqueue(run.ID)
 		}
 
 		w.Header().Set("Location", run.Links.Self)
 		writeJSON(w, http.StatusAccepted, run)
 	}
+}
+
+type workflowRunCreateAuth struct {
+	actor              string
+	defaultTriggerType string
+	triggerTokenID     string
+}
+
+func authenticateWorkflowRunCreateRequest(w http.ResponseWriter, r *http.Request, cfg config, db *sql.DB, projectName string, workflowName string) (workflowRunCreateAuth, bool) {
+	if token := strings.TrimSpace(r.Header.Get(headerWorkflowTriggerToken)); token != "" {
+		tokenID, err := validateWorkflowTriggerToken(r.Context(), db, projectName, workflowName, token)
+		if errors.Is(err, errInvalidWorkflowTriggerToken) {
+			writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
+			return workflowRunCreateAuth{}, false
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeWorkflowTriggerTokenFailed, "failed to validate workflow trigger token")
+			return workflowRunCreateAuth{}, false
+		}
+		return workflowRunCreateAuth{
+			actor:              "workflow-trigger-token",
+			defaultTriggerType: workflowRunTriggerAPI,
+			triggerTokenID:     tokenID,
+		}, true
+	}
+
+	if cfg.AuthMode == authModeProd {
+		principal, err := validateAPIKey(r.Context(), db, r.Header.Get(headerAPIKey))
+		if errors.Is(err, errInvalidAPIKey) {
+			reason := authFailureReason(err)
+			log.Printf("auth api key rejected: reason=%s path=%s", reason, r.URL.Path)
+			_ = insertAuditLog(r.Context(), db, auditLogRecord{
+				EventType:   "auth.api_key_rejected",
+				DetailsJSON: mustDetailsJSON(map[string]string{"reason": reason, "path": r.URL.Path}),
+				CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+			})
+			writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
+			return workflowRunCreateAuth{}, false
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, errorCodeUnauthorized, "unauthorized")
+			return workflowRunCreateAuth{}, false
+		}
+		return workflowRunCreateAuth{actor: principal.Username, defaultTriggerType: workflowRunTriggerAPI}, true
+	}
+
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get(headerAPIKey)), []byte(cfg.BrainAPIKey)) != 1 {
+		writeJSONError(w, http.StatusUnauthorized, errorCodeUnauthorized, "unauthorized")
+		return workflowRunCreateAuth{}, false
+	}
+	return workflowRunCreateAuth{actor: "dev", defaultTriggerType: workflowRunTriggerAPI}, true
 }
 
 func handleListWorkflowRuns(db *sql.DB) http.HandlerFunc {

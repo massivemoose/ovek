@@ -18,7 +18,7 @@ func TestNewWorkflowContainerSpec(t *testing.T) {
 		ProjectName:  "demo-app",
 		WorkflowName: "digest",
 	}
-	spec := newWorkflowContainerSpec(run, "sha256:image-id", projectNetwork{Name: "demo-app-net"}, []string{"PUBLIC_SITE_URL=https://example.com"})
+	spec := newWorkflowContainerSpec(run, "sha256:image-id", projectNetwork{Name: "demo-app-net"}, []string{"PUBLIC_SITE_URL=https://example.com"}, "/tmp/payload.json")
 
 	if spec.Name != "ovek-demo-app-wf-run-123" {
 		t.Fatalf("expected workflow container name, got %q", spec.Name)
@@ -32,6 +32,7 @@ func TestNewWorkflowContainerSpec(t *testing.T) {
 		"OVEK_PROJECT=demo-app",
 		"OVEK_WORKFLOW=digest",
 		"OVEK_WORKFLOW_RUN_ID=run-123",
+		"OVEK_WORKFLOW_PAYLOAD_FILE=/var/run/ovek/workflow-payload.json",
 		"PUBLIC_SITE_URL=https://example.com",
 	}
 	if !reflect.DeepEqual(spec.Config.Env, wantEnv) {
@@ -55,6 +56,12 @@ func TestNewWorkflowContainerSpec(t *testing.T) {
 	}
 	if endpoint := spec.NetworkingConfig.EndpointsConfig["demo-app-net"]; endpoint == nil {
 		t.Fatal("expected project network endpoint")
+	}
+	if len(spec.HostConfig.Mounts) != 1 {
+		t.Fatalf("expected payload file mount, got %#v", spec.HostConfig.Mounts)
+	}
+	if spec.HostConfig.Mounts[0].Source != "/tmp/payload.json" || spec.HostConfig.Mounts[0].Target != workflowPayloadContainerPath || !spec.HostConfig.Mounts[0].ReadOnly {
+		t.Fatalf("expected readonly payload file mount, got %#v", spec.HostConfig.Mounts[0])
 	}
 }
 
@@ -80,7 +87,7 @@ func TestDockerRuntimeWorkflowContainerLifecycle(t *testing.T) {
 		RuntimeImageID: "sha256:image-id",
 	}
 
-	containerID, err := runtime.CreateWorkflowContainer(context.Background(), run, "", []string{"PUBLIC_SITE_URL=https://example.com"})
+	containerID, err := runtime.CreateWorkflowContainer(context.Background(), run, "", []string{"PUBLIC_SITE_URL=https://example.com"}, "/tmp/payload.json")
 	if err != nil {
 		t.Fatalf("expected workflow container creation to succeed, got error: %v", err)
 	}
@@ -130,7 +137,7 @@ func TestWorkflowContainerNameStaysShortForMaxLengthNames(t *testing.T) {
 		ProjectName:  projectName,
 		WorkflowName: workflowName,
 	}
-	spec := newWorkflowContainerSpec(run, "sha256:image-id", projectNetwork{Name: projectName + "-net"}, nil)
+	spec := newWorkflowContainerSpec(run, "sha256:image-id", projectNetwork{Name: projectName + "-net"}, nil, "")
 	if spec.Config.Labels[workflowLabelKey] != workflowName {
 		t.Fatalf("expected full workflow name in labels, got %q", spec.Config.Labels[workflowLabelKey])
 	}
@@ -151,7 +158,7 @@ func TestDockerRuntimeCreateWorkflowContainerEnsuresProjectNetwork(t *testing.T)
 		ProjectName:    "demo-app",
 		WorkflowName:   "digest",
 		SourceImageRef: "ghcr.io/example/digest:latest",
-	}, "", nil)
+	}, "", nil, "")
 	if err != nil {
 		t.Fatalf("expected workflow container creation to succeed, got error: %v", err)
 	}

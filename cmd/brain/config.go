@@ -21,6 +21,7 @@ const defaultAuthMode = authModeDev
 const defaultRuntimeEngine = runtimeEnginePodman
 const defaultTraefikDynamicConfigDir = "/var/lib/ovek/traefik/dynamic"
 const defaultTraefikBrainServiceURL = "http://brain:8081"
+const defaultAppBrainURL = "http://brain:8081"
 const defaultPodmanRuntimeHost = "unix:///run/podman/podman.sock"
 
 type config struct {
@@ -39,6 +40,7 @@ type config struct {
 	PocketBaseImage          string
 	TraefikDynamicConfigDir  string
 	TraefikBrainServiceURL   string
+	AppBrainURL              string
 	WorkflowRunTimeout       time.Duration
 }
 
@@ -123,6 +125,11 @@ func loadConfig() (config, error) {
 		traefikBrainServiceURL = defaultTraefikBrainServiceURL
 	}
 
+	appBrainURL := strings.TrimSpace(os.Getenv("OVEK_APP_BRAIN_URL"))
+	if appBrainURL == "" {
+		appBrainURL = defaultAppBrainURL
+	}
+
 	workflowRunTimeout := defaultWorkflowRunTimeout
 	if workflowRunTimeoutValue := strings.TrimSpace(os.Getenv("OVEK_WORKFLOW_RUN_TIMEOUT")); workflowRunTimeoutValue != "" {
 		parsedWorkflowRunTimeout, err := time.ParseDuration(workflowRunTimeoutValue)
@@ -151,6 +158,7 @@ func loadConfig() (config, error) {
 		PocketBaseImage:          pocketBaseImage,
 		TraefikDynamicConfigDir:  traefikDynamicConfigDir,
 		TraefikBrainServiceURL:   traefikBrainServiceURL,
+		AppBrainURL:              appBrainURL,
 		WorkflowRunTimeout:       workflowRunTimeout,
 	}, nil
 }

@@ -12,9 +12,14 @@ import (
 )
 
 const workflowLogsDirName = "workflow-logs"
+const workflowPayloadsDirName = "workflow-payloads"
 
 func workflowLogPath(dataDir string, runID string) string {
 	return filepath.Join(dataDir, workflowLogsDirName, runID+".log")
+}
+
+func workflowPayloadPath(dataDir string, runID string) string {
+	return filepath.Join(dataDir, workflowPayloadsDirName, runID+".json")
 }
 
 func handleGetWorkflowRunLogs(db *sql.DB, dataDir string) http.HandlerFunc {

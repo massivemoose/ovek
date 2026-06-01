@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -25,7 +27,7 @@ type workflowExecutionRuntime interface {
 	EnsureProjectNetwork(ctx context.Context, projectName string) (projectNetwork, error)
 	EnsureProjectPocketBase(ctx context.Context, projectName string, image string, projectsHostDataDir string) (string, error)
 	WaitForProjectPocketBaseReady(ctx context.Context, projectName string) error
-	CreateWorkflowContainer(ctx context.Context, run workflowRun, imageRef string, env []string) (string, error)
+	CreateWorkflowContainer(ctx context.Context, run workflowRun, imageRef string, env []string, payloadHostPath string) (string, error)
 	StartWorkflowContainer(ctx context.Context, containerID string) error
 	WaitWorkflowContainer(ctx context.Context, containerID string) (int, error)
 	StreamWorkflowContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error)
@@ -89,11 +91,16 @@ func (processor managedWorkflowProcessor) Process(ctx context.Context, run workf
 	logWriter := runtimeConfig.SecretScrubber.Writer(logFile)
 	defer logWriter.Flush()
 
+	payloadHostPath, err := writeWorkflowPayloadFile(processor.dataDir, run)
+	if err != nil {
+		return result, err
+	}
+
 	imageRef := run.RuntimeImageID
 	if imageRef == "" {
 		imageRef = run.SourceImageRef
 	}
-	containerID, err := processor.runtime.CreateWorkflowContainer(ctx, run, imageRef, runtimeConfig.Env)
+	containerID, err := processor.runtime.CreateWorkflowContainer(ctx, run, imageRef, runtimeConfig.Env, payloadHostPath)
 	if err != nil {
 		return result, fmt.Errorf("create workflow container: %w", err)
 	}
@@ -138,4 +145,16 @@ func (processor managedWorkflowProcessor) Process(ctx context.Context, run workf
 	}
 
 	return result, nil
+}
+
+func writeWorkflowPayloadFile(dataDir string, run workflowRun) (string, error) {
+	payloadPath := workflowPayloadPath(dataDir, run.ID)
+	if err := os.MkdirAll(filepath.Dir(payloadPath), 0o755); err != nil {
+		return "", fmt.Errorf("create workflow payload directory: %w", err)
+	}
+	payload := normalizeWorkflowRunPayload(run.Payload)
+	if err := os.WriteFile(payloadPath, payload, 0o600); err != nil {
+		return "", fmt.Errorf("write workflow payload file: %w", err)
+	}
+	return payloadPath, nil
 }

@@ -252,6 +252,34 @@ CREATE INDEX idx_workflow_runs_workflow_status_created
 	ON workflow_runs(project_name, workflow_name, status, created_at ASC);
 `,
 	},
+	{
+		version: 9,
+		name:    "add workflow trigger tokens and run payloads",
+		upSQL: `
+CREATE TABLE workflow_trigger_tokens (
+	id TEXT PRIMARY KEY,
+	project_name TEXT NOT NULL,
+	workflow_name TEXT NOT NULL,
+	label TEXT NOT NULL,
+	token_hash TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	last_used_at TEXT,
+	revoked_at TEXT,
+	FOREIGN KEY (project_name, workflow_name) REFERENCES workflows(project_name, name)
+);
+
+CREATE INDEX idx_workflow_trigger_tokens_workflow
+	ON workflow_trigger_tokens(project_name, workflow_name, created_at DESC);
+
+ALTER TABLE workflow_runs ADD COLUMN payload_json TEXT;
+ALTER TABLE workflow_runs ADD COLUMN idempotency_key TEXT;
+ALTER TABLE workflow_runs ADD COLUMN trigger_token_id TEXT;
+
+CREATE UNIQUE INDEX idx_workflow_runs_idempotency
+	ON workflow_runs(project_name, workflow_name, idempotency_key)
+	WHERE idempotency_key IS NOT NULL AND idempotency_key != '';
+`,
+	},
 }
 
 func openBrainDB(dataDir string) (*sql.DB, error) {

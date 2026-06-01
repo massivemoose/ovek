@@ -10,12 +10,16 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	dockermount "github.com/docker/docker/api/types/mount"
 	dockernetwork "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/pkg/stdcopy"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-const workflowStopTimeoutSeconds = 10
+const (
+	workflowStopTimeoutSeconds   = 10
+	workflowPayloadContainerPath = "/var/run/ovek/workflow-payload.json"
+)
 
 type workflowContainerSpec struct {
 	Name             string
@@ -35,11 +39,12 @@ func workflowContainerEnv(run workflowRun, env []string) []string {
 		"OVEK_PROJECT=" + run.ProjectName,
 		"OVEK_WORKFLOW=" + run.WorkflowName,
 		"OVEK_WORKFLOW_RUN_ID=" + run.ID,
+		"OVEK_WORKFLOW_PAYLOAD_FILE=" + workflowPayloadContainerPath,
 	}
 	return append(builtins, env...)
 }
 
-func newWorkflowContainerSpec(run workflowRun, imageRef string, network projectNetwork, env []string) workflowContainerSpec {
+func newWorkflowContainerSpec(run workflowRun, imageRef string, network projectNetwork, env []string, payloadHostPath string) workflowContainerSpec {
 	networkName := network.Name
 	labels := managedLabels(managedResourceMetadata{
 		ProjectName:   run.ProjectName,
@@ -48,6 +53,22 @@ func newWorkflowContainerSpec(run workflowRun, imageRef string, network projectN
 		WorkflowRunID: run.ID,
 	})
 
+	hostConfig := &dockercontainer.HostConfig{
+		NetworkMode: dockercontainer.NetworkMode(networkName),
+		RestartPolicy: dockercontainer.RestartPolicy{
+			Name: dockercontainer.RestartPolicyDisabled,
+		},
+	}
+	payloadHostPath = strings.TrimSpace(payloadHostPath)
+	if payloadHostPath != "" {
+		hostConfig.Mounts = append(hostConfig.Mounts, dockermount.Mount{
+			Type:     dockermount.TypeBind,
+			Source:   payloadHostPath,
+			Target:   workflowPayloadContainerPath,
+			ReadOnly: true,
+		})
+	}
+
 	return workflowContainerSpec{
 		Name: workflowContainerName(run.ProjectName, run.WorkflowName, run.ID),
 		Config: &dockercontainer.Config{
@@ -55,12 +76,7 @@ func newWorkflowContainerSpec(run workflowRun, imageRef string, network projectN
 			Env:    workflowContainerEnv(run, env),
 			Labels: labels,
 		},
-		HostConfig: &dockercontainer.HostConfig{
-			NetworkMode: dockercontainer.NetworkMode(networkName),
-			RestartPolicy: dockercontainer.RestartPolicy{
-				Name: dockercontainer.RestartPolicyDisabled,
-			},
-		},
+		HostConfig: hostConfig,
 		NetworkingConfig: &dockernetwork.NetworkingConfig{
 			EndpointsConfig: map[string]*dockernetwork.EndpointSettings{
 				networkName: {},
@@ -69,7 +85,7 @@ func newWorkflowContainerSpec(run workflowRun, imageRef string, network projectN
 	}
 }
 
-func (runtime *dockerRuntime) CreateWorkflowContainer(ctx context.Context, run workflowRun, imageRef string, env []string) (string, error) {
+func (runtime *dockerRuntime) CreateWorkflowContainer(ctx context.Context, run workflowRun, imageRef string, env []string, payloadHostPath string) (string, error) {
 	network, err := runtime.EnsureProjectNetwork(ctx, run.ProjectName)
 	if err != nil {
 		return "", fmt.Errorf("ensure project network: %w", err)
@@ -82,7 +98,7 @@ func (runtime *dockerRuntime) CreateWorkflowContainer(ctx context.Context, run w
 	if imageRef == "" {
 		imageRef = run.SourceImageRef
 	}
-	spec := newWorkflowContainerSpec(run, imageRef, network, env)
+	spec := newWorkflowContainerSpec(run, imageRef, network, env, payloadHostPath)
 
 	createResponse, err := runtime.client.ContainerCreate(
 		ctx,
