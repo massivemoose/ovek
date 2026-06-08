@@ -344,8 +344,9 @@ main() {
 	log "Ovek runtime is installed"
 	printf 'Next commands:\n'
 	printf './scripts/ovek-vps-check.sh\n'
-	printf 'ssh -N -L 8088:127.0.0.1:80 <user>@<vps-host>\n'
-	printf './bin/ovek auth bootstrap --profile vps-trial --host http://brain.localhost:8088\n'
+	printf '(On your laptop) ssh -N -L 8088:127.0.0.1:80 <user>@<vps-host>\n'
+	printf "(On your laptop) printf '(On your laptop) ssh -N -L 8088:127.0.0.1:80 <user>@<vps-host>\n'"
+	printf '(On your laptop) bin/ovek auth bootstrap --profile vps-trial --host http://brain.localhost:8088\n'
 }
 
 main "$@"
