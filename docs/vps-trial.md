@@ -112,7 +112,7 @@ Expected: the managed PocketBase sidecar is running, initialized is `yes`, and a
 
 ## 6. Run The Signup Capsule
 
-1. `./bin/ovek run signup-demo ghcr.io/massivemoose/ovek-signup-example:latest`
+1. `./bin/ovek run signup-demo ghcr.io/massivemoose/ovek-workflow-example-digest:latest`
 
 The run command may prompt for your bootstrap password.
 
