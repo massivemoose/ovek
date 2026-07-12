@@ -3,6 +3,7 @@
 set -euo pipefail
 
 env_file="${OVEK_ENV_FILE:-/etc/ovek/ovek.env}"
+data_dir="${OVEK_DATA_DIR:-/var/lib/ovek}"
 brain_url="${OVEK_CHECK_BRAIN_URL:-http://127.0.0.1/healthz}"
 brain_host="${OVEK_CHECK_BRAIN_HOST:-brain.localhost}"
 
@@ -38,6 +39,17 @@ fail_with_suggestion() {
 
 run_priv() {
 	"${sudo_cmd[@]}" "$@"
+}
+
+parse_bool_enabled() {
+	case "$1" in
+		1 | t | T | TRUE | true | True)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
 }
 
 check_ubuntu() {
@@ -195,6 +207,62 @@ check_env_file() {
 	fi
 }
 
+public_hosting_enabled() {
+	if [ "${sudo_ready}" != "1" ]; then
+		return 1
+	fi
+
+	env_content="$(run_priv cat "${env_file}" 2>/dev/null || true)"
+	public_apps_enabled="$(printf '%s\n' "${env_content}" | awk -F= '$1 == "OVEK_PUBLIC_APPS_ENABLED" {print substr($0, index($0, "=") + 1)}' | tail -n 1)"
+	public_brain_enabled="$(printf '%s\n' "${env_content}" | awk -F= '$1 == "OVEK_PUBLIC_BRAIN_ENABLED" {print substr($0, index($0, "=") + 1)}' | tail -n 1)"
+	if parse_bool_enabled "${public_apps_enabled}" || parse_bool_enabled "${public_brain_enabled}"; then
+		return 0
+	fi
+	return 1
+}
+
+check_public_port_listener() {
+	port="$1"
+
+	if ! command -v ss >/dev/null 2>&1; then
+		warn "cannot inspect public port ${port}; ss is not installed"
+		return
+	fi
+
+	if ! listeners="$(run_priv ss -H -ltn "sport = :${port}" 2>/dev/null)"; then
+		warn "could not inspect public port ${port}"
+		return
+	fi
+	if [ -z "${listeners}" ]; then
+		warn "public hosting is enabled but TCP port ${port} is not listening locally"
+		return
+	fi
+
+	ok "public TCP port ${port} is listening locally"
+}
+
+check_public_hosting() {
+	if ! public_hosting_enabled; then
+		ok "public hosting is disabled"
+		return
+	fi
+
+	check_public_port_listener 80
+	check_public_port_listener 443
+
+	acme_dir="${data_dir}/traefik/acme"
+	if ! run_priv test -d "${acme_dir}"; then
+		fail_with_suggestion "ACME storage directory ${acme_dir} is missing" "sudo mkdir -p ${acme_dir} && sudo chmod 0700 ${acme_dir}"
+		return
+	fi
+	if ! run_priv test -w "${acme_dir}"; then
+		fail_with_suggestion "ACME storage directory ${acme_dir} is not writable" "sudo chmod 0700 ${acme_dir}"
+		return
+	fi
+
+	ok "ACME storage directory ${acme_dir} is writable"
+}
+
 check_containers() {
 	if [ "${sudo_ready}" != "1" ]; then
 		fail_with_suggestion "cannot inspect Podman containers without non-interactive sudo" "sudo -v"
@@ -248,6 +316,7 @@ main() {
 	check_enabled_service podman-restart.service "sudo systemctl enable --now podman-restart.service"
 	check_service ovek.service "sudo systemctl status ovek.service"
 	check_env_file
+	check_public_hosting
 	check_containers
 	check_brain
 
