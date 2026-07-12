@@ -39,6 +39,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 h1:HWRh5R2+9EifMyIHV7ZV+MIZqgz
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0/go.mod h1:JfhWUomR1baixubs02l85lZYYOm7LV6om4ceouMv45c=
 github.com/massivemoose/chomp v0.1.0 h1:bb5nxtwYoBskbqZ2u8np8Zu4osfHTrvtPYo8gbLv/d8=
 github.com/massivemoose/chomp v0.1.0/go.mod h1:vju7fMYcquD2ulfgcecbgOIu7NV+hdx0K+ZUtfYiaaI=
+github.com/massivemoose/chomp v0.2.0 h1:DrW8Tx29eb6aSLS9asReLo+lxKgCBnw9Dy0E/4G4gDA=
+github.com/massivemoose/chomp v0.2.0/go.mod h1:vju7fMYcquD2ulfgcecbgOIu7NV+hdx0K+ZUtfYiaaI=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=

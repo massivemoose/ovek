@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/massivemoose/chomp v0.1.0
+	github.com/massivemoose/chomp v0.2.0
 	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.48.0
 )

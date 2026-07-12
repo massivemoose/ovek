@@ -22,9 +22,9 @@ if err != nil {
 
 Chomp is intentionally small. It supports long and single-short flags,
 interspersed positionals, defaults, usage rendering, `--`, help, required
-flags, and positional counts. It does not own subcommand routing, shell
-completion, short flag clusters, env/config binding, aliases, or generated
-docs.
+flags, positional counts, and tiny explicit command routing. It does not own
+shell completion, short flag clusters, env/config binding, aliases, generated
+docs, lifecycle hooks, middleware, or command execution.
 
 Go's standard `flag` package is still fine for simple commands that are
 flag-only or have no interspersed positional/flag ergonomics to preserve.
