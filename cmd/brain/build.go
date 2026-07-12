@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -72,8 +73,8 @@ func newBuildProcessor(
 	}
 }
 
-func (processor buildProcessor) Process(ctx context.Context, job job) (deploymentResult, error) {
-	result := deploymentResult{
+func (processor buildProcessor) Process(ctx context.Context, job job) (result deploymentResult, err error) {
+	result = deploymentResult{
 		LogPath:  jobLogPath(processor.dataDir, job.ID),
 		ImageRef: jobImageRef(job, processor.runtimeRegistryHost),
 	}
@@ -88,7 +89,11 @@ func (processor buildProcessor) Process(ctx context.Context, job job) (deploymen
 		return result, fmt.Errorf("load project config for log redaction: %w", err)
 	}
 	logWriter := scrubber.Writer(logFile)
-	defer logWriter.Flush()
+	defer func() {
+		if flushErr := logWriter.Flush(); flushErr != nil {
+			err = errors.Join(err, fmt.Errorf("flush build log: %w", flushErr))
+		}
+	}()
 	result.LogScrubber = scrubber
 
 	workspace, err := os.MkdirTemp("", "ovek-build-"+job.ID+"-")

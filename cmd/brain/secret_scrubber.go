@@ -64,34 +64,52 @@ func (writer *scrubbingWriter) Write(payload []byte) (int, error) {
 		return len(payload), nil
 	}
 	if len(writer.scrubber.values) == 0 {
-		_, err := writer.writer.Write(payload)
-		return len(payload), err
+		return writer.writer.Write(payload)
 	}
 
-	value := writer.tail + string(payload)
-	keep := writer.scrubber.maxLen - 1
-	if keep < 0 {
-		keep = 0
-	}
-	if len(value) <= keep {
-		writer.tail = value
-		return len(payload), nil
-	}
-
-	flushAt := len(value) - keep
-	flush := writer.scrubber.Scrub(value[:flushAt])
-	writer.tail = value[flushAt:]
-	_, err := io.WriteString(writer.writer, flush)
-	return len(payload), err
+	writer.tail += string(payload)
+	return len(payload), writer.flush(false)
 }
 
 func (writer *scrubbingWriter) Flush() error {
+	return writer.flush(true)
+}
+
+func (writer *scrubbingWriter) flush(final bool) error {
 	if writer == nil || writer.writer == nil || writer.tail == "" {
 		return nil
 	}
 
-	tail := writer.scrubber.Scrub(writer.tail)
-	writer.tail = ""
-	_, err := io.WriteString(writer.writer, tail)
+	var output strings.Builder
+	for len(writer.tail) > 0 {
+		if !final && len(writer.tail) < writer.scrubber.maxLen {
+			break
+		}
+
+		matched := ""
+		// ponytail: project secret sets are small; use a multi-pattern matcher only if profiling proves necessary.
+		for _, secret := range writer.scrubber.values {
+			if strings.HasPrefix(writer.tail, secret) {
+				matched = secret
+				break
+			}
+		}
+		if matched != "" {
+			output.WriteString("[redacted]")
+			writer.tail = writer.tail[len(matched):]
+			continue
+		}
+
+		output.WriteByte(writer.tail[0])
+		writer.tail = writer.tail[1:]
+	}
+
+	if output.Len() == 0 {
+		return nil
+	}
+	written, err := io.WriteString(writer.writer, output.String())
+	if err == nil && written != output.Len() {
+		err = io.ErrShortWrite
+	}
 	return err
 }

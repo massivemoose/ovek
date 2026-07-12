@@ -48,9 +48,9 @@ func newImageProcessor(dataDir string, stores ...projectConfigStore) imageProces
 	}
 }
 
-func (processor imageProcessor) Process(ctx context.Context, currentJob job) (deploymentResult, error) {
+func (processor imageProcessor) Process(ctx context.Context, currentJob job) (result deploymentResult, err error) {
 	imageRef := strings.TrimSpace(currentJob.SourceRef)
-	result := deploymentResult{
+	result = deploymentResult{
 		LogPath:  jobLogPath(processor.dataDir, currentJob.ID),
 		ImageRef: imageRef,
 	}
@@ -69,7 +69,11 @@ func (processor imageProcessor) Process(ctx context.Context, currentJob job) (de
 		return result, fmt.Errorf("load project config for log redaction: %w", err)
 	}
 	logWriter := scrubber.Writer(logFile)
-	defer logWriter.Flush()
+	defer func() {
+		if flushErr := logWriter.Flush(); flushErr != nil {
+			err = errors.Join(err, fmt.Errorf("flush image run log: %w", flushErr))
+		}
+	}()
 	result.LogScrubber = scrubber
 
 	if err := writeBuildLifecycleLine(logWriter, "using prebuilt image "+imageRef); err != nil {

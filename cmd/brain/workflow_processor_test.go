@@ -25,7 +25,7 @@ func TestManagedWorkflowProcessorRunsContainerWithProjectServicesAndEnv(t *testi
 	}
 	runtime := &recordingWorkflowExecutionRuntime{
 		waitExitCode: 0,
-		logs:         "prefix-prefix-prefix secret-token suffix-suffix-suffix\n",
+		logs:         "prefix-prefix-prefix secret-token",
 	}
 	processor := newManagedWorkflowProcessor(db, runtime, t.TempDir(), "/srv/ovek/projects", defaultPocketBaseImage, configStore)
 	run := workflowRun{
@@ -76,7 +76,7 @@ func TestManagedWorkflowProcessorRunsContainerWithProjectServicesAndEnv(t *testi
 	if err != nil {
 		t.Fatalf("expected workflow logs to be readable, got error: %v", err)
 	}
-	if got := string(logBytes); got != "prefix-prefix-prefix [redacted] suffix-suffix-suffix\n" {
+	if got := string(logBytes); got != "prefix-prefix-prefix [redacted]" {
 		t.Fatalf("expected workflow logs to be captured, got %q", got)
 	}
 }

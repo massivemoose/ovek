@@ -51,8 +51,8 @@ func newManagedWorkflowProcessor(db *sql.DB, runtime workflowExecutionRuntime, d
 	}
 }
 
-func (processor managedWorkflowProcessor) Process(ctx context.Context, run workflowRun) (workflowRunResult, error) {
-	result := workflowRunResult{
+func (processor managedWorkflowProcessor) Process(ctx context.Context, run workflowRun) (result workflowRunResult, err error) {
+	result = workflowRunResult{
 		LogPath: workflowLogPath(processor.dataDir, run.ID),
 	}
 	if processor.timeout <= 0 {
@@ -89,7 +89,11 @@ func (processor managedWorkflowProcessor) Process(ctx context.Context, run workf
 		return result, fmt.Errorf("resolve project config: %w", err)
 	}
 	logWriter := runtimeConfig.SecretScrubber.Writer(logFile)
-	defer logWriter.Flush()
+	defer func() {
+		if flushErr := logWriter.Flush(); flushErr != nil {
+			err = errors.Join(err, fmt.Errorf("flush workflow log: %w", flushErr))
+		}
+	}()
 
 	payloadHostPath, err := writeWorkflowPayloadFile(processor.dataDir, run)
 	if err != nil {
