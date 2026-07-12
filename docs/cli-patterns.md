@@ -5,8 +5,9 @@ plain-text output. It is developer-facing guidance, not a public user manual.
 
 ## Argument Parsing
 
-Use `internal/cli/chomp` for commands that combine flags and positional
-arguments, especially when users naturally place flags after positionals:
+Use [`github.com/massivemoose/chomp`](https://github.com/massivemoose/chomp)
+for commands that combine flags and positional arguments, especially when
+users naturally place flags after positionals:
 
 ```go
 parsed, err := ovekCommand("workflow", "set").
@@ -19,10 +20,11 @@ if err != nil {
 }
 ```
 
-Chomp is intentionally small. It supports long flags, `--flag value`,
-`--flag=value`, bool flags, bool values, `--`, help, required flags, and
-positional counts. It does not own subcommand routing, shell completion, short
-flag clusters, env/config binding, aliases, or generated docs.
+Chomp is intentionally small. It supports long and single-short flags,
+interspersed positionals, defaults, usage rendering, `--`, help, required
+flags, and positional counts. It does not own subcommand routing, shell
+completion, short flag clusters, env/config binding, aliases, or generated
+docs.
 
 Go's standard `flag` package is still fine for simple commands that are
 flag-only or have no interspersed positional/flag ergonomics to preserve.
