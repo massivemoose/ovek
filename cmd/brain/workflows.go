@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -33,6 +34,13 @@ var (
 	errWorkflowNotFound  = errors.New("workflow not found")
 	errWorkflowQueueFull = errors.New("workflow queue full")
 )
+
+type createWorkflowRunOptions struct {
+	TriggerType    string
+	Payload        json.RawMessage
+	IdempotencyKey string
+	TriggerTokenID string
+}
 
 func isValidWorkflowName(name string) bool {
 	return isValidProjectName(name)
@@ -180,7 +188,22 @@ func getWorkflowDefinitionQuery(ctx context.Context, queryer workflowQueryer, pr
 }
 
 func deleteWorkflowDefinition(ctx context.Context, db *sql.DB, projectName string, workflowName string) error {
-	result, err := db.ExecContext(
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin workflow delete transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM workflow_trigger_tokens WHERE project_name = ? AND workflow_name = ?`,
+		projectName,
+		workflowName,
+	); err != nil {
+		return fmt.Errorf("delete workflow trigger tokens: %w", err)
+	}
+
+	result, err := tx.ExecContext(
 		ctx,
 		`DELETE FROM workflows WHERE project_name = ? AND name = ?`,
 		projectName,
@@ -191,6 +214,9 @@ func deleteWorkflowDefinition(ctx context.Context, db *sql.DB, projectName strin
 	}
 	if err := requireUpdatedRow(result, "delete workflow"); err != nil {
 		return errWorkflowNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit workflow delete transaction: %w", err)
 	}
 
 	return nil
@@ -215,8 +241,8 @@ func createWorkflowRunRecord(ctx context.Context, db *sql.DB, run workflowRun) (
 
 	if _, err := db.ExecContext(
 		ctx,
-		`INSERT INTO workflow_runs(id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO workflow_runs(id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, payload_json, idempotency_key, trigger_token_id, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		runID,
 		run.ProjectName,
 		run.WorkflowName,
@@ -224,6 +250,9 @@ func createWorkflowRunRecord(ctx context.Context, db *sql.DB, run workflowRun) (
 		run.Status,
 		nullableString(run.ConfigRevisionID),
 		nullableString(run.LogPath),
+		nullableRawJSON(run.Payload),
+		nullableString(run.IdempotencyKey),
+		nullableString(run.TriggerTokenID),
 		run.SourceImageRef,
 		nullableString(run.ResolvedRepoDigest),
 		nullableString(run.RuntimeImageID),
@@ -242,22 +271,43 @@ func createWorkflowRunRecord(ctx context.Context, db *sql.DB, run workflowRun) (
 }
 
 func createQueuedWorkflowRun(ctx context.Context, db *sql.DB, projectName string, workflowName string, triggerType string) (workflowRun, error) {
+	run, _, err := createQueuedWorkflowRunWithOptions(ctx, db, projectName, workflowName, createWorkflowRunOptions{TriggerType: triggerType})
+	return run, err
+}
+
+func createQueuedWorkflowRunWithOptions(ctx context.Context, db *sql.DB, projectName string, workflowName string, options createWorkflowRunOptions) (workflowRun, bool, error) {
+	triggerType := strings.TrimSpace(options.TriggerType)
 	if triggerType == "" {
 		triggerType = workflowRunTriggerAPI
 	}
-
+	payload := normalizeWorkflowRunPayload(options.Payload)
+	idempotencyKey := strings.TrimSpace(options.IdempotencyKey)
+	triggerTokenID := strings.TrimSpace(options.TriggerTokenID)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return workflowRun{}, fmt.Errorf("begin workflow run transaction: %w", err)
+		return workflowRun{}, false, fmt.Errorf("begin workflow run transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	workflow, found, err := getWorkflowDefinitionTx(ctx, tx, projectName, workflowName)
 	if err != nil {
-		return workflowRun{}, err
+		return workflowRun{}, false, err
 	}
 	if !found {
-		return workflowRun{}, errWorkflowNotFound
+		return workflowRun{}, false, errWorkflowNotFound
+	}
+
+	if idempotencyKey != "" {
+		existingRun, found, err := getWorkflowRunByIdempotencyKeyTx(ctx, tx, projectName, workflowName, idempotencyKey)
+		if err != nil {
+			return workflowRun{}, false, err
+		}
+		if found {
+			if err := tx.Commit(); err != nil {
+				return workflowRun{}, false, fmt.Errorf("commit idempotent workflow run transaction: %w", err)
+			}
+			return decorateWorkflowRun(existingRun), false, nil
+		}
 	}
 	if workflow.QueueCap <= 0 {
 		workflow.QueueCap = defaultWorkflowQueueCap
@@ -265,15 +315,15 @@ func createQueuedWorkflowRun(ctx context.Context, db *sql.DB, projectName string
 
 	activeCount, err := countActiveWorkflowRuns(ctx, tx, projectName, workflowName)
 	if err != nil {
-		return workflowRun{}, err
+		return workflowRun{}, false, err
 	}
 	if activeCount >= workflow.QueueCap {
-		return workflowRun{}, errWorkflowQueueFull
+		return workflowRun{}, false, errWorkflowQueueFull
 	}
 
 	configRevisionID, configRevisionFound, err := latestProjectConfigRevisionID(ctx, tx, projectName)
 	if err != nil {
-		return workflowRun{}, err
+		return workflowRun{}, false, err
 	}
 
 	run, err := insertWorkflowRunTx(ctx, tx, workflowRun{
@@ -282,19 +332,22 @@ func createQueuedWorkflowRun(ctx context.Context, db *sql.DB, projectName string
 		TriggerType:        triggerType,
 		Status:             workflowRunStatusQueued,
 		ConfigRevisionID:   optionalRevisionID(configRevisionID, configRevisionFound),
+		Payload:            payload,
+		IdempotencyKey:     idempotencyKey,
+		TriggerTokenID:     triggerTokenID,
 		SourceImageRef:     workflow.SourceImageRef,
 		ResolvedRepoDigest: workflow.ResolvedRepoDigest,
 		RuntimeImageID:     workflow.RuntimeImageID,
 	})
 	if err != nil {
-		return workflowRun{}, err
+		return workflowRun{}, false, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return workflowRun{}, fmt.Errorf("commit workflow run transaction: %w", err)
+		return workflowRun{}, false, fmt.Errorf("commit workflow run transaction: %w", err)
 	}
 
-	return decorateWorkflowRun(run), nil
+	return decorateWorkflowRun(run), true, nil
 }
 
 func createScheduledWorkflowRun(ctx context.Context, db *sql.DB, projectName string, workflowName string) (workflowRun, error) {
@@ -386,8 +439,8 @@ func insertWorkflowRunTx(ctx context.Context, tx *sql.Tx, run workflowRun) (work
 
 	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO workflow_runs(id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO workflow_runs(id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, payload_json, idempotency_key, trigger_token_id, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		runID,
 		run.ProjectName,
 		run.WorkflowName,
@@ -395,6 +448,9 @@ func insertWorkflowRunTx(ctx context.Context, tx *sql.Tx, run workflowRun) (work
 		run.Status,
 		nullableString(run.ConfigRevisionID),
 		nullableString(run.LogPath),
+		nullableRawJSON(run.Payload),
+		nullableString(run.IdempotencyKey),
+		nullableString(run.TriggerTokenID),
 		run.SourceImageRef,
 		nullableString(run.ResolvedRepoDigest),
 		nullableString(run.RuntimeImageID),
@@ -436,7 +492,7 @@ func countActiveWorkflowRuns(ctx context.Context, queryer workflowQueryer, proje
 func listWorkflowRuns(ctx context.Context, db *sql.DB, projectName string, limit int) ([]workflowRun, error) {
 	rows, err := db.QueryContext(
 		ctx,
-		`SELECT id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at
+		`SELECT id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, payload_json, idempotency_key, trigger_token_id, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at
 		 FROM workflow_runs
 		 WHERE project_name = ?
 		 ORDER BY created_at DESC
@@ -468,7 +524,7 @@ func getWorkflowRun(ctx context.Context, db *sql.DB, projectName string, runID s
 	run, err := scanWorkflowRun(
 		db.QueryRowContext(
 			ctx,
-			`SELECT id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at
+			`SELECT id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, payload_json, idempotency_key, trigger_token_id, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at
 			 FROM workflow_runs
 			 WHERE project_name = ? AND id = ?`,
 			projectName,
@@ -486,7 +542,7 @@ func getWorkflowRunByID(ctx context.Context, db *sql.DB, runID string) (workflow
 	run, err := scanWorkflowRun(
 		db.QueryRowContext(
 			ctx,
-			`SELECT id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at
+			`SELECT id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, payload_json, idempotency_key, trigger_token_id, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at
 			 FROM workflow_runs
 			 WHERE id = ?`,
 			runID,
@@ -497,6 +553,27 @@ func getWorkflowRunByID(ctx context.Context, db *sql.DB, runID string) (workflow
 	}
 
 	return decorateWorkflowRun(run), nil
+}
+
+func getWorkflowRunByIdempotencyKeyTx(ctx context.Context, tx *sql.Tx, projectName string, workflowName string, idempotencyKey string) (workflowRun, bool, error) {
+	run, err := scanWorkflowRun(
+		tx.QueryRowContext(
+			ctx,
+			`SELECT id, project_name, workflow_name, trigger_type, status, config_revision_id, log_path, payload_json, idempotency_key, trigger_token_id, source_image_ref, resolved_repo_digest, runtime_image_id, exit_code, error_message, created_at, started_at, finished_at
+			 FROM workflow_runs
+			 WHERE project_name = ? AND workflow_name = ? AND idempotency_key = ?`,
+			projectName,
+			workflowName,
+			idempotencyKey,
+		),
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workflowRun{}, false, nil
+	}
+	if err != nil {
+		return workflowRun{}, false, err
+	}
+	return run, true, nil
 }
 
 type workflowQueryer interface {
@@ -546,6 +623,9 @@ func scanWorkflowRun(scanner workflowScanner) (workflowRun, error) {
 	var run workflowRun
 	var configRevisionID sql.NullString
 	var logPath sql.NullString
+	var payloadJSON sql.NullString
+	var idempotencyKey sql.NullString
+	var triggerTokenID sql.NullString
 	var repoDigest sql.NullString
 	var runtimeImageID sql.NullString
 	var exitCode sql.NullInt64
@@ -561,6 +641,9 @@ func scanWorkflowRun(scanner workflowScanner) (workflowRun, error) {
 		&run.Status,
 		&configRevisionID,
 		&logPath,
+		&payloadJSON,
+		&idempotencyKey,
+		&triggerTokenID,
 		&run.SourceImageRef,
 		&repoDigest,
 		&runtimeImageID,
@@ -577,6 +660,15 @@ func scanWorkflowRun(scanner workflowScanner) (workflowRun, error) {
 	}
 	if logPath.Valid {
 		run.LogPath = logPath.String
+	}
+	if payloadJSON.Valid {
+		run.Payload = json.RawMessage(payloadJSON.String)
+	}
+	if idempotencyKey.Valid {
+		run.IdempotencyKey = idempotencyKey.String
+	}
+	if triggerTokenID.Valid {
+		run.TriggerTokenID = triggerTokenID.String
 	}
 	if repoDigest.Valid {
 		run.ResolvedRepoDigest = repoDigest.String
@@ -599,6 +691,14 @@ func scanWorkflowRun(scanner workflowScanner) (workflowRun, error) {
 	}
 
 	return run, nil
+}
+
+func normalizeWorkflowRunPayload(payload json.RawMessage) json.RawMessage {
+	payload = json.RawMessage(strings.TrimSpace(string(payload)))
+	if len(payload) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return payload
 }
 
 func decorateWorkflowDefinition(workflow workflowDefinition) workflowDefinition {
@@ -626,4 +726,12 @@ func nullableInt(value *int) any {
 		return nil
 	}
 	return *value
+}
+
+func nullableRawJSON(value json.RawMessage) any {
+	value = json.RawMessage(strings.TrimSpace(string(value)))
+	if len(value) == 0 {
+		return nil
+	}
+	return string(value)
 }

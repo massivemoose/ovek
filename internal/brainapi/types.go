@@ -1,5 +1,7 @@
 package brainapi
 
+import "encoding/json"
+
 const (
 	JobTypeDeployment  = "deployment"
 	JobSourceTypeRepo  = "repo"
@@ -158,6 +160,9 @@ type WorkflowRun struct {
 	Status             string           `json:"status"`
 	ConfigRevisionID   string           `json:"configRevisionId,omitempty"`
 	LogPath            string           `json:"logPath,omitempty"`
+	Payload            json.RawMessage  `json:"-"`
+	IdempotencyKey     string           `json:"idempotencyKey,omitempty"`
+	TriggerTokenID     string           `json:"triggerTokenId,omitempty"`
 	SourceImageRef     string           `json:"sourceImageRef"`
 	ResolvedRepoDigest string           `json:"resolvedRepoDigest,omitempty"`
 	RuntimeImageID     string           `json:"runtimeImageId,omitempty"`
@@ -177,7 +182,31 @@ type UpsertWorkflowRequest struct {
 }
 
 type CreateWorkflowRunRequest struct {
-	TriggerType string `json:"triggerType,omitempty"`
+	TriggerType string          `json:"triggerType,omitempty"`
+	Payload     json.RawMessage `json:"payload,omitempty"`
+}
+
+type WorkflowTriggerTokenSummary struct {
+	ID           string `json:"id"`
+	ProjectName  string `json:"projectName"`
+	WorkflowName string `json:"workflowName"`
+	Label        string `json:"label"`
+	CreatedAt    string `json:"createdAt"`
+	LastUsedAt   string `json:"lastUsedAt,omitempty"`
+	RevokedAt    string `json:"revokedAt,omitempty"`
+}
+
+type CreateWorkflowTriggerTokenRequest struct {
+	Label string `json:"label"`
+}
+
+type CreateWorkflowTriggerTokenResponse struct {
+	ID           string `json:"id"`
+	ProjectName  string `json:"projectName"`
+	WorkflowName string `json:"workflowName"`
+	Label        string `json:"label"`
+	Token        string `json:"token"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 type CreateDeploymentRequest struct {

@@ -68,6 +68,7 @@ func main() {
 		cfg.PocketBaseImage,
 		projectConfigStore,
 	)
+	processor.appBrainURL = cfg.AppBrainURL
 	artifactCleaner := newRegistryArtifactCleaner(
 		cfg.RuntimeRegistryHost,
 		cfg.RegistryAPIBaseURL,
@@ -153,7 +154,9 @@ func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqu
 	apiMux.HandleFunc("PUT /v1/projects/{projectName}/workflows/{workflowName}", requireCriticalReauth(cfg, db, "workflow.set.authorized", handleUpsertWorkflowDefinition(db, workflowImages, workflowSchedules)))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflows/{workflowName}", handleGetWorkflowDefinition(db))
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/workflows/{workflowName}", requireCriticalReauth(cfg, db, "workflow.delete.authorized", handleDeleteWorkflowDefinition(db, workflowSchedules)))
-	apiMux.HandleFunc("POST /v1/projects/{projectName}/workflows/{workflowName}/runs", handleCreateWorkflowRun(db, workflowRuns))
+	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflows/{workflowName}/tokens", handleListWorkflowTriggerTokens(db))
+	apiMux.HandleFunc("POST /v1/projects/{projectName}/workflows/{workflowName}/tokens", requireCriticalReauth(cfg, db, "workflow.trigger_token_create.authorized", handleCreateWorkflowTriggerToken(db)))
+	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/workflows/{workflowName}/tokens/{tokenID}", requireCriticalReauth(cfg, db, "workflow.trigger_token_revoke.authorized", handleRevokeWorkflowTriggerToken(db)))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflow-runs", handleListWorkflowRuns(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflow-runs/{runID}", handleGetWorkflowRun(db))
 	apiMux.HandleFunc("GET /v1/projects/{projectName}/workflow-runs/{runID}/logs", handleGetWorkflowRunLogs(db, cfg.DataDir))
@@ -184,6 +187,7 @@ func newHandlerWithRegistryStore(cfg config, db *sql.DB, enqueuer deploymentEnqu
 	apiMux.HandleFunc("DELETE /v1/projects/{projectName}/runtime/app", requireCriticalReauth(cfg, db, "runtime_remove.authorized", handleDeleteProjectAppRuntime(cleaner)))
 
 	mux.HandleFunc("POST /v1/auth/bootstrap", handleBootstrapAuth(cfg, db))
+	mux.HandleFunc("POST /v1/projects/{projectName}/workflows/{workflowName}/runs", handleCreateWorkflowRun(cfg, db, workflowRuns))
 	mux.Handle("/v1/", authMiddleware(cfg, db, apiMux))
 
 	return mux

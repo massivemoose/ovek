@@ -70,6 +70,9 @@ func TestLoadConfigReadsAPIKey(t *testing.T) {
 	if cfg.TraefikBrainServiceURL != defaultTraefikBrainServiceURL {
 		t.Fatalf("expected Traefik brain service URL %q, got %q", defaultTraefikBrainServiceURL, cfg.TraefikBrainServiceURL)
 	}
+	if cfg.AppBrainURL != defaultAppBrainURL {
+		t.Fatalf("expected app Brain URL %q, got %q", defaultAppBrainURL, cfg.AppBrainURL)
+	}
 	if cfg.WorkflowRunTimeout != 10*time.Minute {
 		t.Fatalf("expected workflow run timeout %s, got %s", 10*time.Minute, cfg.WorkflowRunTimeout)
 	}
@@ -105,6 +108,7 @@ func TestLoadConfigReadsRegistryAndProjectRuntimeOverrides(t *testing.T) {
 	t.Setenv("POCKETBASE_IMAGE", "custom/pocketbase:1.0")
 	t.Setenv("TRAEFIK_DYNAMIC_CONFIG_DIR", "/srv/ovek/traefik")
 	t.Setenv("TRAEFIK_BRAIN_SERVICE_URL", "http://brain.internal:8081")
+	t.Setenv("OVEK_APP_BRAIN_URL", "http://brain.internal:9090")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -137,6 +141,9 @@ func TestLoadConfigReadsRegistryAndProjectRuntimeOverrides(t *testing.T) {
 	}
 	if cfg.TraefikBrainServiceURL != "http://brain.internal:8081" {
 		t.Fatalf("expected Traefik brain service URL %q, got %q", "http://brain.internal:8081", cfg.TraefikBrainServiceURL)
+	}
+	if cfg.AppBrainURL != "http://brain.internal:9090" {
+		t.Fatalf("expected app Brain URL %q, got %q", "http://brain.internal:9090", cfg.AppBrainURL)
 	}
 }
 

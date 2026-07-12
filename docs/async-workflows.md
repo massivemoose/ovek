@@ -25,6 +25,14 @@ ovek workflow logs <project> <run-id> [--follow|--no-follow]
 ovek workflow rm <project> <name>
 ```
 
+Create a scoped trigger token for app/API-triggered runs:
+
+```text
+ovek workflow token create <project> <workflow> --label app
+ovek workflow token list <project> <workflow>
+ovek workflow token rm <project> <workflow> <token-id>
+```
+
 ## Runtime Model
 
 - `workflow set` pulls the image immediately using Ovek registry credentials.
@@ -34,6 +42,7 @@ ovek workflow rm <project> <name>
 - Scheduled overlap is skipped; manual/API overlap queues until the workflow queue cap.
 - Default queue cap is `64` per workflow.
 - Default execution timeout is 10 minutes. Brain admins can override the install-wide default with `OVEK_WORKFLOW_RUN_TIMEOUT`, using Go duration syntax such as `5m`, `30m`, or `1h`.
+- App capsules receive `OVEK_BRAIN_URL`, and trigger tokens can enqueue one scoped workflow without exposing a full Brain API key.
 - Project removal deletes workflow definitions, workflow run rows, managed workflow logs, and outstanding workflow containers. It does not delete workflow images.
 
 Workflow containers receive:
@@ -44,9 +53,10 @@ POCKETBASE_URL=http://db:8090
 OVEK_PROJECT=<project>
 OVEK_WORKFLOW=<workflow>
 OVEK_WORKFLOW_RUN_ID=<run-id>
+OVEK_WORKFLOW_PAYLOAD_FILE=/var/run/ovek/workflow-payload.json
 ```
 
-Project env and secrets from the captured project config revision are injected after those built-ins. Workflow readiness is exit-code based: exit `0` succeeds, non-zero fails.
+Project env and secrets from the captured project config revision are injected after those built-ins. Workflow readiness is exit-code based: exit `0` succeeds, non-zero fails. See [Workflow triggers](workflow-triggers.md) for app-triggered runs, payloads, idempotency, and language examples.
 
 ## Manual Validation
 

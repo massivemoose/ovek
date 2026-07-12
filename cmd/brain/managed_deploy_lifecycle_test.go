@@ -103,6 +103,7 @@ func TestManagedDeploymentLifecycleInjectsCapturedProjectConfigRevision(t *testi
 	}
 
 	wantEnv := []string{
+		"OVEK_BRAIN_URL=http://brain:8081",
 		"PB_SUPERUSER_PASSWORD=secret-pass",
 		"PUBLIC_SITE_URL=https://example.com",
 	}

@@ -91,6 +91,11 @@ func (cleaner managedProjectCleaner) Cleanup(ctx context.Context, projectName st
 		log.Printf("warning: failed to list workflow logs for project %q cleanup: %v", projectName, err)
 	}
 	logPaths = append(logPaths, workflowLogPaths...)
+	workflowPayloadPaths, err := listProjectWorkflowPayloadPaths(cleaner.db, cleaner.dataDir, projectName)
+	if err != nil {
+		log.Printf("warning: failed to list workflow payloads for project %q cleanup: %v", projectName, err)
+	}
+	logPaths = append(logPaths, workflowPayloadPaths...)
 
 	apps, err := cleaner.runtime.ListProjectApps(ctx, projectName)
 	if err != nil {
@@ -281,7 +286,7 @@ func managedJobLogPath(dataDir string, logPath string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	for _, logsDirName := range []string{jobLogsDirName, workflowLogsDirName} {
+	for _, logsDirName := range []string{jobLogsDirName, workflowLogsDirName, workflowPayloadsDirName} {
 		baseDir, err := filepath.Abs(filepath.Join(dataDir, logsDirName))
 		if err != nil {
 			return "", false
@@ -414,6 +419,10 @@ func clearProjectWorkflowState(db *sql.DB, projectName string) error {
 	if err != nil {
 		return fmt.Errorf("begin workflow cleanup transaction: %w", err)
 	}
+	if _, err := tx.Exec(`DELETE FROM workflow_trigger_tokens WHERE project_name = ?`, projectName); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("delete workflow trigger tokens for project %q: %w", projectName, err)
+	}
 	if _, err := tx.Exec(`DELETE FROM workflow_runs WHERE project_name = ?`, projectName); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("delete workflow runs for project %q: %w", projectName, err)
@@ -488,4 +497,31 @@ func listProjectWorkflowLogPaths(db *sql.DB, projectName string) ([]string, erro
 	}
 
 	return logPaths, nil
+}
+
+func listProjectWorkflowPayloadPaths(db *sql.DB, dataDir string, projectName string) ([]string, error) {
+	rows, err := db.Query(
+		`SELECT id
+		 FROM workflow_runs
+		 WHERE project_name = ?
+		 ORDER BY created_at ASC`,
+		projectName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list workflow payload paths for project %q: %w", projectName, err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			return nil, fmt.Errorf("scan workflow payload run ID for project %q: %w", projectName, err)
+		}
+		paths = append(paths, workflowPayloadPath(dataDir, runID))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate workflow payload paths for project %q: %w", projectName, err)
+	}
+	return paths, nil
 }

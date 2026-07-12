@@ -33,6 +33,7 @@ func TestManagedWorkflowProcessorRunsContainerWithProjectServicesAndEnv(t *testi
 		ProjectName:      "demo-app",
 		WorkflowName:     "digest",
 		ConfigRevisionID: mutation.RevisionID,
+		Payload:          []byte(`{"signupId":"rec_123"}`),
 		SourceImageRef:   "ghcr.io/example/digest:latest",
 		RuntimeImageID:   "sha256:image-id",
 	}
@@ -53,6 +54,16 @@ func TestManagedWorkflowProcessorRunsContainerWithProjectServicesAndEnv(t *testi
 	}
 	if runtime.createRun.ID != run.ID || runtime.createImageRef != "sha256:image-id" {
 		t.Fatalf("expected workflow container to use runtime image ID, got runtime=%#v", runtime)
+	}
+	if runtime.createPayloadHostPath == "" {
+		t.Fatal("expected workflow payload host path")
+	}
+	payloadBytes, err := os.ReadFile(runtime.createPayloadHostPath)
+	if err != nil {
+		t.Fatalf("expected payload file to be readable, got error: %v", err)
+	}
+	if string(payloadBytes) != `{"signupId":"rec_123"}` {
+		t.Fatalf("expected payload file contents, got %q", string(payloadBytes))
 	}
 	wantEnv := []string{"API_TOKEN=secret-token", "PUBLIC_SITE_URL=https://example.com"}
 	if !reflect.DeepEqual(runtime.createEnv, wantEnv) {
@@ -144,6 +155,7 @@ type recordingWorkflowExecutionRuntime struct {
 	createRun               workflowRun
 	createImageRef          string
 	createEnv               []string
+	createPayloadHostPath   string
 	startContainerID        string
 	waitContainerID         string
 	waitExitCode            int
@@ -171,10 +183,11 @@ func (runtime *recordingWorkflowExecutionRuntime) WaitForProjectPocketBaseReady(
 	return nil
 }
 
-func (runtime *recordingWorkflowExecutionRuntime) CreateWorkflowContainer(_ context.Context, run workflowRun, imageRef string, env []string) (string, error) {
+func (runtime *recordingWorkflowExecutionRuntime) CreateWorkflowContainer(_ context.Context, run workflowRun, imageRef string, env []string, payloadHostPath string) (string, error) {
 	runtime.createRun = run
 	runtime.createImageRef = imageRef
 	runtime.createEnv = env
+	runtime.createPayloadHostPath = payloadHostPath
 	return "workflow-container-123", nil
 }
 
