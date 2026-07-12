@@ -2,125 +2,32 @@ package command
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
-	"sort"
+
+	"github.com/massivemoose/chomp"
 )
 
-var ErrUsage = errors.New("usage")
+var ErrUsage = chomp.ErrUsage
 
-type Command interface {
+type Command = chomp.Command
+
+type HiddenCommand = chomp.HiddenCommand
+
+type UsageError = chomp.UsageError
+
+type Router = chomp.Router
+
+func UsageCommand(err error) (Command, bool) {
+	return chomp.UsageCommand(err)
+}
+
+func NewRouter(name string, summary string, commands ...Command) *Router {
+	return chomp.NewRouter(name, summary, commands...)
+}
+
+var _ interface {
 	Name() string
 	Summary() string
 	Run(context.Context, []string) error
 	Usage(io.Writer)
-}
-
-type HiddenCommand interface {
-	Hidden() bool
-}
-
-type UsageError struct {
-	Command Command
-}
-
-func (err *UsageError) Error() string {
-	return ErrUsage.Error()
-}
-
-func (err *UsageError) Unwrap() error {
-	return ErrUsage
-}
-
-func UsageCommand(err error) (Command, bool) {
-	var usageErr *UsageError
-	if !errors.As(err, &usageErr) || usageErr.Command == nil {
-		return nil, false
-	}
-	return usageErr.Command, true
-}
-
-type Router struct {
-	name     string
-	summary  string
-	commands map[string]Command
-	order    []string
-}
-
-func NewRouter(name string, summary string, commands ...Command) *Router {
-	router := &Router{
-		name:     name,
-		summary:  summary,
-		commands: make(map[string]Command, len(commands)),
-		order:    make([]string, 0, len(commands)),
-	}
-
-	for _, command := range commands {
-		if command == nil {
-			continue
-		}
-		commandName := command.Name()
-		router.commands[commandName] = command
-		router.order = append(router.order, commandName)
-	}
-
-	sort.Strings(router.order)
-
-	return router
-}
-
-func (router *Router) Name() string {
-	return router.name
-}
-
-func (router *Router) Summary() string {
-	return router.summary
-}
-
-func (router *Router) Run(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return ErrUsage
-	}
-	if args[0] == "-h" || args[0] == "--help" {
-		return ErrUsage
-	}
-	if args[0] == "help" {
-		if len(args) == 1 {
-			return ErrUsage
-		}
-		command, ok := router.commands[args[1]]
-		if !ok {
-			return fmt.Errorf("unknown command %q", args[1])
-		}
-		return &UsageError{Command: command}
-	}
-
-	command, ok := router.commands[args[0]]
-	if !ok {
-		return fmt.Errorf("unknown command %q", args[0])
-	}
-
-	if err := command.Run(ctx, args[1:]); err != nil {
-		if errors.Is(err, ErrUsage) {
-			return &UsageError{Command: command}
-		}
-		return err
-	}
-	return nil
-}
-
-func (router *Router) Usage(w io.Writer) {
-	if router.summary != "" {
-		_, _ = fmt.Fprintf(w, "%s\n\n", router.summary)
-	}
-	_, _ = fmt.Fprintf(w, "Usage:\n  %s <command>\n\n", router.name)
-	_, _ = fmt.Fprintf(w, "Commands:\n")
-	for _, commandName := range router.order {
-		command := router.commands[commandName]
-		if hidden, ok := command.(HiddenCommand); ok && hidden.Hidden() {
-			continue
-		}
-		_, _ = fmt.Fprintf(w, "  %-12s %s\n", command.Name(), command.Summary())
-	}
-}
+} = (*Router)(nil)

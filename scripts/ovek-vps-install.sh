@@ -150,7 +150,7 @@ install_runtime_files() {
 		log "Preserving existing data directory ${data_dir}"
 	fi
 
-	if ! run_sudo mkdir -p "${install_dir}" "${config_dir}" "${data_dir}/projects" "${data_dir}/traefik/dynamic" "${data_dir}/job-logs"; then
+	if ! run_sudo mkdir -p "${install_dir}" "${config_dir}" "${data_dir}/projects" "${data_dir}/traefik/dynamic" "${data_dir}/traefik/acme" "${data_dir}/job-logs"; then
 		fail_with_hints \
 			"could not create runtime directories" \
 			"inspect permissions for ${install_dir}, ${config_dir}, and ${data_dir}"
@@ -163,6 +163,9 @@ install_runtime_files() {
 	fi
 	if ! run_sudo chmod 0750 "${data_dir}"; then
 		fail "could not set permissions on ${data_dir}"
+	fi
+	if ! run_sudo chmod 0700 "${data_dir}/traefik/acme"; then
+		fail "could not set permissions on ${data_dir}/traefik/acme"
 	fi
 
 	if ! tar -C "${repo_root}" -cf - "${vps_compose_file}" | run_sudo tar -C "${install_dir}" -xf -; then
@@ -218,6 +221,10 @@ OVEK_SECRETS_KEY=${secrets_key}
 RUNTIME_ENGINE=podman
 RUNTIME_HOST=unix:///run/podman/podman.sock
 POCKETBASE_IMAGE=${pocketbase_image}
+OVEK_PUBLIC_BASE_DOMAIN=${OVEK_PUBLIC_BASE_DOMAIN:-}
+OVEK_PUBLIC_APPS_ENABLED=${OVEK_PUBLIC_APPS_ENABLED:-false}
+OVEK_PUBLIC_BRAIN_ENABLED=${OVEK_PUBLIC_BRAIN_ENABLED:-false}
+OVEK_ACME_EMAIL=${OVEK_ACME_EMAIL:-}
 EOF
 	if ! run_sudo install -m 0600 -o root -g root "${tmp_file}" "${env_file}"; then
 		rm -f "${tmp_file}"
@@ -283,7 +290,8 @@ RemainAfterExit=yes
 WorkingDirectory=${install_dir}
 EnvironmentFile=${env_file}
 Environment=OVEK_BRAIN_IMAGE=${brain_image}
-ExecStartPre=/usr/bin/mkdir -p ${data_dir}/projects ${data_dir}/traefik/dynamic ${data_dir}/job-logs
+ExecStartPre=/usr/bin/mkdir -p ${data_dir}/projects ${data_dir}/traefik/dynamic ${data_dir}/traefik/acme ${data_dir}/job-logs
+ExecStartPre=/usr/bin/chmod 0700 ${data_dir}/traefik/acme
 ExecStartPre=/bin/sh -lc '/usr/bin/podman pull "\$OVEK_BRAIN_IMAGE"'
 ExecStartPre=/usr/bin/podman pull ${traefik_image}
 ExecStartPre=/usr/bin/podman pull ${pocketbase_image}

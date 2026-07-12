@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 
-	"github.com/massivemoose/ovek/internal/cli/chomp"
+	"github.com/massivemoose/chomp"
 	"github.com/massivemoose/ovek/internal/cli/command"
 )
 

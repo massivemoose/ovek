@@ -66,6 +66,25 @@ func TestRouterSupportsHelpForKnownCommand(t *testing.T) {
 	}
 }
 
+func TestRouterPreservesNestedUsageError(t *testing.T) {
+	leaf := &recordingCommand{name: "key", summary: "Manage API keys", err: ErrUsage}
+	parent := NewRouter("auth", "Manage auth", leaf)
+	router := NewRouter("ovek", "Ovek CLI", parent)
+
+	err := router.Run(context.Background(), []string{"auth", "key", "--help"})
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("expected ErrUsage, got %v", err)
+	}
+
+	usageCommand, ok := UsageCommand(err)
+	if !ok {
+		t.Fatalf("expected command usage error, got %v", err)
+	}
+	if usageCommand != leaf {
+		t.Fatalf("expected nested usage command %p, got %p", leaf, usageCommand)
+	}
+}
+
 func TestRouterUsageListsCommands(t *testing.T) {
 	router := NewRouter(
 		"ovek",

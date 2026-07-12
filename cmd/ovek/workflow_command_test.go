@@ -110,7 +110,7 @@ func TestWorkflowSetRejectsUnknownFlagAfterPositionals(t *testing.T) {
 	if exitCode == 0 {
 		t.Fatalf("expected non-zero exit code")
 	}
-	if !strings.Contains(stderr.String(), `unknown workflow set flag "--wat"`) {
+	if !strings.Contains(stderr.String(), `unknown ovek workflow set flag "--wat"`) {
 		t.Fatalf("expected unknown flag error, got %q", stderr.String())
 	}
 }

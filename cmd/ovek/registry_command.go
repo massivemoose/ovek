@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/massivemoose/chomp"
 	"github.com/massivemoose/ovek/internal/brainapi"
-	"github.com/massivemoose/ovek/internal/cli/chomp"
 	"github.com/massivemoose/ovek/internal/cli/client"
 	"github.com/massivemoose/ovek/internal/cli/command"
 	"github.com/massivemoose/ovek/internal/cli/config"

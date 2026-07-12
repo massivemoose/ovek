@@ -41,6 +41,10 @@ type config struct {
 	TraefikDynamicConfigDir  string
 	TraefikBrainServiceURL   string
 	AppBrainURL              string
+	PublicBaseDomain         string
+	PublicAppsEnabled        bool
+	PublicBrainEnabled       bool
+	ACMEEmail                string
 	WorkflowRunTimeout       time.Duration
 }
 
@@ -130,6 +134,31 @@ func loadConfig() (config, error) {
 		appBrainURL = defaultAppBrainURL
 	}
 
+	publicBaseDomain := strings.TrimSpace(os.Getenv("OVEK_PUBLIC_BASE_DOMAIN"))
+	publicAppsEnabled := false
+	if value := strings.TrimSpace(os.Getenv("OVEK_PUBLIC_APPS_ENABLED")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return config{}, errors.New("OVEK_PUBLIC_APPS_ENABLED must be a boolean")
+		}
+		publicAppsEnabled = parsed
+	}
+	publicBrainEnabled := false
+	if value := strings.TrimSpace(os.Getenv("OVEK_PUBLIC_BRAIN_ENABLED")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return config{}, errors.New("OVEK_PUBLIC_BRAIN_ENABLED must be a boolean")
+		}
+		publicBrainEnabled = parsed
+	}
+	acmeEmail := strings.TrimSpace(os.Getenv("OVEK_ACME_EMAIL"))
+	if (publicAppsEnabled || publicBrainEnabled) && publicBaseDomain == "" {
+		return config{}, errors.New("OVEK_PUBLIC_BASE_DOMAIN is required when public hosting is enabled")
+	}
+	if publicBrainEnabled && !publicAppsEnabled {
+		return config{}, errors.New("OVEK_PUBLIC_BRAIN_ENABLED requires OVEK_PUBLIC_APPS_ENABLED")
+	}
+
 	workflowRunTimeout := defaultWorkflowRunTimeout
 	if workflowRunTimeoutValue := strings.TrimSpace(os.Getenv("OVEK_WORKFLOW_RUN_TIMEOUT")); workflowRunTimeoutValue != "" {
 		parsedWorkflowRunTimeout, err := time.ParseDuration(workflowRunTimeoutValue)
@@ -159,6 +188,10 @@ func loadConfig() (config, error) {
 		TraefikDynamicConfigDir:  traefikDynamicConfigDir,
 		TraefikBrainServiceURL:   traefikBrainServiceURL,
 		AppBrainURL:              appBrainURL,
+		PublicBaseDomain:         publicBaseDomain,
+		PublicAppsEnabled:        publicAppsEnabled,
+		PublicBrainEnabled:       publicBrainEnabled,
+		ACMEEmail:                acmeEmail,
 		WorkflowRunTimeout:       workflowRunTimeout,
 	}, nil
 }

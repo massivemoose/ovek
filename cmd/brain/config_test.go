@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -144,6 +145,86 @@ func TestLoadConfigReadsRegistryAndProjectRuntimeOverrides(t *testing.T) {
 	}
 	if cfg.AppBrainURL != "http://brain.internal:9090" {
 		t.Fatalf("expected app Brain URL %q, got %q", "http://brain.internal:9090", cfg.AppBrainURL)
+	}
+}
+
+func TestLoadConfigDefaultsPublicHostingDisabled(t *testing.T) {
+	t.Setenv("BRAIN_API_KEY", "dev-key")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+
+	if cfg.PublicBaseDomain != "" {
+		t.Fatalf("PublicBaseDomain = %q, want empty", cfg.PublicBaseDomain)
+	}
+	if cfg.PublicAppsEnabled {
+		t.Fatal("PublicAppsEnabled = true, want false")
+	}
+	if cfg.PublicBrainEnabled {
+		t.Fatal("PublicBrainEnabled = true, want false")
+	}
+	if cfg.ACMEEmail != "" {
+		t.Fatalf("ACMEEmail = %q, want empty", cfg.ACMEEmail)
+	}
+}
+
+func TestLoadConfigReadsPublicHostingOverrides(t *testing.T) {
+	t.Setenv("BRAIN_API_KEY", "dev-key")
+	t.Setenv("OVEK_PUBLIC_BASE_DOMAIN", "apps.example.com")
+	t.Setenv("OVEK_PUBLIC_APPS_ENABLED", "true")
+	t.Setenv("OVEK_PUBLIC_BRAIN_ENABLED", "false")
+	t.Setenv("OVEK_ACME_EMAIL", "ops@example.com")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+
+	if cfg.PublicBaseDomain != "apps.example.com" {
+		t.Fatalf("PublicBaseDomain = %q", cfg.PublicBaseDomain)
+	}
+	if !cfg.PublicAppsEnabled {
+		t.Fatal("PublicAppsEnabled = false, want true")
+	}
+	if cfg.PublicBrainEnabled {
+		t.Fatal("PublicBrainEnabled = true, want false")
+	}
+	if cfg.ACMEEmail != "ops@example.com" {
+		t.Fatalf("ACMEEmail = %q", cfg.ACMEEmail)
+	}
+}
+
+func TestLoadConfigRejectsPublicAppsWithoutBaseDomain(t *testing.T) {
+	t.Setenv("BRAIN_API_KEY", "dev-key")
+	t.Setenv("OVEK_PUBLIC_APPS_ENABLED", "true")
+
+	_, err := loadConfig()
+	if err == nil || !strings.Contains(err.Error(), "OVEK_PUBLIC_BASE_DOMAIN is required") {
+		t.Fatalf("expected missing domain error, got %v", err)
+	}
+}
+
+func TestLoadConfigRejectsInvalidPublicAppsEnabled(t *testing.T) {
+	t.Setenv("BRAIN_API_KEY", "dev-key")
+	t.Setenv("OVEK_PUBLIC_APPS_ENABLED", "sometimes")
+
+	_, err := loadConfig()
+	if err == nil || !strings.Contains(err.Error(), "OVEK_PUBLIC_APPS_ENABLED must be a boolean") {
+		t.Fatalf("expected invalid public apps enabled error, got %v", err)
+	}
+}
+
+func TestLoadConfigRejectsPublicBrainWithoutPublicApps(t *testing.T) {
+	t.Setenv("BRAIN_API_KEY", "dev-key")
+	t.Setenv("OVEK_PUBLIC_BASE_DOMAIN", "apps.example.com")
+	t.Setenv("OVEK_PUBLIC_APPS_ENABLED", "false")
+	t.Setenv("OVEK_PUBLIC_BRAIN_ENABLED", "true")
+
+	_, err := loadConfig()
+	if err == nil || !strings.Contains(err.Error(), "OVEK_PUBLIC_BRAIN_ENABLED requires OVEK_PUBLIC_APPS_ENABLED") {
+		t.Fatalf("expected public brain dependency error, got %v", err)
 	}
 }
 

@@ -8,11 +8,18 @@ services:
       - "--providers.file.directory=/var/lib/ovek/traefik/dynamic"
       - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.ovek.acme.email=${OVEK_ACME_EMAIL:-}"
+      - "--certificatesresolvers.ovek.acme.storage=/var/lib/ovek/traefik/acme/acme.json"
+      - "--certificatesresolvers.ovek.acme.httpchallenge=true"
+      - "--certificatesresolvers.ovek.acme.httpchallenge.entrypoint=web"
     ports:
       - "80:80"
+      - "443:443"
       - "8080:8080"
     volumes:
-      - "./brain_data/traefik:/var/lib/ovek/traefik:ro,z"
+      - "./brain_data/traefik/dynamic:/var/lib/ovek/traefik/dynamic:ro,z"
+      - "./brain_data/traefik/acme:/var/lib/ovek/traefik/acme:z"
     networks:
       - ovek-net
 
@@ -31,6 +38,10 @@ services:
       - POCKETBASE_IMAGE=${POCKETBASE_IMAGE:-ghcr.io/massivemoose/ovek-pocketbase:v0.38.1}
       - TRAEFIK_DYNAMIC_CONFIG_DIR=/var/lib/ovek/traefik/dynamic
       - TRAEFIK_BRAIN_SERVICE_URL=http://brain:8081
+      - OVEK_PUBLIC_BASE_DOMAIN=${OVEK_PUBLIC_BASE_DOMAIN:-}
+      - OVEK_PUBLIC_APPS_ENABLED=${OVEK_PUBLIC_APPS_ENABLED:-false}
+      - OVEK_PUBLIC_BRAIN_ENABLED=${OVEK_PUBLIC_BRAIN_ENABLED:-false}
+      - OVEK_ACME_EMAIL=${OVEK_ACME_EMAIL:-}
     volumes:
       - "/run/podman/podman.sock:/run/podman/podman.sock"
       - "./brain_data:/var/lib/ovek:z"
